@@ -1058,6 +1058,20 @@ export function useGamepadNavigation({
         }
       }
 
+      const isEqualizerModalOpen = Boolean(
+        document.querySelector('[data-equalizer-modal="true"]')
+      );
+      if (isEqualizerModalOpen) {
+        const eqEvent = new CustomEvent('simp-gamepad-action', {
+          detail: { action, source },
+          cancelable: true,
+        });
+        window.dispatchEvent(eqEvent);
+        if (eqEvent.defaultPrevented) {
+          return;
+        }
+      }
+
       switch (action) {
         case 'left':
           if (isDirectTransportView) {

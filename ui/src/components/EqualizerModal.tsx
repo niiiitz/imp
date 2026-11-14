@@ -77,6 +77,21 @@ interface EqualizerModalProps {
   onToggleKaraokeMode: (enableKaraoke: boolean) => void;
 }
 
+const markEqualizerFocus = (el: HTMLElement | null) => {
+  if (!el) return;
+  document
+    .querySelectorAll<HTMLElement>('[data-simp-active-focus="true"], .simp-gpfocus')
+    .forEach((node) => {
+      if (node !== el) {
+        node.removeAttribute('data-simp-active-focus');
+        node.classList.remove('simp-gpfocus');
+      }
+    });
+  el.setAttribute('data-simp-active-focus', 'true');
+  el.classList.add('simp-gpfocus');
+  el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+};
+
 export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   open,
   onClose,
@@ -90,6 +105,11 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   const engagedSliderRef = useRef<number | null>(null);
   engagedSliderRef.current = engagedSlider;
 
+  const updateEngagedSlider = useCallback((next: number | null) => {
+    engagedSliderRef.current = next;
+    setEngagedSlider(next);
+  }, []);
+
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const draggingSliderRef = useRef<number | null>(null);
   const faderTrackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -97,10 +117,12 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   // Focus capture & restoration on modal open/close
   useEffect(() => {
     if (!open) {
-      setEngagedSlider(null);
+      updateEngagedSlider(null);
       return;
     }
-    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    previousFocusRef.current =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]') ||
+      (document.activeElement as HTMLElement | null);
     const timer = window.setTimeout(() => {
       const btn =
         document.querySelector<HTMLElement>(
@@ -110,24 +132,24 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
           '[data-equalizer-modal="true"] button:not([disabled]):not([data-equalizer-close="true"])'
         );
       if (btn) {
-        btn.focus({ preventScroll: true });
+        markEqualizerFocus(btn);
       }
     }, 35);
     return () => {
       window.clearTimeout(timer);
     };
-  }, [open]);
+  }, [open, updateEngagedSlider]);
 
   const handleCloseModal = useCallback(() => {
-    setEngagedSlider(null);
+    updateEngagedSlider(null);
     onClose();
     window.setTimeout(() => {
       const prev = previousFocusRef.current;
-      if (prev && document.body.contains(prev)) {
-        prev.focus({ preventScroll: true });
+      if (prev && prev.isConnected && document.body.contains(prev)) {
+        markEqualizerFocus(prev);
       }
     }, 35);
-  }, [onClose]);
+  }, [onClose, updateEngagedSlider]);
 
   const adjustSliderByDelta = useCallback(
     (sliderIdx: number, deltaDb: number) => {
@@ -149,59 +171,26 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
     [dspState.bands_db, dspState.preamp_db, onUpdateDsp]
   );
 
-  // Intercept Up/Down/Back when a vertical fader is engaged (for both Keyboard and Gamepad)
+  // Intercept Up/Down/Left/Right/Activate/Back via unified gamepad dispatcher (which deduplicates
+  // Keyboard + Daemon HID + Web Gamepad + Decky bridge), plus PageUp/PageDown/Spacebar on Keyboard.
   useEffect(() => {
     if (!open) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       const engaged = engagedSliderRef.current;
-      if (engaged !== null) {
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          e.stopPropagation();
-          adjustSliderByDelta(engaged, 0.5);
-          return;
-        }
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          e.stopPropagation();
-          adjustSliderByDelta(engaged, -0.5);
-          return;
-        }
-        if (e.key === 'PageUp') {
-          e.preventDefault();
-          e.stopPropagation();
-          adjustSliderByDelta(engaged, 2.0);
-          return;
-        }
-        if (e.key === 'PageDown') {
-          e.preventDefault();
-          e.stopPropagation();
-          adjustSliderByDelta(engaged, -2.0);
-          return;
-        }
-        if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          setEngagedSlider(null);
-          return;
-        }
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-          e.preventDefault();
-          e.stopPropagation();
-          const nextIdx =
-            e.key === 'ArrowRight' ? Math.min(9, engaged + 1) : Math.max(-1, engaged - 1);
-          setEngagedSlider(nextIdx);
-          const nextBtn = document.querySelector<HTMLElement>(
-            `[data-equalizer-modal="true"] button[data-eq-slider-index="${nextIdx}"]`
-          );
-          nextBtn?.focus({ preventScroll: true });
-          return;
-        }
-      } else if (e.key === 'Escape') {
+      if (engaged === null) return;
+      if (e.key === 'PageUp') {
         e.preventDefault();
         e.stopPropagation();
-        handleCloseModal();
+        adjustSliderByDelta(engaged, 2.0);
+      } else if (e.key === 'PageDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        adjustSliderByDelta(engaged, -2.0);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        updateEngagedSlider(null);
       }
     };
 
@@ -212,23 +201,27 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
       if (engaged === null || !action) return;
 
       if (action === 'up') {
+        ev.preventDefault();
         ev.stopImmediatePropagation();
         adjustSliderByDelta(engaged, 0.5);
       } else if (action === 'down') {
+        ev.preventDefault();
         ev.stopImmediatePropagation();
         adjustSliderByDelta(engaged, -0.5);
       } else if (action === 'left' || action === 'right') {
+        ev.preventDefault();
         ev.stopImmediatePropagation();
         const nextIdx =
           action === 'right' ? Math.min(9, engaged + 1) : Math.max(-1, engaged - 1);
-        setEngagedSlider(nextIdx);
+        updateEngagedSlider(nextIdx);
         const nextBtn = document.querySelector<HTMLElement>(
           `[data-equalizer-modal="true"] button[data-eq-slider-index="${nextIdx}"]`
         );
-        nextBtn?.focus({ preventScroll: true });
+        markEqualizerFocus(nextBtn);
       } else if (action === 'back' || action === 'activate') {
+        ev.preventDefault();
         ev.stopImmediatePropagation();
-        setEngagedSlider(null);
+        updateEngagedSlider(null);
       }
     };
 
@@ -238,7 +231,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('simp-gamepad-action', onGamepadCapture, true);
     };
-  }, [open, adjustSliderByDelta, handleCloseModal]);
+  }, [open, adjustSliderByDelta, updateEngagedSlider]);
 
   const applyPointerYToSlider = useCallback(
     (sliderIdx: number, clientY: number) => {
@@ -738,9 +731,13 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                   {/* Interactive Vertical Fader Button */}
                   <button
                     data-eq-slider-index={sliderIdx}
-                    onClick={() =>
-                      setEngagedSlider((prev) => (prev === sliderIdx ? null : sliderIdx))
-                    }
+                    data-eq-slider-engaged={isEngaged ? 'true' : undefined}
+                    onClick={(e) => {
+                      markEqualizerFocus(e.currentTarget);
+                      updateEngagedSlider(
+                        engagedSliderRef.current === sliderIdx ? null : sliderIdx
+                      );
+                    }}
                     onDoubleClick={() => {
                       if (isPreamp) {
                         onUpdateDsp({ preamp_db: 0 });
@@ -755,6 +752,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                       width: '100%',
                       height: 138,
                       padding: 0,
+                      borderRadius: 8,
                       background: 'transparent',
                       border: 'none',
                       cursor: 'ns-resize',
@@ -764,12 +762,49 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                       position: 'relative',
                     }}
                   >
+                    {isEngaged && (
+                      <>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            fontSize: 8,
+                            lineHeight: 1,
+                            fontWeight: 900,
+                            color: '#34d399',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          ▲
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            fontSize: 8,
+                            lineHeight: 1,
+                            fontWeight: 900,
+                            color: '#34d399',
+                            pointerEvents: 'none',
+                          }}
+                        >
+                          ▼
+                        </span>
+                      </>
+                    )}
                     <div
                       ref={(el) => {
                         if (el) faderTrackRefs.current.set(sliderIdx, el);
                       }}
                       onPointerDown={(e) => {
                         e.stopPropagation();
+                        markEqualizerFocus(e.currentTarget.closest('button'));
                         draggingSliderRef.current = sliderIdx;
                         applyPointerYToSlider(sliderIdx, e.clientY);
                       }}

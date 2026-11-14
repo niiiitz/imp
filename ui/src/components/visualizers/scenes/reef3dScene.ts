@@ -20,6 +20,7 @@ let crabRaveUntil = -10;
 let lastAudioIntegrateAt = -1;
 let schoolSwimDist = 0;
 let crabGroovePhase = 0;
+const smoothedCrabStand: [number, number, number, number, number] = [0, 0, 0, 0, 0];
 
 interface DispatchedLyricBubble {
   id: number;
@@ -423,7 +424,11 @@ export function renderReef3dScene(s: SceneRenderContext): void {
   schoolSwimDist +=
     frameDt * (24 + audioAmp * 96 + beat * 38 + (crabRaveActive ? 52 : 0));
   crabGroovePhase +=
-    frameDt * tempoHz * Math.PI * 2 * (0.42 + audioAmp * 0.95 + beat * 0.45);
+    frameDt *
+    tempoHz *
+    Math.PI *
+    2 *
+    (crabRaveActive ? 1.55 + subBass * 0.45 : 0.45 + audioAmp * 0.85 + beat * 0.35);
 
   const ctx = mainCtx;
   const horizonY = CANVAS_H * 0.58;
@@ -1035,71 +1040,93 @@ export function renderReef3dScene(s: SceneRenderContext): void {
   );
 
   // 8. Articulated Bryce-3D Chrome & Crystal Reef Crabs (5-Crab Formation, Music-Reactive!)
-  //    3 Iconic Moves: (A) Low Crab-Walk Scuttle, (B) High-Stilt Leg Extension + Overhead Claw Pumping,
-  //    and (C) Beat-Drop "Party Bounce" & Lateral Rave Hop!
+  //    3 Iconic Moves with C1-Continuous Damped Transitions (zero phase jumps!):
+  //    (A) Low Crab-Walk Scuttle, (B) High-Stilt Leg Extension + Overhead Claw Pumping,
+  //    and (C) Beat-Drop "Crab Rave" Mode with High Jumps, Body Light Strobing & Electric Claws!
+  const smoothstep01 = (t: number) => {
+    const c = Math.max(0, Math.min(1, t));
+    return c * c * (3 - 2 * c);
+  };
+  const raveBlend = smoothstep01(raveFanProgress);
+
   const drawBryceCrab = (
+    crabIdx: number,
     baseX: number,
     baseY: number,
     scale: number,
     seed: number,
   ) => {
-    const ravePhase = timeSec * tempoHz * Math.PI * 2;
     const crabBand = sb[(Math.floor(seed * 3) + 2) & 15];
     const musicDrive = Math.min(1.35, 0.35 + audioAmp * 0.85 + crabBand * 0.35);
 
-    // Smooth 0..1 blend for the "Stand High on Extended Legs & Claw Pump" choreography:
-    // - During Crab Rave: first 1.85s is full-formation synchronized High-Stilt Claw Pumping, then transitions into Party Bounce.
-    // - During normal playback: every ~8.5s cycle (plus whenever music energy surges high), crabs extend legs high to pump claws!
-    const normalCycle = (timeSec * (0.85 + audioAmp * 0.45) + seed * 0.65) % 8.5;
-    const cycleStandBlend =
-      normalCycle < 2.8
-        ? Math.min(1, Math.min(normalCycle / 0.45, (2.8 - normalCycle) / 0.45))
+    // 1. Target "Stand High on Extended Stilt-Legs & Claw Pump" envelope (smoothly damped per crab so it never jerks!)
+    //    Uses strictly monotonic `timeSec` for the cycle clock so audio fluctuations never jump the cycle phase,
+    //    and smoothly hands off to full jumping Rave Party mode (`1 - raveBlend`) when a beat-drop Crab Rave hits.
+    const normalCycle = (timeSec + seed * 1.15) % 9.0;
+    const cycleWindow =
+      normalCycle < 3.0
+        ? smoothstep01(Math.min(normalCycle / 0.65, (3.0 - normalCycle) / 0.65))
         : 0;
-    const energyStandBoost =
-      audioAmp > 0.56 ? Math.min(0.85, (audioAmp - 0.56) * 2.1) : 0;
-    const normalStandBlend = Math.max(
-      cycleStandBlend * Math.min(1, 0.45 + audioAmp * 0.9),
-      energyStandBoost,
-    );
-    const raveStandBlend = crabRaveActive
-      ? raveElapsed < 1.85
-        ? Math.min(1, raveElapsed / 0.28)
-        : Math.max(0, 1 - (raveElapsed - 1.85) / 0.35)
-      : 0;
-    const standBlend = Math.max(normalStandBlend, raveStandBlend);
-    const isPartyBounce = crabRaveActive && standBlend < 0.5;
+    const energyStandTarget =
+      audioAmp > 0.58 ? Math.min(0.9, (audioAmp - 0.58) * 2.2) : 0;
+    const rawStandTarget =
+      Math.max(cycleWindow * Math.min(1, 0.5 + audioAmp * 0.85), energyStandTarget) *
+      (1 - raveBlend);
 
-    // Lateral scuttle scales with music amplitude & slows when standing tall on extended stilt-legs
-    const walkAmp = (1 - standBlend * 0.72) * (0.45 + musicDrive * 0.75);
-    const scuttleX = crabRaveActive
-      ? baseX + Math.sin(ravePhase * 0.5) * 28 * walkAmp
-      : baseX + Math.sin(crabGroovePhase * 0.32 + seed) * 32 * walkAmp;
+    const dampRate = Math.min(1, frameDt * 5.5);
+    smoothedCrabStand[crabIdx] +=
+      (rawStandTarget - smoothedCrabStand[crabIdx]) * dampRate;
+    const standBlend = smoothedCrabStand[crabIdx];
 
-    // Tall stilt-leg elevation + music-reactive knee-pump squat & beat bounce
+    // 2. Unified Continuous Position & Bounce Kinematics (single integrated `crabGroovePhase` clock — never teleports!)
+    const walkSpan =
+      (28 * (0.45 + musicDrive * 0.72) * (1 - standBlend * 0.68)) * (1 - raveBlend) +
+      44 * raveBlend;
+    const scuttleX = baseX + Math.sin(crabGroovePhase * 0.38 + seed) * walkSpan;
+
+    // Stilt-leg elevation + beat squat vs. chaotic high-flying Crab Rave jumping!
     const standPumpSquat =
       Math.abs(Math.sin(crabGroovePhase * 0.5 + seed * 0.2)) *
-      (3.5 + subBass * 5.0 + beat * 3.5);
-    const standLift = standBlend * (21 - standPumpSquat);
-    const bounceLift = isPartyBounce
-      ? Math.abs(Math.sin(ravePhase + seed * 0.3)) * (14 + subBass * 10)
-      : (1 - standBlend) *
-        (Math.abs(Math.sin(crabGroovePhase * 0.5 + seed)) * (1.8 + audioAmp * 5.5) +
-          beat * (2.5 + subBass * 4.5) +
-          crabBand * 2.5);
-    const bounceY = baseY - (standLift + bounceLift) * scale;
+      (3.5 + subBass * 4.5 + beat * 3.0);
+    const standLift = standBlend * (20 - standPumpSquat);
 
-    const bodyTilt = crabRaveActive
-      ? Math.sin(ravePhase * 0.5) * (0.16 - standBlend * 0.08)
-      : Math.sin(crabGroovePhase * 0.5 + seed) * (0.04 + audioAmp * 0.08) * (0.5 + standBlend * 0.5);
+    const normalBounce =
+      (1 - standBlend) *
+      (Math.abs(Math.sin(crabGroovePhase * 0.5 + seed)) * (1.8 + audioAmp * 5.0) +
+        beat * (2.2 + subBass * 4.0) +
+        crabBand * 2.2);
+    const raveJump =
+      Math.abs(Math.sin(crabGroovePhase * 0.82 + seed * 0.35)) *
+        (24 + subBass * 18 + beat * 10) +
+      Math.abs(Math.cos(crabGroovePhase * 1.64 + seed)) * (6 + highEnergy * 8);
+    const totalLift = standLift + normalBounce * (1 - raveBlend) + raveJump * raveBlend;
+    const bounceY = baseY - totalLift * scale;
+
+    const normalTilt =
+      Math.sin(crabGroovePhase * 0.5 + seed) *
+      (0.04 + audioAmp * 0.07) *
+      (0.5 + standBlend * 0.5);
+    const raveTilt =
+      Math.sin(crabGroovePhase * 0.82 + seed * 0.5) * 0.26 +
+      Math.cos(crabGroovePhase * 1.64 + seed) * 0.09;
+    const bodyTilt = normalTilt * (1 - raveBlend) + raveTilt * raveBlend;
+
+    const pumpActive = Math.max(raveBlend, standBlend, audioAmp * 0.42);
     const clawSnap =
-      crabRaveActive || standBlend > 0.25
-        ? (0.2 + Math.abs(Math.sin(crabGroovePhase * 1.2 + seed)) * (0.45 + audioAmp * 0.45)) *
-          Math.max(crabRaveActive ? 1 : 0, standBlend)
-        : (beat * 0.5 + crabBand * 0.4 + highEnergy * 0.35) * 0.65;
+      (0.22 +
+        Math.abs(Math.sin(crabGroovePhase * (1.2 + raveBlend * 0.8) + seed)) *
+          (0.5 + audioAmp * 0.4 + raveBlend * 0.35)) *
+      Math.max(0.35, pumpActive);
 
-    // Ground shadow anchored on the seabed (narrows slightly when carapace is jacked up high on stilts)
-    const shadowScale = 1 - standBlend * 0.16;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.68)';
+    // High-speed 12 Hz neon body strobe index during Crab Rave (evoking classic reef3d body light strobing!)
+    const strobeTick = Math.floor(timeSec * 13.5 + seed * 1.9);
+    const isRaveStrobe = raveBlend > 0.12;
+    const strobePalIdx = 4 + (strobeTick & 3);
+    const raveFlash = isRaveStrobe ? 0.5 + 0.5 * Math.sin(timeSec * 28 + seed * 2.3) : 0;
+
+    // Ground shadow anchored on the seabed (shrinks as the crab jumps high off the floor!)
+    const shadowScale = Math.max(0.48, 1 - totalLift * 0.012);
+    ctx.fillStyle = `rgba(0, 0, 0, ${(0.68 * shadowScale).toFixed(2)})`;
     ctx.beginPath();
     ctx.ellipse(
       scuttleX,
@@ -1117,76 +1144,133 @@ export function renderReef3dScene(s: SceneRenderContext): void {
     ctx.rotate(bodyTilt);
     ctx.scale(scale, scale);
 
+    // Pulsing neon rave body-strobe aura behind the crab during Crab Rave
+    if (raveBlend > 0.05) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const auraR = 34 + raveFlash * 12 + beat * 8;
+      const auraGrad = ctx.createRadialGradient(0, -2, 3, 0, -2, auraR);
+      auraGrad.addColorStop(
+        0,
+        rgbToCss(palette[7], (0.42 + raveFlash * 0.38) * raveBlend),
+      );
+      auraGrad.addColorStop(
+        0.5,
+        rgbToCss(palette[strobePalIdx], (0.28 + raveFlash * 0.24) * raveBlend),
+      );
+      auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = auraGrad;
+      ctx.beginPath();
+      ctx.arc(0, -2, auraR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
     // 6 Articulated 2-segment beveled 3D crystal legs (3 per side)
-    // When `standBlend > 0`, knees pull in and long tibia stilts extend down by `+standLift` to stay planted on the seabed!
-    const legLit = palette[crabRaveActive || standBlend > 0.4 ? 6 : 5];
-    const legDark = palette[crabRaveActive || standBlend > 0.4 ? 4 : 3];
+    const legLit = palette[isRaveStrobe ? 5 + (strobeTick & 2) : standBlend > 0.4 ? 6 : 5];
+    const legDark = palette[isRaveStrobe ? 3 + ((strobeTick + 1) & 3) : standBlend > 0.4 ? 4 : 3];
+    const legWire = palette[isRaveStrobe && (strobeTick & 1) === 0 ? 6 : 7];
     for (const side of [-1, 1]) {
       for (let leg = 0; leg < 3; leg++) {
-        const stepOsc = crabRaveActive
-          ? Math.sin(timeSec * 14.0 + leg * 1.4 + side)
-          : Math.sin(crabGroovePhase * 1.35 + leg * 1.4 + side);
-        const step =
-          stepOsc *
-          (crabRaveActive ? 6 : 2.2 + musicDrive * 3.2) *
-          (1 - standBlend * 0.82);
+        const stepOsc = Math.sin(
+          crabGroovePhase * (1.35 + raveBlend * 1.15) + leg * 1.4 + side,
+        );
+        const stepAmp =
+          (2.2 + musicDrive * 3.2) * (1 - standBlend * 0.82) * (1 - raveBlend) +
+          (8.5 + subBass * 4.5) * raveBlend;
+        const step = stepOsc * stepAmp;
         const lx0 = side * (16 + leg * 4);
         const ly0 = 2 + leg * 3;
-        const kneeX = side * (30 + leg * 6 - standBlend * 5.5);
-        const kneeY = -6 + leg * 3 + standLift * 0.22 + step * 0.5;
-        const footX = side * (39 + leg * 7 - standBlend * 8.5);
+        const kneeX = side * (30 + leg * 6 - standBlend * 5.5 + raveBlend * 2.5);
+        const kneeY = -6 + leg * 3 + standLift * 0.22 - raveBlend * 3.5 + step * 0.65;
+        const footX = side * (39 + leg * 7 - standBlend * 8.5 + raveBlend * 4.0);
         const footY = 14 + leg * 2 + standLift + step;
 
-        drawBeveledCrystalSegment(ctx, lx0, ly0, kneeX, kneeY, 2.5, 2.0, legLit, legDark, palette[7]);
-        drawBeveledCrystalSegment(ctx, kneeX, kneeY, footX, footY, 2.0, 0.6, legLit, legDark, palette[7]);
+        drawBeveledCrystalSegment(ctx, lx0, ly0, kneeX, kneeY, 2.5, 2.0, legLit, legDark, legWire);
+        drawBeveledCrystalSegment(ctx, kneeX, kneeY, footX, footY, 2.0, 0.6, legLit, legDark, legWire);
       }
     }
 
-    // Raytraced chrome core beneath the translucent 3D faceted carapace dome
+    // Raytraced chrome core beneath the translucent 3D faceted carapace dome (strobes rapidly during Crab Rave!)
     ctx.save();
     ctx.scale(1.38, 0.84);
-    drawBryceOrb(ctx, 0, -2, 18, palette, 7, crabRaveActive ? 6 : 5, 0, 0.72);
+    drawBryceOrb(
+      ctx,
+      0,
+      -2,
+      18 + raveBlend * 3.5,
+      palette,
+      7,
+      isRaveStrobe ? strobePalIdx : 5,
+      0,
+      0.72 + raveBlend * 0.26,
+    );
     ctx.restore();
+
+    // Rotate palette slots across the 3D carapace facets during Crab Rave for full-body neon strobing
+    const carapacePalette = isRaveStrobe
+      ? [
+          palette[0],
+          palette[2 + (strobeTick & 1)],
+          palette[3 + (strobeTick & 3)],
+          palette[4 + ((strobeTick + 1) & 3)],
+          palette[5 + ((strobeTick + 2) & 2)],
+          palette[6 + (strobeTick & 1)],
+          palette[7],
+          palette[7],
+        ]
+      : palette;
 
     projectAndDrawMesh3D(ctx, CRAB_CARAPACE_MESH_3D, {
       cx: 0,
       cy: 0,
-      scale: 22,
-      rx: 0.46 - standBlend * 0.08,
-      ry: Math.cos(crabGroovePhase * 0.25 + seed) * (0.16 + audioAmp * 0.12),
+      scale: 22 + raveBlend * (raveFlash * 2.2),
+      rx: 0.46 - standBlend * 0.08 + raveBlend * Math.sin(crabGroovePhase + seed) * 0.12,
+      ry: Math.cos(crabGroovePhase * (0.25 + raveBlend * 0.35) + seed) * (0.16 + audioAmp * 0.12 + raveBlend * 0.16),
       rz: 0,
-      palette,
+      palette: carapacePalette,
       snapStep: 0,
-      wireLineWidth: 0.88,
-      alphaBoost: 1.0,
+      wireLineWidth: 0.88 + raveBlend * 0.22,
+      alphaBoost: 1.0 + raveBlend * 0.32,
     });
 
     // Slender vector eye stalks topped with chrome specular spheres
-    ctx.strokeStyle = rgbToCss(palette[6], 0.9);
+    ctx.strokeStyle = rgbToCss(palette[isRaveStrobe ? 7 : 6], 0.92);
     ctx.lineWidth = 1.0;
     for (const ex of [-7.5, 7.5]) {
+      const eyeBounce = raveBlend * Math.sin(crabGroovePhase * 1.5 + ex) * 2.2;
       ctx.beginPath();
       ctx.moveTo(ex, -11);
-      ctx.lineTo(ex * 1.08, -18.5 - standBlend * 1.5);
+      ctx.lineTo(ex * 1.08, -18.5 - standBlend * 1.5 - eyeBounce);
       ctx.stroke();
-      drawBryceOrb(ctx, ex * 1.08, -19.5 - standBlend * 1.5, 2.8, palette, 7, 5, 0.85);
+      drawBryceOrb(
+        ctx,
+        ex * 1.08,
+        -19.5 - standBlend * 1.5 - eyeBounce,
+        2.8 + raveBlend * 0.6,
+        palette,
+        7,
+        isRaveStrobe ? strobePalIdx : 5,
+        0.88,
+      );
     }
 
-    // Articulated Arms + Snapping Beveled 3D Pincer Claws (with vertical overhead "Claw Pumping"!)
+    // Articulated Arms + Snapping Beveled 3D Pincer Claws (with smooth vertical overhead "Claw Pumping"!)
     const tipPositions: [number, number][] = [];
-    const pumpActive = Math.max(crabRaveActive ? 1 : 0, standBlend, audioAmp * 0.45);
     for (const side of [-1, 1]) {
-      // Rhythmic vertical claw-pump stroke driven by music phase, beat & frequency band
-      const pumpWave = Math.sin(crabGroovePhase + (crabRaveActive ? 0 : side * 0.45 + seed * 0.3));
+      const pumpWave = Math.sin(
+        crabGroovePhase * (1 + raveBlend * 0.5) + side * (0.45 * (1 - raveBlend)) + seed * 0.3,
+      );
       const pumpReachY =
         pumpActive *
-        (8 + Math.max(0, pumpWave) * (8 + audioAmp * 8 + beat * 6 + crabBand * 4));
+        (8 +
+          raveBlend * 6 +
+          (0.5 + 0.5 * pumpWave) * (9 + audioAmp * 8 + beat * 6 + crabBand * 4 + raveBlend * 7));
       const shoulderX = side * 17;
       const shoulderY = -7;
-      const wristX = side * (20 + standBlend * 2 - pumpActive * pumpWave * 1.8);
+      const wristX = side * (20 + standBlend * 2 + raveBlend * 3 - pumpActive * pumpWave * 2.2);
       const wristY = -8 - pumpReachY;
 
-      // Upper crystal arm segment connecting shoulder to pumping claw wrist
       drawBeveledCrystalSegment(
         ctx,
         shoulderX,
@@ -1198,23 +1282,25 @@ export function renderReef3dScene(s: SceneRenderContext): void {
         legLit,
         legDark,
         palette[7],
-        0.60,
-        0.38,
+        0.62 + raveBlend * 0.2,
+        0.38 + raveBlend * 0.15,
       );
 
       ctx.save();
       ctx.translate(wristX, wristY);
       const raveLift =
-        pumpActive > 0.1
-          ? side * (-0.32 - pumpActive * (0.82 + Math.sin(crabGroovePhase + side) * 0.26))
-          : side * (-0.32 - (beat * 0.22 + crabBand * 0.18));
+        side *
+        (-0.32 -
+          pumpActive * (0.82 + Math.sin(crabGroovePhase * (1 + raveBlend * 0.5) + side) * (0.24 + raveBlend * 0.18)) -
+          (1 - pumpActive) * (beat * 0.22 + crabBand * 0.18));
       ctx.rotate(raveLift);
 
-      // Upper pincer blade + lower pincer blade as beveled crystal segments
       const upTipX = side * 19;
       const upTipY = -12 - clawSnap * 9;
       const loTipX = side * 20;
       const loTipY = -4 + clawSnap * 7;
+      const clawLit = palette[isRaveStrobe ? 6 + (strobeTick & 1) : standBlend > 0.5 ? 7 : 6];
+      const clawDark = palette[isRaveStrobe ? strobePalIdx : 4];
       drawBeveledCrystalSegment(
         ctx,
         0,
@@ -1223,11 +1309,11 @@ export function renderReef3dScene(s: SceneRenderContext): void {
         upTipY,
         4.2,
         1.1,
-        palette[crabRaveActive || standBlend > 0.5 ? 7 : 6],
-        palette[4],
+        clawLit,
+        clawDark,
         palette[7],
-        0.66,
-        0.42,
+        0.68 + raveBlend * 0.22,
+        0.42 + raveBlend * 0.18,
       );
       drawBeveledCrystalSegment(
         ctx,
@@ -1237,14 +1323,13 @@ export function renderReef3dScene(s: SceneRenderContext): void {
         loTipY,
         3.4,
         0.9,
-        palette[crabRaveActive || standBlend > 0.5 ? 6 : 5],
+        palette[isRaveStrobe ? strobePalIdx : standBlend > 0.5 ? 6 : 5],
         palette[3],
         palette[7],
-        0.58,
-        0.38,
+        0.60 + raveBlend * 0.22,
+        0.38 + raveBlend * 0.16,
       );
 
-      // Compute approximate rotated claw tip for Crab Rave electric arc
       const cosL = Math.cos(raveLift);
       const sinL = Math.sin(raveLift);
       tipPositions.push([
@@ -1254,24 +1339,33 @@ export function renderReef3dScene(s: SceneRenderContext): void {
       ctx.restore();
     }
 
-    // Crab Rave neon lightning arc between overhead pincer tips
-    if (crabRaveActive && tipPositions.length === 2) {
+    // Dual-bolt crackling neon lightning arcs between overhead pincer tips during Crab Rave
+    if (raveBlend > 0.05 && tipPositions.length === 2) {
       const [pL, pR] = tipPositions;
-      ctx.beginPath();
-      ctx.moveTo(pL[0], pL[1]);
-      for (let sg = 1; sg < 6; sg++) {
-        const u = sg / 6;
-        const archY = -Math.sin(u * Math.PI) * (10 + sb[sg & 15] * 12);
-        const jitter = Math.sin(timeSec * 36 + sg * 2.7 + seed) * 3.5;
-        ctx.lineTo(pL[0] + (pR[0] - pL[0]) * u, pL[1] + (pR[1] - pL[1]) * u + archY + jitter);
+      for (let bolt = 0; bolt < 2; bolt++) {
+        ctx.beginPath();
+        ctx.moveTo(pL[0], pL[1]);
+        for (let sg = 1; sg < 7; sg++) {
+          const u = sg / 7;
+          const archY = -Math.sin(u * Math.PI) * (10 + sb[(sg + bolt * 3) & 15] * 15);
+          const jitter =
+            Math.sin(timeSec * (42 + bolt * 17) + sg * 3.1 + seed) * (4.5 + bolt * 2.5);
+          ctx.lineTo(
+            pL[0] + (pR[0] - pL[0]) * u,
+            pL[1] + (pR[1] - pL[1]) * u + archY + jitter,
+          );
+        }
+        ctx.lineTo(pR[0], pR[1]);
+        ctx.strokeStyle = rgbToCss(
+          palette[bolt === 0 ? strobePalIdx : 6],
+          (bolt === 0 ? 0.58 : 0.42) * raveBlend,
+        );
+        ctx.lineWidth = bolt === 0 ? 3.2 : 2.0;
+        ctx.stroke();
+        ctx.strokeStyle = rgbToCss(palette[7], (bolt === 0 ? 0.96 : 0.78) * raveBlend);
+        ctx.lineWidth = bolt === 0 ? 1.0 : 0.7;
+        ctx.stroke();
       }
-      ctx.lineTo(pR[0], pR[1]);
-      ctx.strokeStyle = rgbToCss(palette[6], 0.45);
-      ctx.lineWidth = 3.0;
-      ctx.stroke();
-      ctx.strokeStyle = rgbToCss(palette[7], 0.92);
-      ctx.lineWidth = 0.9;
-      ctx.stroke();
     }
 
     ctx.restore();
@@ -1279,11 +1373,11 @@ export function renderReef3dScene(s: SceneRenderContext): void {
 
   // Render 5 Reef Crabs in a depth-layered V-formation (back-to-front so foreground crabs overlap cleanly)
   const safeCrabY = Math.min(CANVAS_H - 34, cropBottomY - 24);
-  drawBryceCrab(CANVAS_W * 0.11, safeCrabY - 38, 0.56, 1.05);
-  drawBryceCrab(CANVAS_W * 0.89, safeCrabY - 36, 0.58, 5.25);
-  drawBryceCrab(CANVAS_W * 0.26, safeCrabY - 20, 0.74, 2.1);
-  drawBryceCrab(CANVAS_W * 0.74, safeCrabY - 18, 0.76, 4.2);
-  drawBryceCrab(CANVAS_W * 0.5, safeCrabY, 1.02, 0);
+  drawBryceCrab(0, CANVAS_W * 0.11, safeCrabY - 38, 0.56, 1.05);
+  drawBryceCrab(1, CANVAS_W * 0.89, safeCrabY - 36, 0.58, 5.25);
+  drawBryceCrab(2, CANVAS_W * 0.26, safeCrabY - 20, 0.74, 2.1);
+  drawBryceCrab(3, CANVAS_W * 0.74, safeCrabY - 18, 0.76, 4.2);
+  drawBryceCrab(4, CANVAS_W * 0.5, safeCrabY, 1.02, 0);
 
   // 9. High-DPI Rising Crystalline Bubble Lyric Cascade (Sequential One-Shot Word Dispatch!)
   //    Each lyric line queues its words into fresh one-shot bubbles that release sequentially

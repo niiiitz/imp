@@ -21,12 +21,6 @@ import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { BrowserTarget } from './PlayerView';
 import { ImpIcon } from '../components/icons/ImpIcon';
 import { FolderChooserModal } from '../components/FolderChooserModal';
-import {
-  applySkinPackToDocument,
-  loadActiveSkinPackId,
-  SKIN_PACK_REGISTRY,
-  SkinPackId,
-} from '../theme/skinPacks';
 
 interface DaemonPerfSnapshot {
   cpu_percent: number;
@@ -190,7 +184,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
   const [iaSafeSearch, setIaSafeSearch] = useState(true);
   const [perfSnap, setPerfSnap] = useState<DaemonPerfSnapshot | null>(null);
-  const [activeSkinPack, setActiveSkinPack] = useState<SkinPackId>(() => loadActiveSkinPackId());
 
   const closeSettingsDrawer = () => {
     setSourceModalOpen(false);
@@ -1398,64 +1391,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               ◄
             </span>
           </button>
-
-          {/* Row 3b: [Skin Pack Switcher] */}
-          <div
-            style={{
-              padding: '9px 12px',
-              borderRadius: 14,
-              background: '#0d0d14',
-              border: '1px solid #222230',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#bfeaf5', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <ImpIcon name="palette" size={13} /> Skin Pack
-              </span>
-              <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: '#67e8f9' }}>
-                {SKIN_PACK_REGISTRY.find((s) => s.id === activeSkinPack)?.name || 'IMP Portal Dark'}
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-              {SKIN_PACK_REGISTRY.map((pack) => {
-                const isActive = activeSkinPack === pack.id;
-                return (
-                  <button
-                    key={pack.id}
-                    type="button"
-                    title={pack.tagline}
-                    onClick={() => {
-                      setActiveSkinPack(pack.id);
-                      applySkinPackToDocument(pack.id);
-                      showToast(`Skin Pack: ${pack.name}`);
-                    }}
-                    style={{
-                      minHeight: 34,
-                      padding: '4px 6px',
-                      borderRadius: 8,
-                      background: isActive ? pack.tokens.surfaceElevated : '#13131d',
-                      border: isActive
-                        ? `1.5px solid ${pack.tokens.brandPrimary}`
-                        : '1px solid #252534',
-                      color: isActive ? pack.tokens.textPrimary : '#a1a1aa',
-                      fontSize: 10.5,
-                      fontWeight: isActive ? 800 : 700,
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {pack.name.replace(/^IMP\s+/i, '')}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* Row 4: [System Load] */}
           <div
