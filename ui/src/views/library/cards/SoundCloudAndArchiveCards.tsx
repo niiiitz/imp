@@ -36,6 +36,7 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`soundcloud_playlist:${pl.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({
@@ -246,6 +247,7 @@ export const SoundCloudUserCard: React.FC<SoundCloudUserCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`artist:soundcloud:${user.id}`}
       onClick={() => selectSoundCloudUser(user)}
       style={{
         minWidth: 0,
@@ -381,6 +383,7 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`ia_item:${item.identifier}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({

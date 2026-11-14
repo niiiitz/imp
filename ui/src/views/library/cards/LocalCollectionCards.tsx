@@ -38,6 +38,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`playlist:${pl.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({
@@ -308,6 +309,7 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`album:${alb.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({
@@ -561,6 +563,7 @@ export const LocalArtistCard: React.FC<LocalArtistCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`artist:local:name:${artistName}`}
       onClick={onSelect}
       style={{
         minWidth: 0,

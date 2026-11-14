@@ -151,9 +151,9 @@ export const VISUALIZER_SCENES: VisualizerSceneDescriptor[] = [
     id: 'reef3d',
     label: 'Coral Reef 3D',
     shortLabel: 'REEF 3D',
-    subtitle: 'Low-poly seabed, seahorses & crab rave',
-    eraBadge: 'PS1 • 320×180',
-    transitionLabel: 'Caustic Raster Wipe',
+    subtitle: 'Bryce-3D seabed, squid, seahorses & crab rave',
+    eraBadge: 'BRYCE • 720P',
+    transitionLabel: 'Caustic Prism Wipe',
     cohort: 'wave2',
     safeZones: {
       lyricAnchor: 'top-center',

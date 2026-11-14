@@ -502,8 +502,8 @@ export const LibraryArtistProfilePane: React.FC<LibraryArtistProfilePaneProps> =
                           <button
                             data-focusable="true"
                             data-load-more="true"
+                            aria-busy={activeArtistProfile.loadingMore}
                             onClick={loadMoreArtistTracks}
-                            disabled={activeArtistProfile.loadingMore}
                             style={{
                               minHeight: 38,
                               padding: '0 20px',

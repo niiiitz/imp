@@ -181,6 +181,7 @@ export interface DrawMeshOptions {
   wireframeOnly?: boolean;
   lightDir?: Vec3;
   alphaBoost?: number;
+  wireLineWidth?: number;
 }
 
 /**
@@ -207,6 +208,7 @@ export function projectAndDrawMesh3D(
     wireframeOnly = false,
     lightDir = [-0.35, -0.65, 0.67],
     alphaBoost = 1.0,
+    wireLineWidth = 1.2,
   } = opts;
 
   const cosX = Math.cos(rx), sinX = Math.sin(rx);
@@ -307,7 +309,7 @@ export function projectAndDrawMesh3D(
     const wireAlpha = Math.min(1, (face.wireAlpha ?? 0.78) * alphaBoost);
     if (wireAlpha > 0.02) {
       ctx.strokeStyle = rgbToCss(palette[wireIdx] || palette[7], wireAlpha);
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = wireLineWidth;
       ctx.stroke();
     }
   }
@@ -325,7 +327,10 @@ export function drawPerspectiveGridFloor(
   palette: RgbTuple[],
   checkerboard = true,
   alphaScale = 1.0,
+  snapStep = 2,
+  tileWireAlpha = 0,
 ): void {
+  const snap = (v: number) => (snapStep > 0 ? snapPs1(v, snapStep) : v);
   const numRows = 9;
   const numCols = 10;
   const frac = 1 - ((scrollZ % 1 + 1) % 1);
@@ -335,8 +340,8 @@ export function drawPerspectiveGridFloor(
   for (let r = 0; r < numRows; r++) {
     const d0 = Math.max(0, (r + frac) / numRows);
     const d1 = Math.min(1, (r + 1 + frac) / numRows);
-    const y0 = snapPs1(horizonY + Math.pow(d0, 1.75) * spanH, 2);
-    const y1 = snapPs1(horizonY + Math.pow(d1, 1.75) * spanH, 2);
+    const y0 = snap(horizonY + Math.pow(d0, 1.75) * spanH);
+    const y1 = snap(horizonY + Math.pow(d1, 1.75) * spanH);
     const span0 = 76 + Math.pow(d0, 1.42) * 580;
     const span1 = 76 + Math.pow(d1, 1.42) * 580;
     const sw0 = swayX * (1 - d0 * 0.65);
@@ -347,10 +352,10 @@ export function drawPerspectiveGridFloor(
       const isCheck = ((c + rowParity) & 1) === 0;
       const u0 = c / (numCols * 0.5);
       const u1 = (c + 1) / (numCols * 0.5);
-      const x0a = snapPs1(CANVAS_W * 0.5 + sw0 + u0 * span0, 2);
-      const x0b = snapPs1(CANVAS_W * 0.5 + sw0 + u1 * span0, 2);
-      const x1b = snapPs1(CANVAS_W * 0.5 + sw1 + u1 * span1, 2);
-      const x1a = snapPs1(CANVAS_W * 0.5 + sw1 + u0 * span1, 2);
+      const x0a = snap(CANVAS_W * 0.5 + sw0 + u0 * span0);
+      const x0b = snap(CANVAS_W * 0.5 + sw0 + u1 * span0);
+      const x1b = snap(CANVAS_W * 0.5 + sw1 + u1 * span1);
+      const x1a = snap(CANVAS_W * 0.5 + sw1 + u0 * span1);
 
       const palSlot = 2 + (Math.abs(c + r - rowParityBase) % 4);
       if (checkerboard) {
@@ -363,6 +368,14 @@ export function drawPerspectiveGridFloor(
         ctx.lineTo(x1a, y1);
         ctx.closePath();
         ctx.fill();
+        if (tileWireAlpha > 0.01) {
+          ctx.strokeStyle = rgbToCss(
+            palette[6] || palette[7],
+            Math.min(0.75, tileWireAlpha * (0.35 + d0 * 0.65)),
+          );
+          ctx.lineWidth = 0.65;
+          ctx.stroke();
+        }
       } else {
         ctx.strokeStyle = rgbToCss(palette[palSlot + 1] || palette[5], Math.min(0.85, (0.22 + d0 * 0.48) * alphaScale));
         ctx.lineWidth = 1.2;

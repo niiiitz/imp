@@ -103,6 +103,7 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
     >
       <button
         data-single-song-play="true"
+        data-tile-key={`song:${ctxPrefix}:${s.uri}`}
         onClick={() => {
           if (s.source === 'local_video' || s.uri.startsWith('video://local/')) {
             openLocalVideoFile(s, peerList, `${ctxPrefix}:${s.uri}`);

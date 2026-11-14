@@ -187,8 +187,8 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                             <button
                               data-focusable="true"
                               data-load-more="true"
+                              aria-busy={iaLoadingMore}
                               onClick={loadMoreIaDiscover}
-                              disabled={iaLoadingMore}
                               style={{
                                 minHeight: 38,
                                 padding: '0 20px',

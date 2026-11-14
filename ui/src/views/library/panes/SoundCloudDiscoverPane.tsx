@@ -695,8 +695,10 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             {scDiscoverNextHref && (
                               <button
                                 data-right-tile="true"
+                                data-focusable="true"
+                                data-load-more="true"
+                                aria-busy={scLoadingMore}
                                 onClick={loadMoreScDiscover}
-                                disabled={scLoadingMore}
                                 style={{
                                   minHeight: 40,
                                   padding: '8px 16px',

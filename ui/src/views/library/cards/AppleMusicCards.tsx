@@ -46,6 +46,7 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`cloud_playlist:${pl.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({
@@ -304,6 +305,7 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`cloud_album:${alb.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         openLibraryContextMenu({
@@ -550,6 +552,7 @@ export const StationCard: React.FC<StationCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`station:${st.id}`}
       onClick={() => handleStartAppleStation(st)}
       style={{
         minWidth: 0,
@@ -678,6 +681,7 @@ export const AppleArtistCard: React.FC<AppleArtistCardProps> = ({
   return (
     <button
       data-right-tile="true"
+      data-tile-key={`artist:apple_music:${artist.id || `name:${artist.name}`}`}
       onClick={onSelect}
       style={{
         minWidth: 0,

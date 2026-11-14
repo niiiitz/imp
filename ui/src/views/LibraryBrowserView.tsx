@@ -614,8 +614,95 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     [resolveDaemonUrl]
   );
 
+  const pendingLoadMoreFocusRef = useRef<{
+    firstTileKey: string | null;
+    savedScrollTop: number;
+  } | null>(null);
+
+  const flushLoadMoreFocusTransfer = useCallback(() => {
+    const pending = pendingLoadMoreFocusRef.current;
+    if (!pending) return;
+    pendingLoadMoreFocusRef.current = null;
+    const col = document.querySelector<HTMLElement>('[data-nav-col="right"]');
+    if (!col) return;
+    const curFocused = document.querySelector<HTMLElement>('[data-simp-active-focus="true"]');
+    if (curFocused && curFocused.isConnected && curFocused.dataset.loadMore !== 'true') {
+      return;
+    }
+    col.scrollTop = pending.savedScrollTop;
+    if (pending.firstTileKey) {
+      const candidates = col.querySelectorAll<HTMLElement>('[data-tile-key]');
+      for (const el of candidates) {
+        if (el.dataset.tileKey === pending.firstTileKey && !el.hasAttribute('disabled')) {
+          applyFocusMarker(el);
+          el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          return;
+        }
+      }
+    }
+    const fallbackNodes = Array.from(
+      col.querySelectorAll<HTMLElement>(
+        '[data-right-tile="true"]:not([disabled]), [data-single-song-play="true"]:not([disabled])'
+      )
+    ).filter((el) => el.dataset.loadMore !== 'true');
+    const lastTile = fallbackNodes[fallbackNodes.length - 1];
+    if (lastTile) {
+      applyFocusMarker(lastTile);
+      lastTile.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }, [applyFocusMarker]);
+
+  const transferFocusAfterLoadMore = useCallback(
+    (startedOnLoadMore = false) => {
+      const rightCol = document.querySelector<HTMLElement>('[data-nav-col="right"]');
+      if (!rightCol) return null;
+      const focused = document.querySelector<HTMLElement>('[data-simp-active-focus="true"]');
+      const isLoadMoreFocused = Boolean(focused && focused.dataset.loadMore === 'true');
+      const isLostFocus = !focused || !focused.isConnected;
+      const shouldTransfer =
+        isLoadMoreFocused ||
+        (isLostFocus &&
+          (startedOnLoadMore || document.documentElement.dataset.simpInput === 'gamepad'));
+      if (!shouldTransfer) return null;
+
+      const slot = {
+        firstTileKey: null as string | null,
+        savedScrollTop: rightCol.scrollTop,
+      };
+      pendingLoadMoreFocusRef.current = slot;
+      window.setTimeout(() => {
+        if (pendingLoadMoreFocusRef.current === slot) {
+          flushLoadMoreFocusTransfer();
+        }
+      }, 30);
+      return slot;
+    },
+    [flushLoadMoreFocusTransfer]
+  );
+
+  useEffect(() => {
+    if (pendingLoadMoreFocusRef.current) {
+      flushLoadMoreFocusTransfer();
+    }
+  }, [
+    iaItems,
+    iaHasMore,
+    iaSearchResults,
+    iaSearchHasMore,
+    scTrendingTracks,
+    scDiscoverNextHref,
+    scCatalogSearchResults.songs,
+    scCatalogSearchResults.next_tracks_href,
+    activeArtistProfile?.scData?.tracks,
+    activeArtistProfile?.scData?.next_tracks_href,
+    flushLoadMoreFocusTransfer,
+  ]);
+
   const loadMoreIaDiscover = useCallback(() => {
     if (iaLoadingMore || !iaHasMore) return;
+    const startedOnLoadMore =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]')?.dataset.loadMore ===
+      'true';
     const nextPage = iaPage + 1;
     setIaLoadingMore(true);
     fetch(
@@ -633,9 +720,19 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             ? d.data
             : [];
         if (d?.ok) {
+          const transferSlot = transferFocusAfterLoadMore(startedOnLoadMore);
           setIaItems((prev) => {
             const seen = new Set(prev.map((it) => it.identifier));
             const added = list.filter((it) => !seen.has(it.identifier));
+            const firstVisibleAdded =
+              added.find((it) => {
+                if (mediaTypeFilter === 'video') return it.mediatype === 'movies';
+                if (mediaTypeFilter === 'audio') return it.mediatype !== 'movies';
+                return true;
+              }) || added[0];
+            if (transferSlot && firstVisibleAdded) {
+              transferSlot.firstTileKey = `ia_item:${firstVisibleAdded.identifier}`;
+            }
             return [...prev, ...added];
           });
           setIaPage(nextPage);
@@ -644,7 +741,16 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       })
       .catch(() => {})
       .finally(() => setIaLoadingMore(false));
-  }, [iaLoadingMore, iaHasMore, iaPage, iaSubTab, iaSubFilter, resolveDaemonUrl]);
+  }, [
+    iaLoadingMore,
+    iaHasMore,
+    iaPage,
+    iaSubTab,
+    iaSubFilter,
+    mediaTypeFilter,
+    resolveDaemonUrl,
+    transferFocusAfterLoadMore,
+  ]);
 
   useEffect(() => {
     if (browserSourceFilter !== 'internet_archive' || iaSubTab === 'pinned') return;
@@ -691,6 +797,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const loadMoreIaSearch = useCallback(() => {
     const q = browserSearch.trim();
     if (!q || iaSearchLoadingMore || !iaSearchHasMore) return;
+    const startedOnLoadMore =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]')?.dataset.loadMore ===
+      'true';
     const nextPage = iaSearchPage + 1;
     setIaSearchLoadingMore(true);
     fetch(resolveDaemonUrl(`/api/ia/search?q=${encodeURIComponent(q)}&page=${nextPage}`))
@@ -702,9 +811,19 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             ? d.data
             : [];
         if (d?.ok) {
+          const transferSlot = transferFocusAfterLoadMore(startedOnLoadMore);
           setIaSearchResults((prev) => {
             const seen = new Set(prev.map((it) => it.identifier));
             const added = list.filter((it) => !seen.has(it.identifier));
+            const firstVisibleAdded =
+              added.find((it) => {
+                if (mediaTypeFilter === 'video') return it.mediatype === 'movies';
+                if (mediaTypeFilter === 'audio') return it.mediatype !== 'movies';
+                return true;
+              }) || added[0];
+            if (transferSlot && firstVisibleAdded) {
+              transferSlot.firstTileKey = `ia_item:${firstVisibleAdded.identifier}`;
+            }
             return [...prev, ...added];
           });
           setIaSearchPage(nextPage);
@@ -713,17 +832,32 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       })
       .catch(() => {})
       .finally(() => setIaSearchLoadingMore(false));
-  }, [browserSearch, iaSearchLoadingMore, iaSearchHasMore, iaSearchPage, resolveDaemonUrl]);
+  }, [
+    browserSearch,
+    iaSearchLoadingMore,
+    iaSearchHasMore,
+    iaSearchPage,
+    mediaTypeFilter,
+    resolveDaemonUrl,
+    transferFocusAfterLoadMore,
+  ]);
 
   const loadMoreScDiscover = useCallback(() => {
     if (!scDiscoverNextHref || scLoadingMore) return;
+    const startedOnLoadMore =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]')?.dataset.loadMore ===
+      'true';
     setScLoadingMore(true);
     fetchSoundCloudNextPage(scDiscoverNextHref)
       .then((res) => {
+        const transferSlot = transferFocusAfterLoadMore(startedOnLoadMore);
         if (res.tracks && res.tracks.length > 0) {
           setScTrendingTracks((prev) => {
             const seen = new Set(prev.map((t) => t.uri));
             const added = res.tracks.filter((t) => !seen.has(t.uri));
+            if (transferSlot && added[0]) {
+              transferSlot.firstTileKey = `song:sc_trending:${added[0].uri}`;
+            }
             return [...prev, ...added];
           });
         }
@@ -731,17 +865,30 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       })
       .catch(() => {})
       .finally(() => setScLoadingMore(false));
-  }, [scDiscoverNextHref, scLoadingMore, setScTrendingTracks, setScDiscoverNextHref]);
+  }, [
+    scDiscoverNextHref,
+    scLoadingMore,
+    setScTrendingTracks,
+    setScDiscoverNextHref,
+    transferFocusAfterLoadMore,
+  ]);
 
   const loadMoreScSearch = useCallback(() => {
     const nextHref = scCatalogSearchResults.next_tracks_href;
     if (!nextHref || scLoadingMore || !setScCatalogSearchResults) return;
+    const startedOnLoadMore =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]')?.dataset.loadMore ===
+      'true';
     setScLoadingMore(true);
     fetchSoundCloudNextPage(nextHref)
       .then((res) => {
+        const transferSlot = transferFocusAfterLoadMore(startedOnLoadMore);
         setScCatalogSearchResults((prev) => {
           const seen = new Set(prev.songs.map((t) => t.uri));
           const added = (res.tracks || []).filter((t) => !seen.has(t.uri));
+          if (transferSlot && added[0]) {
+            transferSlot.firstTileKey = `song:sc_search:${added[0].uri}`;
+          }
           return {
             ...prev,
             songs: [...prev.songs, ...added],
@@ -751,7 +898,12 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       })
       .catch(() => {})
       .finally(() => setScLoadingMore(false));
-  }, [scCatalogSearchResults.next_tracks_href, scLoadingMore, setScCatalogSearchResults]);
+  }, [
+    scCatalogSearchResults.next_tracks_href,
+    scLoadingMore,
+    setScCatalogSearchResults,
+    transferFocusAfterLoadMore,
+  ]);
 
   // Lazy background item/episode count & content rating resolver for visible Internet Archive tiles
   useEffect(() => {
@@ -806,8 +958,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   // Auto-load Internet Archive item detail when jumping directly from Player ('Open Collection')
   useEffect(() => {
-    if (browserTarget?.kind !== 'ia_item') return;
-    setRightPaneMode('tracks');
+    if (rightPaneMode !== 'tracks' || browserTarget?.kind !== 'ia_item') return;
     if (activeIaDetail?.summary.identifier === browserTarget.id) return;
     setIaLoading(true);
     fetch(resolveDaemonUrl(`/api/ia/item?id=${encodeURIComponent(browserTarget.id)}`))
@@ -821,7 +972,13 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       })
       .catch(() => {})
       .finally(() => setIaLoading(false));
-  }, [browserTarget, activeIaDetail?.summary.identifier, setBrowserTracks, resolveDaemonUrl]);
+  }, [
+    rightPaneMode,
+    browserTarget,
+    activeIaDetail?.summary.identifier,
+    setBrowserTracks,
+    resolveDaemonUrl,
+  ]);
 
   // Listen for 'Open Collection in Library' ('simp-open-collection-in-library') from Player / SELECT menu:
   // Switch the Right Pane to 'tracks' mode, clear any active search query, and scroll/focus the playing track!
@@ -930,6 +1087,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   // Auto-focus Right Pane when selecting a Place ('tile') or Collection ('track')
   const pendingRightFocusRef = useRef<'track' | 'tile' | null>(null);
+  const pendingRightTileRestoreRef = useRef<{
+    tileKey?: string | null;
+    scrollTop?: number;
+  } | null>(null);
   const xmbPreviewTriggerRef = useRef<boolean>(false);
 
   // PS3 XMB Auto-Fill: When cursor lands on a non-drill-down row in the Left Column (`data-xmb-preview="true"`),
@@ -960,6 +1121,11 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const focusRightPaneFirstTrack = useCallback(() => {
     if (xmbPreviewTriggerRef.current) return;
     pendingRightFocusRef.current = 'track';
+    pendingRightTileRestoreRef.current = null;
+    const rightCol = document.querySelector<HTMLElement>('[data-nav-col="right"]');
+    if (rightCol) {
+      rightCol.scrollTop = 0;
+    }
     window.setTimeout(() => {
       const firstTrack =
         document.querySelector<HTMLElement>(
@@ -977,20 +1143,48 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     }, 55);
   }, [applyFocusMarker]);
 
-  const focusRightPaneFirstTile = useCallback(() => {
-    if (xmbPreviewTriggerRef.current) return;
-    pendingRightFocusRef.current = 'tile';
-    window.setTimeout(() => {
+  const applyRightPaneTileFocus = useCallback(
+    (allowButtonFallback: boolean) => {
+      const rightCol = document.querySelector<HTMLElement>('[data-nav-col="right"]');
+      const restore = pendingRightTileRestoreRef.current;
+      if (rightCol && restore?.scrollTop !== undefined) {
+        rightCol.scrollTop = restore.scrollTop;
+      }
+      if (restore?.tileKey) {
+        let matchedTile: HTMLElement | null = null;
+        const candidates = rightCol?.querySelectorAll<HTMLElement>('[data-tile-key]') || [];
+        for (const el of candidates) {
+          if (el.dataset.tileKey === restore.tileKey && !el.hasAttribute('disabled')) {
+            matchedTile = el;
+            break;
+          }
+        }
+        if (matchedTile) {
+          if (rightCol && restore.scrollTop !== undefined) {
+            rightCol.scrollTop = restore.scrollTop;
+          }
+          applyFocusMarker(matchedTile);
+          matchedTile.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          pendingRightFocusRef.current = null;
+          pendingRightTileRestoreRef.current = null;
+          return;
+        }
+        if (!allowButtonFallback) {
+          return;
+        }
+      }
       const firstTile =
         document.querySelector<HTMLElement>(
           '[data-nav-col="right"] [data-right-tile="true"]:not([disabled]), [data-nav-col="right"] [data-single-song-play="true"]:not([disabled]), [data-nav-col="right"] [data-right-track="true"]:not([disabled])'
         ) ||
-        document.querySelector<HTMLElement>(
-          '[data-nav-col="right"] button:not([disabled]):not([data-right-filter-pill="true"])'
-        ) ||
-        document.querySelector<HTMLElement>(
-          '[data-nav-col="right"] button:not([disabled])'
-        );
+        (allowButtonFallback
+          ? document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] button:not([disabled]):not([data-right-filter-pill="true"])'
+            ) ||
+            document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] button:not([disabled])'
+            )
+          : null);
       if (firstTile) {
         applyFocusMarker(firstTile);
         if (
@@ -999,10 +1193,25 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           firstTile.dataset.rightTrack === 'true'
         ) {
           pendingRightFocusRef.current = null;
+          pendingRightTileRestoreRef.current = null;
         }
       }
-    }, 45);
-  }, [applyFocusMarker]);
+    },
+    [applyFocusMarker]
+  );
+
+  const focusRightPaneFirstTile = useCallback(
+    (restoreOptions?: { tileKey?: string | null; scrollTop?: number }) => {
+      if (xmbPreviewTriggerRef.current) return;
+      pendingRightFocusRef.current = 'tile';
+      pendingRightTileRestoreRef.current = restoreOptions ? { ...restoreOptions } : null;
+      window.setTimeout(() => {
+        if (pendingRightFocusRef.current !== 'tile') return;
+        applyRightPaneTileFocus(true);
+      }, 45);
+    },
+    [applyRightPaneTileFocus]
+  );
 
   // Complete deferred Right-Pane focus when async tracks or cloud tiles finish loading
   useEffect(() => {
@@ -1019,14 +1228,20 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       return () => window.clearTimeout(t);
     }
     if (pendingRightFocusRef.current === 'tile' && rightPaneMode === 'browse') {
+      const curFocused = document.querySelector<HTMLElement>('[data-simp-active-focus="true"]');
+      const alreadyFocusedInRightBrowse =
+        Boolean(curFocused?.closest('[data-nav-col="right"]')) &&
+        (curFocused?.dataset.rightTile === 'true' ||
+          curFocused?.dataset.singleSongPlay === 'true' ||
+          curFocused?.dataset.loadMore === 'true');
+      if (alreadyFocusedInRightBrowse && !pendingRightTileRestoreRef.current?.tileKey) {
+        pendingRightFocusRef.current = null;
+        pendingRightTileRestoreRef.current = null;
+        return;
+      }
       const t = window.setTimeout(() => {
-        const firstTile = document.querySelector<HTMLElement>(
-          '[data-nav-col="right"] [data-right-tile="true"]:not([disabled]), [data-nav-col="right"] [data-single-song-play="true"]:not([disabled]), [data-nav-col="right"] [data-right-track="true"]:not([disabled])'
-        );
-        if (firstTile) {
-          applyFocusMarker(firstTile);
-          pendingRightFocusRef.current = null;
-        }
+        if (pendingRightFocusRef.current !== 'tile') return;
+        applyRightPaneTileFocus(false);
       }, 25);
       return () => window.clearTimeout(t);
     }
@@ -1035,6 +1250,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     rightPaneMode,
     appleSubTab,
     soundCloudSubTab,
+    iaSubTab,
+    iaItems,
+    iaSearchResults,
     cloudPlaylists,
     radioStations,
     forYouPlaylists,
@@ -1047,6 +1265,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     scTrendingMixes,
     scTrendingPlaylists,
     applyFocusMarker,
+    applyRightPaneTileFocus,
   ]);
 
   // Switch Right Pane to 'browse' when user types a search query
@@ -1333,55 +1552,87 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     activeMountRoot: string | null;
     browserSearch: string;
     activeArtistProfile?: typeof activeArtistProfile;
+    returnTileKey?: string | null;
+    scrollTop?: number;
   }
   const [navHistory, setNavHistory] = useState<RightNavEntry[]>([]);
 
-  const pushCurrentNavState = useCallback(() => {
-    if (xmbPreviewTriggerRef.current) return;
-    setNavHistory((prev) => {
-      const next: RightNavEntry = {
-        browserSourceFilter,
-        rightPaneMode,
-        browserTarget,
-        browserTracks,
-        appleSubTab,
-        soundCloudSubTab,
-        iaSubTab,
-        activeMountRoot,
-        browserSearch,
-        activeArtistProfile,
-      };
-      const last = prev[prev.length - 1];
-      if (
-        last &&
-        last.browserSourceFilter === next.browserSourceFilter &&
-        last.rightPaneMode === next.rightPaneMode &&
-        last.appleSubTab === next.appleSubTab &&
-        last.soundCloudSubTab === next.soundCloudSubTab &&
-        last.iaSubTab === next.iaSubTab &&
-        last.activeMountRoot === next.activeMountRoot &&
-        last.browserSearch === next.browserSearch &&
-        last.activeArtistProfile?.idOrName === next.activeArtistProfile?.idOrName &&
-        JSON.stringify(last.browserTarget) === JSON.stringify(next.browserTarget)
-      ) {
-        return prev;
-      }
-      return [...prev.slice(-15), next];
-    });
-  }, [
-    browserSourceFilter,
-    rightPaneMode,
-    browserTarget,
-    browserTracks,
-    appleSubTab,
-    soundCloudSubTab,
-    iaSubTab,
-    activeMountRoot,
-    browserSearch,
-    activeArtistProfile,
-  ]);
+  const pushCurrentNavState = useCallback(
+    (opts?: { returnTileKey?: string | null; scrollTop?: number }) => {
+      if (xmbPreviewTriggerRef.current) return;
+      const capturedScrollTop =
+        opts?.scrollTop ??
+        document.querySelector<HTMLElement>('[data-nav-col="right"]')?.scrollTop ??
+        0;
+      const focusedTileKey =
+        opts?.returnTileKey ??
+        document
+          .querySelector<HTMLElement>(
+            '[data-nav-col="right"] [data-simp-active-focus="true"][data-tile-key]'
+          )
+          ?.dataset.tileKey ??
+        null;
+      setNavHistory((prev) => {
+        const next: RightNavEntry = {
+          browserSourceFilter,
+          rightPaneMode,
+          browserTarget,
+          browserTracks,
+          appleSubTab,
+          soundCloudSubTab,
+          iaSubTab,
+          activeMountRoot,
+          browserSearch,
+          activeArtistProfile,
+          returnTileKey: focusedTileKey,
+          scrollTop: capturedScrollTop,
+        };
+        const last = prev[prev.length - 1];
+        if (
+          last &&
+          last.browserSourceFilter === next.browserSourceFilter &&
+          last.rightPaneMode === next.rightPaneMode &&
+          last.appleSubTab === next.appleSubTab &&
+          last.soundCloudSubTab === next.soundCloudSubTab &&
+          last.iaSubTab === next.iaSubTab &&
+          last.activeMountRoot === next.activeMountRoot &&
+          last.browserSearch === next.browserSearch &&
+          last.activeArtistProfile?.idOrName === next.activeArtistProfile?.idOrName &&
+          JSON.stringify(last.browserTarget) === JSON.stringify(next.browserTarget)
+        ) {
+          return [
+            ...prev.slice(0, -1),
+            {
+              ...last,
+              returnTileKey: next.returnTileKey ?? last.returnTileKey,
+              scrollTop: next.scrollTop,
+            },
+          ];
+        }
+        return [...prev.slice(-15), next];
+      });
+    },
+    [
+      browserSourceFilter,
+      rightPaneMode,
+      browserTarget,
+      browserTracks,
+      appleSubTab,
+      soundCloudSubTab,
+      iaSubTab,
+      activeMountRoot,
+      browserSearch,
+      activeArtistProfile,
+    ]
+  );
 
   const handleWalkBack = useCallback(() => {
+    const exitedTileKey =
+      rightPaneMode === 'artist' && activeArtistProfile
+        ? `artist:${activeArtistProfile.source}:${activeArtistProfile.idOrName}`
+        : rightPaneMode === 'tracks' && browserTarget
+        ? `${browserTarget.kind}:${browserTarget.id}`
+        : null;
     if (navHistory.length > 0) {
       const prev = navHistory[navHistory.length - 1];
       setNavHistory((h) => h.slice(0, -1));
@@ -1396,7 +1647,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       setActiveArtistProfile(prev.activeArtistProfile || null);
       setRightPaneMode(prev.rightPaneMode);
       if (prev.rightPaneMode === 'browse') {
-        focusRightPaneFirstTile();
+        focusRightPaneFirstTile({
+          tileKey: prev.returnTileKey || exitedTileKey,
+          scrollTop: prev.scrollTop,
+        });
       } else {
         focusRightPaneFirstTrack();
       }
@@ -1404,7 +1658,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     }
     if (rightPaneMode === 'tracks' || rightPaneMode === 'artist') {
       setRightPaneMode('browse');
-      focusRightPaneFirstTile();
+      focusRightPaneFirstTile({ tileKey: exitedTileKey });
       return;
     }
     if (browserSearch.trim()) {
@@ -1425,12 +1679,15 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   }, [
     navHistory,
     rightPaneMode,
+    activeArtistProfile,
+    browserTarget,
     browserSearch,
     activeMountRoot,
     browserSourceFilter,
     setBrowserSourceFilter,
     setAppleSubTab,
     setSoundCloudSubTab,
+    setIaSubTab,
     setActiveMountRoot,
     setBrowserSearch,
     setBrowserTarget,
@@ -1453,7 +1710,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       idOrName: string;
       displayName: string;
     }) => {
-      pushCurrentNavState();
+      pushCurrentNavState({
+        returnTileKey: `artist:${params.source}:${params.idOrName}`,
+      });
       setActiveArtistProfile({
         source: params.source,
         idOrName: params.idOrName,
@@ -1465,7 +1724,22 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         localData: null,
       });
       setRightPaneMode('artist');
-      focusRightPaneFirstTile();
+      pendingRightFocusRef.current = null;
+      pendingRightTileRestoreRef.current = null;
+      const rightCol = document.querySelector<HTMLElement>('[data-nav-col="right"]');
+      if (rightCol) {
+        rightCol.scrollTop = 0;
+      }
+      window.setTimeout(() => {
+        const artistTarget =
+          document.querySelector<HTMLElement>(
+            '[data-nav-col="right"] [data-single-song-play="true"]:not([disabled]), [data-nav-col="right"] [data-right-tile="true"]:not([disabled])'
+          ) ||
+          document.querySelector<HTMLElement>('[data-nav-col="right"] button:not([disabled])');
+        if (artistTarget) {
+          applyFocusMarker(artistTarget);
+        }
+      }, 45);
 
       try {
         if (params.source === 'soundcloud') {
@@ -1524,7 +1798,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         );
       }
     },
-    [pushCurrentNavState, focusRightPaneFirstTile, setBrowserTracks, showToast]
+    [pushCurrentNavState, applyFocusMarker, setBrowserTracks, showToast]
   );
 
   const loadMoreArtistTracks = useCallback(() => {
@@ -1537,13 +1811,22 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     ) {
       return;
     }
+    const artistSource = activeArtistProfile.source;
+    const artistDisplayName = activeArtistProfile.displayName;
+    const startedOnLoadMore =
+      document.querySelector<HTMLElement>('[data-simp-active-focus="true"]')?.dataset.loadMore ===
+      'true';
     setActiveArtistProfile((prev) => (prev ? { ...prev, loadingMore: true } : prev));
     fetchSoundCloudNextPage(nextHref)
       .then((res) => {
+        const transferSlot = transferFocusAfterLoadMore(startedOnLoadMore);
         setActiveArtistProfile((prev) => {
           if (!prev || !prev.scData) return prev;
           const seen = new Set(prev.scData.tracks.map((t) => t.uri));
           const added = (res.tracks || []).filter((t) => !seen.has(t.uri));
+          if (transferSlot && added[0]) {
+            transferSlot.firstTileKey = `song:artist:${artistSource}:${artistDisplayName}:${added[0].uri}`;
+          }
           const updatedTracks = [...prev.scData.tracks, ...added];
           return {
             ...prev,
@@ -1559,7 +1842,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       .catch(() => {
         setActiveArtistProfile((prev) => (prev ? { ...prev, loadingMore: false } : prev));
       });
-  }, [activeArtistProfile]);
+  }, [activeArtistProfile, transferFocusAfterLoadMore]);
 
   useEffect(() => {
     const onOpenArtistEvent = (ev: Event) => {
@@ -1582,21 +1865,27 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   // Open a collection, switch the Right Pane to Tracklist view, and focus the first track
   const selectLocalCollection = (target: BrowserTarget) => {
-    pushCurrentNavState();
+    pushCurrentNavState({
+      returnTileKey: `${target.kind}:${target.id}`,
+    });
     setBrowserTarget(target);
     setRightPaneMode('tracks');
     focusRightPaneFirstTrack();
   };
 
   const selectCloudPlaylist = async (pl: AppleCloudPlaylistSummary) => {
-    pushCurrentNavState();
+    pushCurrentNavState({
+      returnTileKey: `cloud_playlist:${pl.id}`,
+    });
     setRightPaneMode('tracks');
     focusRightPaneFirstTrack();
     await handleOpenCloudPlaylist(pl);
   };
 
   const selectSoundCloudPlaylist = async (pl: SoundCloudPlaylistSummary) => {
-    pushCurrentNavState();
+    pushCurrentNavState({
+      returnTileKey: `soundcloud_playlist:${pl.id}`,
+    });
     setRightPaneMode('tracks');
     focusRightPaneFirstTrack();
     await handleOpenSoundCloudPlaylist(pl);
@@ -1615,7 +1904,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     songUri?: string | null;
     fallbackTitle?: string;
   }) => {
-    pushCurrentNavState();
+    pushCurrentNavState({
+      returnTileKey: params.albumId ? `cloud_album:${params.albumId}` : undefined,
+    });
     setRightPaneMode('tracks');
     focusRightPaneFirstTrack();
     await handleOpenFullAppleAlbum(params);
@@ -1656,6 +1947,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   const openIaItem = useCallback(
     async (item: ArchiveItemSummary, watchImmediately = false) => {
+      const preScrollTop =
+        document.querySelector<HTMLElement>('[data-nav-col="right"]')?.scrollTop ?? 0;
       setIaLoading(true);
       try {
         const resp = await fetch(
@@ -1669,7 +1962,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         }
         setActiveIaDetail(detail);
         const itemTracks = detail.tracks || [];
-        pushCurrentNavState();
+        pushCurrentNavState({
+          returnTileKey: `ia_item:${item.identifier}`,
+          scrollTop: preScrollTop,
+        });
         setBrowserTarget({
           kind: 'ia_item',
           id: detail.summary.identifier,

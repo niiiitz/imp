@@ -76,6 +76,7 @@ export function useGamepadNavigation({
   const lastWebGamepadTsRef = useRef<number>(0);
   const lastGamepadInputTsRef = useRef<number>(0);
   const lastBrowserFocusRef = useRef<HTMLElement | null>(null);
+  const lastBrowserColRef = useRef<string | null>(null);
   const preMuteVolumeRef = useRef<number>(0.85);
   const lastActionTsRef = useRef<Record<string, number>>({});
   const lastActionSourceRef = useRef<Record<string, string>>({});
@@ -166,10 +167,21 @@ export function useGamepadNavigation({
     if (el) {
       el.setAttribute('data-simp-active-focus', 'true');
       el.classList.add('simp-gpfocus');
-      if (el.closest('[data-nav-col]')) {
+      const navColEl = el.closest<HTMLElement>('[data-nav-col]');
+      if (navColEl) {
         lastBrowserFocusRef.current = el;
+        lastBrowserColRef.current = navColEl.dataset.navCol || null;
+      } else if (!el.closest('[data-modal-root="true"], [data-osk-root="true"]')) {
+        lastBrowserColRef.current = null;
       }
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (el.dataset.loadMore === 'true') {
+        window.setTimeout(() => {
+          if (el.isConnected && el.getAttribute('data-simp-active-focus') === 'true') {
+            el.click();
+          }
+        }, 40);
+      }
       if (el.closest('[data-nav-col="left"]') && el.dataset.xmbPreview === 'true') {
         window.dispatchEvent(
           new CustomEvent('simp-xmb-left-focus', { detail: { element: el } })
@@ -296,8 +308,27 @@ export function useGamepadNavigation({
         // If the user is hovering over an interactive node with a VR laser pointer / mouse when they deflect
         // the thumbstick, seed spatial focus directly on that hovered element so focus continues seamlessly.
         const hoveredNode = nodes.find((el) => el.matches(':hover'));
+        const wasInRightCol =
+          !isModalOpen &&
+          !oskTarget &&
+          (Boolean(active?.closest('[data-nav-col="right"]')) ||
+            Boolean(lastBrowserFocusRef.current?.closest('[data-nav-col="right"]')) ||
+            lastBrowserColRef.current === 'right');
+        const rightPrimaryNodes = wasInRightCol
+          ? nodes.filter(
+              (n) =>
+                Boolean(n.closest('[data-nav-col="right"]')) &&
+                (n.dataset.rightTile === 'true' ||
+                  n.dataset.singleSongPlay === 'true' ||
+                  n.dataset.rightTrack === 'true') &&
+                n.dataset.loadMore !== 'true'
+            )
+          : [];
         const preferred =
           hoveredNode ||
+          (rightPrimaryNodes.length > 0
+            ? rightPrimaryNodes[rightPrimaryNodes.length - 1]
+            : null) ||
           nodes.find((el) => el.dataset.defaultFocus === 'true') ||
           nodes[0];
         applyFocusMarker(preferred);

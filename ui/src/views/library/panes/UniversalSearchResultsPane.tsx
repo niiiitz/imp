@@ -416,8 +416,10 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                                       {scCatalogSearchResults.next_tracks_href && (
                                         <button
                                           data-right-tile="true"
+                                          data-focusable="true"
+                                          data-load-more="true"
+                                          aria-busy={scLoadingMore}
                                           onClick={loadMoreScSearch}
-                                          disabled={scLoadingMore}
                                           style={{
                                             minHeight: 40,
                                             padding: '8px 16px',
@@ -470,8 +472,10 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                               {iaSearchHasMore && (
                                 <button
                                   data-right-tile="true"
+                                  data-focusable="true"
+                                  data-load-more="true"
+                                  aria-busy={iaSearchLoadingMore}
                                   onClick={loadMoreIaSearch}
-                                  disabled={iaSearchLoadingMore}
                                   style={{
                                     minHeight: 40,
                                     padding: '8px 16px',
