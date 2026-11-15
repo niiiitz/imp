@@ -222,8 +222,12 @@ fi
 "${CARGO_BIN}" build --release -p simp --offline
 BUILT_BIN="${REPO_ROOT}/target/release/simp"
 
-echo "3/5 Generating macOS SIMP.icns icon set (Apple HIG 824x824 squircle in 1024x1024 canvas)..."
-ICON_SRC="${REPO_ROOT}/ui/public/simp-icon-dark.png"
+echo "3/5 Generating macOS SIMP.icns icon set (Apple HIG 1024x1024 rounded-squircle master)..."
+if [[ -f "${REPO_ROOT}/ui/public/simp-icon-macos-squircle.png" ]]; then
+  ICON_SRC="${REPO_ROOT}/ui/public/simp-icon-macos-squircle.png"
+else
+  ICON_SRC="${REPO_ROOT}/ui/public/simp-icon-dark.png"
+fi
 ICONSET_DIR="${REPO_ROOT}/dist/SIMP.iconset"
 PADDED_MASTER="${REPO_ROOT}/dist/.simp-macos-master-1024.png"
 rm -rf "${ICONSET_DIR}" "${PADDED_MASTER}" "${APP_BUNDLE}" "${ZIP_ARCHIVE}"
@@ -231,7 +235,10 @@ mkdir -p "${ICONSET_DIR}" \
   "${APP_BUNDLE}/Contents/MacOS" \
   "${APP_BUNDLE}/Contents/Resources/ui"
 
-ICON_SRC="${ICON_SRC}" PADDED_MASTER="${PADDED_MASTER}" swift - <<'SWIFT'
+if [[ -f "${REPO_ROOT}/ui/public/simp-icon-macos-squircle.png" ]]; then
+  cp "${ICON_SRC}" "${PADDED_MASTER}"
+else
+  ICON_SRC="${ICON_SRC}" PADDED_MASTER="${PADDED_MASTER}" swift - <<'SWIFT'
 import AppKit
 import Foundation
 
@@ -310,6 +317,7 @@ guard let pngData = rep.representation(using: .png, properties: [:]) else {
 }
 try pngData.write(to: URL(fileURLWithPath: outPath))
 SWIFT
+fi
 
 for sz in 16 32 128 256 512; do
   sips -z "${sz}" "${sz}" "${PADDED_MASTER}" --out "${ICONSET_DIR}/icon_${sz}x${sz}.png" >/dev/null

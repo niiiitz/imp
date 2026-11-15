@@ -133,11 +133,16 @@ fn resolve_dock_icon_path() -> Option<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
             candidates.push(exe_dir.join("../Resources/SIMP.icns"));
+            candidates.push(exe_dir.join("../Resources/ui/simp-icon-macos-squircle.png"));
             candidates.push(exe_dir.join("../../dist/SIMP.app/Contents/Resources/SIMP.icns"));
+            candidates.push(exe_dir.join("../../ui/public/simp-icon-macos-squircle.png"));
+            candidates.push(exe_dir.join("../../ui/dist/simp-icon-macos-squircle.png"));
         }
     }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("dist/SIMP.app/Contents/Resources/SIMP.icns"));
+        candidates.push(cwd.join("ui/public/simp-icon-macos-squircle.png"));
+        candidates.push(cwd.join("ui/dist/simp-icon-macos-squircle.png"));
     }
     if let Some(icns) = candidates.into_iter().find(|p| p.is_file()) {
         return Some(icns);
