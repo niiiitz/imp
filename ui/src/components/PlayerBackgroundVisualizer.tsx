@@ -60,6 +60,15 @@ export {
   type VisualizerMode,
 };
 
+// Shared scene rotation & simulation clock across fullscreen PlayerView and embedded LibraryMiniPlayerBar
+// so switching views (clicking the mini-visualizer, pressing L1/R1, or entering screensaver) preserves
+// the exact active scene and animation phase without resetting to index 0 (glyph) or double-advancing.
+let sharedCycleIndex = 0;
+let sharedPrevTrackUri: string | undefined = undefined;
+let sharedPrevTrackLogicalKey = '';
+let sharedSimTimeSec = 0;
+let sharedPhaseAccum = 0;
+
 const UNIFIED_SCENE_RENDERERS: Record<
   VisualizerEngine,
   (sceneCtx: SceneRenderContext, rt: ClassicSceneRuntimeRefs) => void
@@ -96,6 +105,7 @@ interface Props {
   hasLyrics?: boolean;
   lyricsMarqueeFallback?: string | null;
   hidden?: boolean;
+  embedded?: boolean;
 }
 
 export const PlayerBackgroundVisualizer: React.FC<Props> = ({
@@ -116,6 +126,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   hasLyrics = false,
   lyricsMarqueeFallback = null,
   hidden = false,
+  embedded = false,
 }) => {
   // Strictly enforce SoundCloud comment user attribution before any visualizer consumer sees it
   const activeComment = isValidAttributedComment(rawActiveComment) ? rawActiveComment : null;
@@ -209,15 +220,15 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   const rowCorruptMaskRef = useRef<Uint8Array>(new Uint8Array(GRID_ROWS));
   const glitchTimerRef = useRef<number>(0);
   const glitchSeedRef = useRef<number>(1337);
-  const phaseAccumRef = useRef<number>(0);
-  const simTimeSecRef = useRef<number>(0);
+  const phaseAccumRef = useRef<number>(sharedPhaseAccum);
+  const simTimeSecRef = useRef<number>(sharedSimTimeSec);
   const lastRenderedModeRef = useRef<VisualizerMode | null>(null);
 
   // Track transition impulse (1.0 -> 0.0 over ~1.25s when track.uri or mode changes)
   const prevTrackUriRef = useRef<string | undefined>(track?.uri);
   const prevTrackLogicalKeyRef = useRef<string>("");
   const prevModeRef = useRef<VisualizerMode>(mode);
-  const cycleIndexRef = useRef<number>(0);
+  const cycleIndexRef = useRef<number>(sharedCycleIndex);
   const transitionImpulseRef = useRef<number>(0);
 
   // Live audio spectrum + Beat-Drop & Build-Up Detector state
@@ -420,14 +431,16 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       return t.uri;
     };
     const nextLogicalKey = normalizeTrackLogicalKey(track);
-    const hadPreviousTrack = Boolean(prevTrackUriRef.current);
+    const hadPreviousTrack = Boolean(sharedPrevTrackUri);
     const uriChanged = Boolean(
       track?.uri &&
-        track.uri !== prevTrackUriRef.current &&
-        (!hadPreviousTrack || nextLogicalKey !== prevTrackLogicalKeyRef.current)
+        track.uri !== sharedPrevTrackUri &&
+        (!hadPreviousTrack || nextLogicalKey !== sharedPrevTrackLogicalKey)
     );
     const modeChanged = mode !== prevModeRef.current && mode !== 'off';
     if (track?.uri) {
+      sharedPrevTrackUri = track.uri;
+      sharedPrevTrackLogicalKey = nextLogicalKey;
       prevTrackUriRef.current = track.uri;
       prevTrackLogicalKeyRef.current = nextLogicalKey;
     }
@@ -435,11 +448,11 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       const pool =
         enabledScenesRef.current.length > 0 ? enabledScenesRef.current : VISUALIZER_ENGINES;
       if (mode === 'shuffle' && pool.length > 1) {
-        const currentIdx = cycleIndexRef.current % pool.length;
+        const currentIdx = sharedCycleIndex % pool.length;
         const offset = 1 + Math.floor(Math.random() * (pool.length - 1));
-        cycleIndexRef.current = (currentIdx + offset) % pool.length;
+        sharedCycleIndex = (currentIdx + offset) % pool.length;
       } else {
-        cycleIndexRef.current = (cycleIndexRef.current + 1) % pool.length;
+        sharedCycleIndex = (sharedCycleIndex + 1) % pool.length;
       }
       // Clear any lingering glyph mutations from the previous track
       for (const p of mutationPatchesRef.current) {
@@ -700,10 +713,18 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
     }
 
     // When playback is paused, freeze the animation completely at 0 FPS.
-    // Only render a single static preview frame if the canvas hasn't rendered this mode yet.
-    if (!isPlaying && lastRenderedModeRef.current === mode) {
+    // Only render a single static preview frame if the canvas hasn't rendered this mode/scene yet.
+    if (
+      !isPlaying &&
+      lastRenderedModeRef.current === mode &&
+      cycleIndexRef.current === sharedCycleIndex
+    ) {
       return;
     }
+
+    simTimeSecRef.current = sharedSimTimeSec;
+    phaseAccumRef.current = sharedPhaseAccum;
+    cycleIndexRef.current = sharedCycleIndex;
 
     let rafId = 0;
     let frameCount = 0;
@@ -732,6 +753,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         const dt = Math.min(0.08, Math.max(0.008, elapsedMs * 0.001));
         lastFramePerf = nowPerf;
         simTimeSecRef.current += dt;
+        sharedSimTimeSec = simTimeSecRef.current;
       } else {
         lastFramePerf = nowPerf;
       }
@@ -871,6 +893,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       // Music-coupled phase accumulator
       const bpmFactor = Math.max(0.6, Math.min(1.6, (bpmRef.current || 120) / 120));
       phaseAccumRef.current += dt * (14 * bpmFactor + subBass * 38 + beatPulseRef.current * 24);
+      sharedPhaseAccum = phaseAccumRef.current;
 
       // Decay beat pulse, glitch tear timer & transition shatter impulse
       beatPulseRef.current = Math.max(0, beatPulseRef.current - dt * 2.4);
@@ -900,7 +923,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       const activeMode: VisualizerEngine = preferredSceneRef.current
         ? preferredSceneRef.current
         : modeRef.current === 'cycle' || modeRef.current === 'shuffle'
-          ? pool[cycleIndexRef.current % pool.length]
+          ? pool[sharedCycleIndex % pool.length]
           : (modeRef.current as VisualizerEngine);
 
       if (lastReportedEngineRef.current !== activeMode) {
@@ -1136,6 +1159,25 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
 
   if (mode === 'off') {
     return null;
+  }
+
+  if (embedded) {
+    return (
+      <canvas
+        ref={canvasRef}
+        width={CANVAS_W * RENDER_SCALE}
+        height={CANVAS_H * RENDER_SCALE}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'block',
+          objectFit: 'cover',
+          pointerEvents: 'none',
+          opacity: isPlaying ? 0.96 : 0.48,
+          transition: 'opacity 320ms ease',
+        }}
+      />
+    );
   }
 
   return (

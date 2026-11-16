@@ -790,6 +790,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       try {
         window.localStorage.setItem('simp.visualizer_mode', nextMode);
       } catch {}
+      window.dispatchEvent(new CustomEvent('simp-viz-config-changed'));
       const found = VISUALIZER_MODES.find((m) => m.id === nextMode);
       if (found) {
         showToast?.(`Visualizer: ${found.label}`);
@@ -806,6 +807,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       }
       const next = exists ? prev.filter((e) => e !== engine) : [...prev, engine];
       saveEnabledVisualizerScenes(next);
+      window.dispatchEvent(new CustomEvent('simp-viz-config-changed'));
       return next;
     });
   }, []);
@@ -814,6 +816,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const next = engines.length > 0 ? engines : [...VISUALIZER_ENGINES];
     setEnabledVizScenes(next);
     saveEnabledVisualizerScenes(next);
+    window.dispatchEvent(new CustomEvent('simp-viz-config-changed'));
   }, []);
 
   const toggleLyricsKaraoke = useCallback(() => {

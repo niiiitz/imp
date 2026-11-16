@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   defaultSimpClient,
   SimpStateSnapshot,
@@ -7,6 +7,23 @@ import {
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { getSourceThemeForTrack } from '../../theme/sourceTheme';
 import { ImpIcon } from '../../components/icons/ImpIcon';
+import {
+  loadEnabledVisualizerScenes,
+  PlayerBackgroundVisualizer,
+  VISUALIZER_MODES,
+  type VisualizerEngine,
+  type VisualizerMode,
+} from '../../components/PlayerBackgroundVisualizer';
+
+function readSavedVizMode(): VisualizerMode {
+  try {
+    const saved = window.localStorage.getItem('simp.visualizer_mode') as VisualizerMode | null;
+    if (saved && VISUALIZER_MODES.some((m) => m.id === saved)) {
+      return saved;
+    }
+  } catch {}
+  return 'cycle';
+}
 
 export interface LibraryMiniPlayerBarProps {
   track: TrackMetadata | null;
@@ -156,6 +173,24 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   setPowerModalOpen,
 }) => {
   const theme = getSourceThemeForTrack(track?.uri, track?.source);
+  const [vizMode, setVizMode] = useState<VisualizerMode>(() => readSavedVizMode());
+  const [enabledVizScenes, setEnabledVizScenes] = useState<VisualizerEngine[]>(() =>
+    loadEnabledVisualizerScenes()
+  );
+
+  useEffect(() => {
+    const syncVizConfig = () => {
+      setVizMode(readSavedVizMode());
+      setEnabledVizScenes(loadEnabledVisualizerScenes());
+    };
+    window.addEventListener('simp-viz-config-changed', syncVizConfig);
+    window.addEventListener('storage', syncVizConfig);
+    return () => {
+      window.removeEventListener('simp-viz-config-changed', syncVizConfig);
+      window.removeEventListener('storage', syncVizConfig);
+    };
+  }, []);
+
   const isVideoTrack = Boolean(
     track &&
       (track.source === 'ia_video' ||
@@ -200,8 +235,8 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
       src={track.art_url}
       alt=""
       style={{
-        width: 28,
-        height: 28,
+        width: 24,
+        height: 24,
         borderRadius: 6,
         objectFit: 'cover',
         border: `1px solid ${theme.accent}`,
@@ -211,8 +246,8 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   ) : (
     <div
       style={{
-        width: 28,
-        height: 28,
+        width: 24,
+        height: 24,
         borderRadius: 6,
         background: '#11141e',
         border: `1px solid ${track ? theme.accent : '#2a3142'}`,
@@ -223,15 +258,15 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
       }}
     >
       {track?.source === 'apple_music' ? (
-        <ImpIcon name="apple" size={14} color="#fda4af" />
+        <ImpIcon name="apple" size={12} color="#fda4af" />
       ) : track?.source === 'soundcloud' ? (
-        <ImpIcon name="soundcloud" size={11} color="#ffffff" />
+        <ImpIcon name="soundcloud" size={10} color="#ffffff" />
       ) : track?.source === 'internet_archive' || track?.source === 'ia_video' ? (
-        <ImpIcon name="archive" size={13} color="#6ee7b7" />
+        <ImpIcon name="archive" size={12} color="#6ee7b7" />
       ) : track ? (
-        <ImpIcon name="music" size={13} color="#d4d4dc" />
+        <ImpIcon name="music" size={12} color="#d4d4dc" />
       ) : (
-        <ImpIcon name="disc" size={14} color="#9ca3af" />
+        <ImpIcon name="disc" size={13} color="#9ca3af" />
       )}
     </div>
   );
@@ -302,7 +337,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         </button>
       </div>
 
-      {/* Column 2 — Option A: Art + MiniVisualizer Portal Dock ([L1 Player | Art] over [MiniVisualizer]) */}
+      {/* Column 2 — 16:9 Mini-Visualizer Monitor ([L1] corner badge in Dual Mode) */}
       <button
         type="button"
         data-row-aux="true"
@@ -315,57 +350,65 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             : 'Open Player / Video Stage'
         }
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 4,
-          padding: '4px 7px',
-          borderRadius: 9,
-          background: '#0a0a0e',
+          position: 'relative',
+          width: 104,
+          height: 58,
+          alignSelf: 'center',
+          padding: 0,
+          borderRadius: 8,
+          overflow: 'hidden',
+          background: '#05060a',
           border: `1px solid ${snap?.is_playing && track ? theme.accentBorder : '#22222c'}`,
           cursor: 'pointer',
           flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
         }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            width: '100%',
-          }}
-        >
-          {!desktopMode && (
-            <span
-              className="simp-gp-badge"
-              style={{
-                padding: '1px 5px',
-                borderRadius: 5,
-                background: '#14141e',
-                border: '1px solid #2a2a38',
-                color: '#9ca3af',
-                fontSize: 9.5,
-                fontFamily: 'monospace',
-                fontWeight: 800,
-              }}
-            >
-              L1
-            </span>
-          )}
-          {dockArtworkThumb}
-        </div>
-        <MiniSpectrumCanvas
-          isPlaying={Boolean(snap?.is_playing && track)}
-          hidden={hidden}
-          trackUri={track?.uri || null}
-          accentColor={theme.accent}
-          idleColor={track ? theme.accentBorder : '#242938'}
-        />
+        {!desktopMode && (
+          <span
+            className="simp-gp-badge"
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              zIndex: 2,
+              padding: '1px 5px',
+              borderRadius: 5,
+              background: 'rgba(14, 16, 24, 0.85)',
+              border: '1px solid #2a2a38',
+              color: '#9ca3af',
+              fontSize: 9.5,
+              fontFamily: 'monospace',
+              fontWeight: 800,
+            }}
+          >
+            L1
+          </span>
+        )}
+        {vizMode !== 'off' && !isVideoTrack ? (
+          <PlayerBackgroundVisualizer
+            embedded
+            mode={vizMode}
+            enabledScenes={enabledVizScenes}
+            isPlaying={Boolean(snap?.is_playing && track)}
+            track={track}
+            artUrl={track?.art_url || null}
+            hidden={hidden}
+          />
+        ) : (
+          <MiniSpectrumCanvas
+            isPlaying={Boolean(snap?.is_playing && track)}
+            hidden={hidden}
+            trackUri={track?.uri || null}
+            accentColor={theme.accent}
+            idleColor={track ? theme.accentBorder : '#242938'}
+          />
+        )}
       </button>
 
-      {/* Column 3 — Flexible Center (Title + Metadata on Row 1, Scrub Bar on Row 2) */}
+      {/* Column 3 — Flexible Center (Artwork + Title + Metadata on Row 1, Scrub Bar on Row 2) */}
       <div
         style={{
           display: 'flex',
@@ -381,21 +424,13 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             height: 29,
             display: 'flex',
             alignItems: 'center',
-            gap: 7,
+            gap: 8,
             minWidth: 0,
           }}
         >
           {track ? (
             <>
-              <span
-                style={{
-                  color: snap?.is_playing ? theme.accent : '#94a3b8',
-                  fontSize: 12,
-                  flexShrink: 0,
-                }}
-              >
-                {snap?.is_playing ? '▶' : '⏸'}
-              </span>
+              {dockArtworkThumb}
               <span
                 style={{
                   fontSize: 12.5,
@@ -428,17 +463,20 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               )}
             </>
           ) : (
-            <span
-              style={{
-                color: '#64748b',
-                fontSize: 12,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              No track playing — select any album, playlist, or song below
-            </span>
+            <>
+              {dockArtworkThumb}
+              <span
+                style={{
+                  color: '#64748b',
+                  fontSize: 12,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                No track playing — select any album, playlist, or song below
+              </span>
+            </>
           )}
         </div>
 
