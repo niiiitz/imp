@@ -3252,9 +3252,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          gap: 5,
-          minHeight: 76,
-          padding: '7px 14px',
+          gap: 4,
+          minHeight: 84,
+          padding: '6px 14px',
           background: '#06070b',
           borderRight: '1px solid #16161c',
           borderBottom: `1px solid ${browserSearch ? libTheme.accentBorder : '#181a24'}`,
@@ -3299,7 +3299,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             }}
             style={{
               width: '100%',
-              minHeight: 29,
+              minHeight: 26,
               padding: browserSearch ? '0 58px 0 32px' : '0 34px 0 32px',
               borderRadius: 8,
               background: '#08080c',

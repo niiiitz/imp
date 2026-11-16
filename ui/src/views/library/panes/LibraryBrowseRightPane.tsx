@@ -575,7 +575,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 >
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 15, fontWeight: 800, color: '#bfeaf5' }}>
-                      {activeMountPlaceObj.is_online ? '🟢' : '⚫'} 💾 {activeMountPlaceObj.label}
+                      💾 {activeMountPlaceObj.label}
                     </div>
                     <div
                       style={{

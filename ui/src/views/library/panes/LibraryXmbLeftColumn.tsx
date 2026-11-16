@@ -75,7 +75,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
     accent: 'teal' | 'apple' | 'soundcloud' | 'archive';
   }> = [
     { id: 'all', label: 'All', icon: 'globe', accent: 'teal' },
-    { id: 'local', label: 'Local', icon: 'disc', accent: 'teal' },
+    { id: 'local', label: 'Local', icon: 'local', accent: 'teal' },
     ...(sourceVisibility.apple_music &&
     (snap?.apple_authenticated || appleAuthState === 'reauth_required')
       ? [
@@ -109,151 +109,181 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
       : []),
   ];
 
+  const splitRows =
+    sourceTabs.some((t) => t.id === 'internet_archive') || sourceTabs.length > 3;
+  const topRowTabs = splitRows
+    ? sourceTabs.filter((t) => t.id !== 'soundcloud' && t.id !== 'internet_archive')
+    : sourceTabs;
+  const bottomRowTabs = splitRows
+    ? sourceTabs.filter((t) => t.id === 'soundcloud' || t.id === 'internet_archive')
+    : [];
+  const pillRows = bottomRowTabs.length > 0 ? [topRowTabs, bottomRowTabs] : [topRowTabs];
+  const pillMinHeight = bottomRowTabs.length > 0 ? 24 : 28;
+
+  const renderSourcePill = (tab: (typeof sourceTabs)[number]) => {
+    const active =
+      tab.id === 'all'
+        ? selectedSources.length === 0 && browserSourceFilter === 'all'
+        : selectedSources.length > 0
+        ? selectedSources.includes(tab.id)
+        : browserSourceFilter === tab.id;
+    return (
+      <button
+        key={tab.id}
+        onClick={() => {
+          pushCurrentNavState();
+          if (tab.id === 'all') {
+            setSelectedSources([]);
+            setBrowserSourceFilterRaw('all');
+            setAppleSubTab('pinned');
+            setSoundCloudSubTab('pinned');
+            setIaSubTab('pinned');
+            setRightPaneMode('browse');
+            return;
+          }
+          const currentSet =
+            selectedSources.length > 0
+              ? selectedSources
+              : browserSourceFilter !== 'all'
+              ? [browserSourceFilter]
+              : [];
+          const exists = currentSet.includes(tab.id);
+          const nextSet = exists
+            ? currentSet.filter((s) => s !== tab.id)
+            : [...currentSet, tab.id];
+
+          setSelectedSources(nextSet);
+          if (nextSet.length === 0) {
+            setBrowserSourceFilterRaw('all');
+            setAppleSubTab('pinned');
+            setSoundCloudSubTab('pinned');
+            setIaSubTab('pinned');
+            setRightPaneMode('browse');
+          } else if (nextSet.length === 1) {
+            const single = nextSet[0];
+            setBrowserSourceFilterRaw(single);
+            setImpFypActive(false);
+            if (single === 'local') {
+              setAppleSubTab('pinned');
+              setSoundCloudSubTab('pinned');
+              setIaSubTab('pinned');
+              setRightPaneMode('browse');
+            } else if (single === 'soundcloud') {
+              setActiveMountRoot(null);
+              if (soundCloudSubTab === 'pinned') {
+                setSoundCloudSubTab('trending');
+              }
+              setRightPaneMode('browse');
+            } else if (single === 'apple_music') {
+              setActiveMountRoot(null);
+              if (appleSubTab === 'pinned') {
+                setAppleSubTab('for_you');
+              }
+              setRightPaneMode('browse');
+            } else if (single === 'internet_archive') {
+              setActiveMountRoot(null);
+              if (iaSubTab === 'pinned') {
+                setIaSubTab('trending');
+                setIaSubFilter('all');
+              }
+              setRightPaneMode('browse');
+            }
+          } else {
+            // Multi-source mix: show unified Imp Library / Search filtered to selected sources
+            setBrowserSourceFilterRaw('all');
+            setActiveMountRoot(null);
+            setAppleSubTab('pinned');
+            setSoundCloudSubTab('pinned');
+            setIaSubTab('pinned');
+            setRightPaneMode('browse');
+          }
+        }}
+        style={{
+          flex: '1 1 0%',
+          minWidth: 0,
+          minHeight: pillMinHeight,
+          padding: '0 7px',
+          borderRadius: 8,
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+          background: active
+            ? tab.accent === 'apple'
+              ? '#28111b'
+              : tab.accent === 'soundcloud'
+              ? '#2c140a'
+              : tab.accent === 'archive'
+              ? '#261a0b'
+              : '#0f222a'
+            : '#0a0a0e',
+          border: active
+            ? tab.accent === 'apple'
+              ? '1px solid #fa243c'
+              : tab.accent === 'soundcloud'
+              ? '1px solid #ea580c'
+              : tab.accent === 'archive'
+              ? '1px solid #f59e0b'
+              : '1px solid #2aa3c4'
+            : '1px solid #1e1e26',
+          color: active
+            ? tab.accent === 'apple'
+              ? '#fecdd3'
+              : tab.accent === 'soundcloud'
+              ? '#fdba74'
+              : tab.accent === 'archive'
+              ? '#fde68a'
+              : '#bfeaf5'
+            : '#9ca3af',
+          fontSize: 11,
+          fontWeight: 800,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+        }}
+      >
+        {tab.id === 'local' ? (
+          <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
+        ) : (
+          <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
+        )}
+        <span
+          style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {tab.label}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div
       style={{
         display: 'flex',
-        alignItems: 'stretch',
+        flexDirection: 'column',
         gap: 4,
         width: '100%',
         minWidth: 0,
       }}
     >
-      {sourceTabs.map((tab) => {
-        const active =
-          tab.id === 'all'
-            ? selectedSources.length === 0 && browserSourceFilter === 'all'
-            : selectedSources.length > 0
-            ? selectedSources.includes(tab.id)
-            : browserSourceFilter === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={() => {
-              pushCurrentNavState();
-              if (tab.id === 'all') {
-                setSelectedSources([]);
-                setBrowserSourceFilterRaw('all');
-                setAppleSubTab('pinned');
-                setSoundCloudSubTab('pinned');
-                setIaSubTab('pinned');
-                setRightPaneMode('browse');
-                return;
-              }
-              const currentSet =
-                selectedSources.length > 0
-                  ? selectedSources
-                  : browserSourceFilter !== 'all'
-                  ? [browserSourceFilter]
-                  : [];
-              const exists = currentSet.includes(tab.id);
-              const nextSet = exists
-                ? currentSet.filter((s) => s !== tab.id)
-                : [...currentSet, tab.id];
-
-              setSelectedSources(nextSet);
-              if (nextSet.length === 0) {
-                setBrowserSourceFilterRaw('all');
-                setAppleSubTab('pinned');
-                setSoundCloudSubTab('pinned');
-                setIaSubTab('pinned');
-                setRightPaneMode('browse');
-              } else if (nextSet.length === 1) {
-                const single = nextSet[0];
-                setBrowserSourceFilterRaw(single);
-                setImpFypActive(false);
-                if (single === 'local') {
-                  setAppleSubTab('pinned');
-                  setSoundCloudSubTab('pinned');
-                  setIaSubTab('pinned');
-                  setRightPaneMode('browse');
-                } else if (single === 'soundcloud') {
-                  setActiveMountRoot(null);
-                  if (soundCloudSubTab === 'pinned') {
-                    setSoundCloudSubTab('trending');
-                  }
-                  setRightPaneMode('browse');
-                } else if (single === 'apple_music') {
-                  setActiveMountRoot(null);
-                  if (appleSubTab === 'pinned') {
-                    setAppleSubTab('for_you');
-                  }
-                  setRightPaneMode('browse');
-                } else if (single === 'internet_archive') {
-                  setActiveMountRoot(null);
-                  if (iaSubTab === 'pinned') {
-                    setIaSubTab('trending');
-                    setIaSubFilter('all');
-                  }
-                  setRightPaneMode('browse');
-                }
-              } else {
-                // Multi-source mix: show unified Imp Library / Search filtered to selected sources
-                setBrowserSourceFilterRaw('all');
-                setActiveMountRoot(null);
-                setAppleSubTab('pinned');
-                setSoundCloudSubTab('pinned');
-                setIaSubTab('pinned');
-                setRightPaneMode('browse');
-              }
-            }}
-            style={{
-              flex: '1 1 auto',
-              minWidth: 0,
-              minHeight: 29,
-              padding: '0 7px',
-              borderRadius: 8,
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
-              background: active
-                ? tab.accent === 'apple'
-                  ? '#28111b'
-                  : tab.accent === 'soundcloud'
-                  ? '#2c140a'
-                  : tab.accent === 'archive'
-                  ? '#261a0b'
-                  : '#0f222a'
-                : '#0a0a0e',
-              border: active
-                ? tab.accent === 'apple'
-                  ? '1px solid #fa243c'
-                  : tab.accent === 'soundcloud'
-                  ? '1px solid #ea580c'
-                  : tab.accent === 'archive'
-                  ? '1px solid #f59e0b'
-                  : '1px solid #2aa3c4'
-                : '1px solid #1e1e26',
-              color: active
-                ? tab.accent === 'apple'
-                  ? '#fecdd3'
-                  : tab.accent === 'soundcloud'
-                  ? '#fdba74'
-                  : tab.accent === 'archive'
-                  ? '#fde68a'
-                  : '#bfeaf5'
-                : '#9ca3af',
-              fontSize: 11,
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-            }}
-          >
-            <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
-            <span
-              style={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tab.label}
-            </span>
-          </button>
-        );
-      })}
+      {pillRows.map((rowTabs, rowIdx) => (
+        <div
+          key={rowIdx}
+          style={{
+            display: 'flex',
+            alignItems: 'stretch',
+            gap: 4,
+            width: '100%',
+            minWidth: 0,
+          }}
+        >
+          {rowTabs.map(renderSourcePill)}
+        </div>
+      ))}
     </div>
   );
 };
@@ -1078,7 +1108,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         flex: 1,
                       }}
                     >
-                      {m.is_online ? '🟢' : '⚫'} 💾 Local: {m.label} ({m.track_count})
+                      💾 Local: {m.label}{!m.is_online ? ' (Offline)' : ''} ({m.track_count})
                     </span>
                     <span
                       style={{
@@ -1576,11 +1606,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   {isApple ? (
                     <AppleMusicLogo size={11} />
                   ) : (
-                    <ImpIcon
-                      name="disc"
-                      size={11}
-                      color={alb.steam_app_id != null ? '#a78bfa' : '#34d399'}
-                    />
+                    <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
                   )}
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {cleanCollectionTitle(alb.title)}
