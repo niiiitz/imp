@@ -105,9 +105,19 @@ rel_body = notes
 if not notes_file and "body" in rel and rel["body"]:
     rel_body = rel["body"]
 
+try:
+    cur_branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True
+    ).strip()
+except Exception:
+    cur_branch = ""
+target_commitish = os.environ.get("SIMP_TARGET_COMMITISH", "").strip() or (
+    cur_branch if cur_branch and cur_branch != "HEAD" else "main"
+)
+
 rel_payload = {
     "tag_name": tag,
-    "target_commitish": "main",
+    "target_commitish": target_commitish,
     "name": f"SIMP {tag}",
     "body": rel_body,
     "draft": False,

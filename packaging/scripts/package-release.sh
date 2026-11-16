@@ -141,6 +141,35 @@ if os.path.isfile(pbx_path):
         with open(pbx_path, "w", encoding="utf-8") as f:
             f.write(pbx_next)
 
+# 7. Sync src-tauri/tauri.conf.json version
+tauri_path = "src-tauri/tauri.conf.json"
+if os.path.isfile(tauri_path):
+    with open(tauri_path, "r", encoding="utf-8") as f:
+        tauri_src = f.read()
+    tauri_next = re.sub(
+        r'("version"\s*:\s*)"[^"]+"',
+        rf'\1"{raw_ver}"',
+        tauri_src,
+        count=1,
+    )
+    if tauri_next != tauri_src:
+        with open(tauri_path, "w", encoding="utf-8") as f:
+            f.write(tauri_next)
+
+# 8. Sync ui/index.html favicon cache-busters
+html_path = "ui/index.html"
+if os.path.isfile(html_path):
+    with open(html_path, "r", encoding="utf-8") as f:
+        html_src = f.read()
+    html_next = re.sub(
+        r'(\.(?:ico|png)\?v=)[^"]+',
+        rf'\g<1>{raw_ver}',
+        html_src,
+    )
+    if html_next != html_src:
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_next)
+
 print(f"v{raw_ver}", end="")
 PY
 )"
