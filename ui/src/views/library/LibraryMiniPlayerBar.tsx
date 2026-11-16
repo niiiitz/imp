@@ -15,6 +15,20 @@ export interface LibraryMiniPlayerBarProps {
   desktopMode?: boolean;
   onReturnToPlayer: () => void;
   onTriggerScreensaver?: () => void;
+  applyVolume: (nextVol: number) => void;
+  currentVolume: number;
+  volumePopoverOpen: boolean;
+  setVolumePopoverOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isPlaying: boolean;
+  volPct: number;
+  brightnessPopoverOpen: boolean;
+  setBrightnessPopoverOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  brightnessPct: number;
+  setBrightnessPct: React.Dispatch<React.SetStateAction<number>>;
+  sourceModalOpen: boolean;
+  powerModalOpen: boolean;
+  setSourceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setPowerModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const MiniSpectrumCanvas: React.FC<{
@@ -48,8 +62,8 @@ const MiniSpectrumCanvas: React.FC<{
     if (!ctx) return;
 
     const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
-    const logicalW = 96;
-    const logicalH = 26;
+    const logicalW = 84;
+    const logicalH = 22;
     if (canvas.width !== logicalW * dpr || canvas.height !== logicalH * dpr) {
       canvas.width = logicalW * dpr;
       canvas.height = logicalH * dpr;
@@ -61,9 +75,9 @@ const MiniSpectrumCanvas: React.FC<{
       ctx.clearRect(0, 0, logicalW, logicalH);
 
       const barCount = 16;
-      const barW = 4;
-      const gap = 2;
-      const startX = 1;
+      const barW = 3.5;
+      const gap = 1.6;
+      const startX = 2;
       const now = performance.now();
       const usingFallback = playing && now - lastSpecPerfRef.current > 450;
       const t = now * 0.001;
@@ -81,9 +95,9 @@ const MiniSpectrumCanvas: React.FC<{
         const next = playing ? prev + (target - prev) * (target > prev ? 0.38 : 0.16) : 0;
         curBandsRef.current[i] = next;
 
-        const barH = playing ? Math.max(2.5, next * (logicalH - 4)) : 2.5;
+        const barH = playing ? Math.max(2, next * (logicalH - 3)) : 2;
         const x = startX + i * (barW + gap);
-        const y = logicalH - 2 - barH;
+        const y = logicalH - 1.5 - barH;
         ctx.fillStyle = playing ? accentColor : idleColor;
         ctx.beginPath();
         ctx.roundRect(x, y, barW, barH, 1.5);
@@ -110,8 +124,8 @@ const MiniSpectrumCanvas: React.FC<{
     <canvas
       ref={canvasRef}
       style={{
-        width: 96,
-        height: 26,
+        width: 84,
+        height: 22,
         display: 'block',
         pointerEvents: 'none',
       }}
@@ -126,6 +140,20 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   desktopMode = false,
   onReturnToPlayer,
   onTriggerScreensaver,
+  applyVolume,
+  currentVolume,
+  volumePopoverOpen,
+  setVolumePopoverOpen,
+  isPlaying,
+  volPct,
+  brightnessPopoverOpen,
+  setBrightnessPopoverOpen,
+  brightnessPct,
+  setBrightnessPct,
+  sourceModalOpen,
+  powerModalOpen,
+  setSourceModalOpen,
+  setPowerModalOpen,
 }) => {
   const theme = getSourceThemeForTrack(track?.uri, track?.source);
   const isVideoTrack = Boolean(
@@ -147,369 +175,734 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
     }
   };
 
-  const openInterfaceOptions = () => {
-    window.dispatchEvent(
-      new CustomEvent('simp-select-category-focus', { detail: { category: 'interface' } })
-    );
+  const openSelectOptions = () => {
+    setVolumePopoverOpen(false);
+    setBrightnessPopoverOpen(false);
+    setPowerModalOpen(false);
+    setSourceModalOpen(false);
+    if (!track) {
+      window.dispatchEvent(
+        new CustomEvent('simp-select-category-focus', { detail: { category: 'interface' } })
+      );
+    }
     window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
   };
 
-  const renderUtilityButtons = () => (
-    <>
-      <button
-        type="button"
-        data-row-aux="true"
-        onClick={() => window.dispatchEvent(new CustomEvent('simp-equalizer-toggle'))}
-        title="10-Band Audio Equalizer & Vocal Stage"
-        style={{
-          minHeight: 32,
-          padding: '0 9px',
-          borderRadius: 8,
-          background: '#101420',
-          border: '1px solid #263145',
-          color: '#67e8f9',
-          fontSize: 11,
-          fontWeight: 800,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        <ImpIcon name="sliders" size={13} color="#67e8f9" />
-        <span>EQ</span>
-      </button>
-      {desktopMode && (
-        <button
-          type="button"
-          data-row-aux="true"
-          onClick={openInterfaceOptions}
-          title="Interface & Desktop Mode Options (SELECT)"
-          style={{
-            minHeight: 32,
-            padding: '0 9px',
-            borderRadius: 8,
-            background: '#0f222a',
-            border: '1px solid #2aa3c4',
-            color: '#bfeaf5',
-            fontSize: 11,
-            fontWeight: 800,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          <ImpIcon name="gamepad-select" size={13} color="#67e8f9" />
-          <span>Options</span>
-        </button>
-      )}
-    </>
-  );
+  const toggleStartSettings = () => {
+    setVolumePopoverOpen(false);
+    setBrightnessPopoverOpen(false);
+    setPowerModalOpen(false);
+    setSourceModalOpen((v) => !v);
+  };
 
-  if (!track) {
-    return (
-      <div
-        data-mini-player-bar="true"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 14,
-          minHeight: 53,
-          padding: '7px 14px',
-          background: '#06070b',
-          borderBottom: '1px solid #181a24',
-          boxSizing: 'border-box',
-          minWidth: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', fontSize: 12 }}>
-          <ImpIcon name="disc" size={16} color="#38bdf8" />
-          <span>No track playing — select any album, playlist, or song below</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          {renderUtilityButtons()}
-        </div>
-      </div>
-    );
-  }
+  const dockArtworkThumb = track?.art_url ? (
+    <img
+      src={track.art_url}
+      alt=""
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        objectFit: 'cover',
+        border: `1px solid ${theme.accent}`,
+        flexShrink: 0,
+      }}
+    />
+  ) : (
+    <div
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 6,
+        background: '#11141e',
+        border: `1px solid ${track ? theme.accent : '#2a3142'}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}
+    >
+      {track?.source === 'apple_music' ? (
+        <ImpIcon name="apple" size={14} color="#fda4af" />
+      ) : track?.source === 'soundcloud' ? (
+        <ImpIcon name="soundcloud" size={11} color="#ffffff" />
+      ) : track?.source === 'internet_archive' || track?.source === 'ia_video' ? (
+        <ImpIcon name="archive" size={13} color="#6ee7b7" />
+      ) : track ? (
+        <ImpIcon name="music" size={13} color="#d4d4dc" />
+      ) : (
+        <ImpIcon name="disc" size={14} color="#9ca3af" />
+      )}
+    </div>
+  );
 
   return (
     <div
       data-mini-player-bar="true"
       style={{
         display: 'flex',
-        alignItems: 'center',
+        alignItems: 'stretch',
         justifyContent: 'space-between',
-        gap: 14,
-        minHeight: 53,
+        gap: 12,
+        minHeight: 76,
         padding: '7px 14px',
         background: '#06070b',
-        borderBottom: `1px solid ${theme.accentBorder}`,
+        borderBottom: track ? `1px solid ${theme.accentBorder}` : '1px solid #181a24',
         boxSizing: 'border-box',
         minWidth: 0,
+        position: 'relative',
+        zIndex: 40,
       }}
     >
-      {/* Left: Clickable 38x38 Artwork + Title / Artist / Album */}
+      {/* Column 1 — Solo SELECT Icon Button (symmetric with START ☰ at far right) */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          minWidth: 0,
-          flex: '1 1 240px',
-          maxWidth: '38%',
+          flexDirection: 'column',
+          justifyContent: 'flex-start',
+          flexShrink: 0,
         }}
       >
         <button
+          type="button"
           data-row-aux="true"
-          onClick={handleArtOrVizClick}
-          title={
-            desktopMode && !isVideoTrack
-              ? 'Launch Visualizer Screensaver'
-              : 'Return to Player View'
-          }
+          onClick={openSelectOptions}
+          title="Track Options, Visualizer & Interface Settings (SELECT)"
           style={{
-            padding: 0,
-            border: 'none',
-            background: 'transparent',
+            minHeight: 29,
+            padding: '0 10px',
+            borderRadius: 8,
+            background: '#10121a',
+            border: '1px solid #222634',
+            color: '#d4d4dc',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 5,
             cursor: 'pointer',
-            flexShrink: 0,
-            display: 'flex',
+            alignSelf: 'flex-start',
           }}
         >
-          {track.art_url ? (
-            <img
-              src={track.art_url}
-              alt=""
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 8,
-                objectFit: 'cover',
-                border: `1px solid ${theme.accent}`,
-              }}
-            />
-          ) : (
-            <div
-              style={{
-                width: 38,
-                height: 38,
-                borderRadius: 8,
-                background: '#11141e',
-                border: `1px solid ${theme.accent}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 16,
-              }}
-            >
-              {track.source === 'apple_music' ? (
-                <ImpIcon name="apple" size={16} color="#fda4af" />
-              ) : track.source === 'soundcloud' ? (
-                <ImpIcon name="soundcloud" size={13} color="#ffffff" />
-              ) : track.source === 'internet_archive' || track.source === 'ia_video' ? (
-                <ImpIcon name="archive" size={15} color="#6ee7b7" />
-              ) : (
-                <ImpIcon name="music" size={15} color="#67e8f9" />
-              )}
-            </div>
-          )}
+          <ImpIcon name="gamepad-select" size={14} color="#c8c8d2" />
+          <span
+            className="simp-gp-badge"
+            style={{
+              padding: '1px 5px',
+              borderRadius: 5,
+              background: '#14141e',
+              border: '1px solid #2a2a38',
+              color: '#9ca3af',
+              fontSize: 9.5,
+              fontFamily: 'monospace',
+              fontWeight: 700,
+            }}
+          >
+            SELECT
+          </span>
         </button>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div
-            style={{
-              fontSize: 12.5,
-              fontWeight: 800,
-              color: '#f1f5f9',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-            }}
-          >
-            <span style={{ color: snap?.is_playing ? theme.accent : '#94a3b8' }}>
-              {snap?.is_playing ? '▶' : '⏸'}
-            </span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {track.title}
-            </span>
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: '#94a3b8',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {track.artists.join(', ')}
-            {track.album ? ` • ${track.album}` : ''}
-          </div>
-        </div>
       </div>
 
-      {/* Center: Compact Progress Scrubber */}
-      <div style={{ flex: '1 1 240px', minWidth: 140, maxWidth: 420 }}>
-        <ProgressBarRaf
-          durationMs={track.duration_ms || 0}
-          trackUri={track.uri}
-          compact
-          hidden={hidden}
-        />
-      </div>
-
-      {/* Micro-Scale Live Audio Visualizer */}
+      {/* Column 2 — Option A: Art + MiniVisualizer Portal Dock ([L1 Player | Art] over [MiniVisualizer]) */}
       <button
         type="button"
         data-row-aux="true"
         onClick={handleArtOrVizClick}
         title={
-          desktopMode && !isVideoTrack
+          !desktopMode
+            ? 'Open Full Player View (L1)'
+            : desktopMode && !isVideoTrack
             ? 'Launch Visualizer Screensaver'
-            : 'Open Visualizer / Player View'
+            : 'Open Player / Video Stage'
         }
         style={{
-          padding: '2px 5px',
-          height: 32,
-          borderRadius: 8,
-          background: '#0a0c14',
-          border: `1px solid ${snap?.is_playing ? theme.accentBorder : '#1e2230'}`,
-          cursor: 'pointer',
-          display: 'inline-flex',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
           alignItems: 'center',
-          justifyContent: 'center',
+          gap: 4,
+          padding: '4px 7px',
+          borderRadius: 9,
+          background: '#0a0a0e',
+          border: `1px solid ${snap?.is_playing && track ? theme.accentBorder : '#22222c'}`,
+          cursor: 'pointer',
           flexShrink: 0,
         }}
       >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            width: '100%',
+          }}
+        >
+          {!desktopMode && (
+            <span
+              className="simp-gp-badge"
+              style={{
+                padding: '1px 5px',
+                borderRadius: 5,
+                background: '#14141e',
+                border: '1px solid #2a2a38',
+                color: '#9ca3af',
+                fontSize: 9.5,
+                fontFamily: 'monospace',
+                fontWeight: 800,
+              }}
+            >
+              L1
+            </span>
+          )}
+          {dockArtworkThumb}
+        </div>
         <MiniSpectrumCanvas
-          isPlaying={Boolean(snap?.is_playing)}
+          isPlaying={Boolean(snap?.is_playing && track)}
           hidden={hidden}
-          trackUri={track.uri}
+          trackUri={track?.uri || null}
           accentColor={theme.accent}
-          idleColor={theme.accentBorder}
+          idleColor={track ? theme.accentBorder : '#242938'}
         />
       </button>
 
-      {/* Right: Transport Controls + Repeat Mode Overlay + EQ / Desktop Options */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <button
-          data-row-aux="true"
-          onClick={() => defaultSimpClient.previous()}
-          title="Previous Track"
+      {/* Column 3 — Flexible Center (Title + Metadata on Row 1, Scrub Bar on Row 2) */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          gap: 5,
+          flex: '1 1 220px',
+          minWidth: 0,
+        }}
+      >
+        <div
           style={{
-            minHeight: 32,
-            padding: '0 9px',
-            borderRadius: 8,
-            background: '#10121a',
-            border: '1px solid #222634',
-            color: '#d4d4dc',
-            fontSize: 12,
-            cursor: 'pointer',
+            height: 29,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            minWidth: 0,
           }}
         >
-          ⏮
-        </button>
-        <button
-          data-row-aux="true"
-          onClick={() => defaultSimpClient.togglePlayPause()}
-          title={snap?.is_playing ? 'Pause' : 'Play'}
-          style={{
-            minHeight: 32,
-            padding: '0 11px',
-            borderRadius: 8,
-            background: snap?.is_playing ? theme.accentMuted : '#141622',
-            border: snap?.is_playing ? `1px solid ${theme.accent}` : '1px solid #2a2e3e',
-            color: snap?.is_playing ? theme.accent : '#f1f5f9',
-            fontSize: 12,
-            fontWeight: 800,
-            cursor: 'pointer',
-          }}
-        >
-          {snap?.is_playing ? '⏸' : '▶'}
-        </button>
-        <button
-          data-row-aux="true"
-          onClick={() => defaultSimpClient.next()}
-          title="Next Track"
-          style={{
-            minHeight: 32,
-            padding: '0 9px',
-            borderRadius: 8,
-            background: '#10121a',
-            border: '1px solid #222634',
-            color: '#d4d4dc',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          ⏭
-        </button>
-        <button
-          data-row-aux="true"
-          onClick={() => {
-            const cur = snap?.repeat_mode || 'off';
-            const next = cur === 'off' ? 'queue' : cur === 'queue' ? 'track' : 'off';
-            defaultSimpClient.setRepeat(next);
-          }}
-          title={
-            snap?.repeat_mode === 'track'
-              ? 'Repeat: 1 Track'
-              : snap?.repeat_mode === 'queue'
-              ? 'Repeat: Queue (∞)'
-              : 'Repeat: Off'
-          }
-          style={{
-            position: 'relative',
-            minHeight: 32,
-            padding: '0 9px',
-            borderRadius: 8,
-            background:
-              snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#0f222a' : '#10121a',
-            border:
-              snap?.repeat_mode && snap.repeat_mode !== 'off'
-                ? '1px solid #2aa3c4'
-                : '1px solid #222634',
-            color:
-              snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#67e8f9' : '#8e8e99',
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          🔁
-          {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
+          {track ? (
+            <>
+              <span
+                style={{
+                  color: snap?.is_playing ? theme.accent : '#94a3b8',
+                  fontSize: 12,
+                  flexShrink: 0,
+                }}
+              >
+                {snap?.is_playing ? '▶' : '⏸'}
+              </span>
+              <span
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 800,
+                  color: '#f1f5f9',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: '0 1 auto',
+                  minWidth: 0,
+                }}
+              >
+                {track.title}
+              </span>
+              {(track.artists?.length || track.album) && (
+                <span
+                  style={{
+                    fontSize: 11.5,
+                    color: '#94a3b8',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    flex: '1 1 0',
+                    minWidth: 0,
+                  }}
+                >
+                  — {track.artists.join(', ')}
+                  {track.album ? ` • ${track.album}` : ''}
+                </span>
+              )}
+            </>
+          ) : (
             <span
               style={{
-                position: 'absolute',
-                right: 2,
-                bottom: 1,
-                minWidth: 12,
-                height: 12,
-                padding: '0 2px',
-                borderRadius: 999,
-                background: '#05161e',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
-                fontSize: 8.5,
-                fontFamily: 'monospace',
-                fontWeight: 900,
-                lineHeight: '10px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
+                color: '#64748b',
+                fontSize: 12,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
-              {snap.repeat_mode === 'track' ? '1' : '∞'}
+              No track playing — select any album, playlist, or song below
             </span>
           )}
-        </button>
-        {renderUtilityButtons()}
+        </div>
+
+        <div
+          style={{
+            height: 29,
+            display: 'flex',
+            alignItems: 'center',
+            width: '100%',
+            minWidth: 140,
+          }}
+        >
+          {track ? (
+            <div style={{ width: '100%' }}>
+              <ProgressBarRaf
+                durationMs={track.duration_ms || 0}
+                trackUri={track.uri}
+                compact
+                hidden={hidden}
+              />
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                width: '100%',
+                color: '#475569',
+                fontSize: 10.5,
+                fontFamily: 'monospace',
+              }}
+            >
+              <span>00:00</span>
+              <div style={{ height: 4, flex: 1, borderRadius: 999, background: '#141620' }} />
+              <span>00:00</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Column 4 — Right Controls Stack (Transport + START ☰ on Row 1, Volume + Brightness on Row 2) */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          alignItems: 'flex-end',
+          gap: 5,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <button
+            data-row-aux="true"
+            onClick={() => defaultSimpClient.previous()}
+            title="Previous Track"
+            style={{
+              minHeight: 29,
+              padding: '0 9px',
+              borderRadius: 8,
+              background: '#10121a',
+              border: '1px solid #222634',
+              color: '#d4d4dc',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            ⏮
+          </button>
+          <button
+            data-row-aux="true"
+            onClick={() => defaultSimpClient.togglePlayPause()}
+            title={snap?.is_playing ? 'Pause' : 'Play'}
+            style={{
+              minHeight: 29,
+              padding: '0 11px',
+              borderRadius: 8,
+              background: snap?.is_playing ? theme.accentMuted : '#141622',
+              border: snap?.is_playing ? `1px solid ${theme.accent}` : '1px solid #2a2e3e',
+              color: snap?.is_playing ? theme.accent : '#f1f5f9',
+              fontSize: 12,
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            {snap?.is_playing ? '⏸' : '▶'}
+          </button>
+          <button
+            data-row-aux="true"
+            onClick={() => defaultSimpClient.next()}
+            title="Next Track"
+            style={{
+              minHeight: 29,
+              padding: '0 9px',
+              borderRadius: 8,
+              background: '#10121a',
+              border: '1px solid #222634',
+              color: '#d4d4dc',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            ⏭
+          </button>
+          <button
+            data-row-aux="true"
+            onClick={() => {
+              const cur = snap?.repeat_mode || 'off';
+              const next = cur === 'off' ? 'queue' : cur === 'queue' ? 'track' : 'off';
+              defaultSimpClient.setRepeat(next);
+            }}
+            title={
+              snap?.repeat_mode === 'track'
+                ? 'Repeat: 1 Track'
+                : snap?.repeat_mode === 'queue'
+                ? 'Repeat: Queue (∞)'
+                : 'Repeat: Off'
+            }
+            style={{
+              position: 'relative',
+              minHeight: 29,
+              padding: '0 9px',
+              borderRadius: 8,
+              background:
+                snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#161822' : '#10121a',
+              border:
+                snap?.repeat_mode && snap.repeat_mode !== 'off'
+                  ? '1px solid #383c52'
+                  : '1px solid #222634',
+              color:
+                snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#e2e8f0' : '#8e8e99',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            🔁
+            {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
+              <span
+                style={{
+                  position: 'absolute',
+                  right: 2,
+                  bottom: 1,
+                  minWidth: 11,
+                  height: 11,
+                  padding: '0 2px',
+                  borderRadius: 999,
+                  background: '#0e1018',
+                  border: '1px solid #383c52',
+                  color: '#e2e8f0',
+                  fontSize: 8,
+                  fontFamily: 'monospace',
+                  fontWeight: 900,
+                  lineHeight: '9px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {snap.repeat_mode === 'track' ? '1' : '∞'}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            data-row-aux="true"
+            onClick={toggleStartSettings}
+            title="Settings Menu (START)"
+            style={{
+              minHeight: 29,
+              padding: '0 10px',
+              borderRadius: 8,
+              background: sourceModalOpen || powerModalOpen ? '#161822' : '#10121a',
+              border:
+                sourceModalOpen || powerModalOpen
+                  ? '1px solid #383c52'
+                  : '1px solid #222634',
+              color: sourceModalOpen || powerModalOpen ? '#e2e8f0' : '#d4d4dc',
+              fontSize: 14,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            <span
+              className="simp-gp-badge"
+              style={{
+                padding: '1px 5px',
+                borderRadius: 5,
+                background: '#14141e',
+                border: '1px solid #2a2a38',
+                color: '#9ca3af',
+                fontSize: 9.5,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+              }}
+            >
+              START
+            </span>
+            <span style={{ lineHeight: 1 }}>☰</span>
+          </button>
+        </div>
+
+        {/* Row 2: Compact Volume, OLED Brightness Popovers & Equalizer */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            position: 'relative',
+            zIndex: 45,
+          }}
+        >
+          <div
+            onWheel={(e) => {
+              e.preventDefault();
+              const delta = e.deltaY < 0 ? 0.05 : -0.05;
+              applyVolume(currentVolume + delta);
+            }}
+            style={{
+              height: 29,
+              borderRadius: 8,
+              background: '#0a0a0e',
+              border: volumePopoverOpen
+                ? '1px solid #383c52'
+                : isPlaying
+                ? '1px solid #2e3242'
+                : '1px solid #22222c',
+              display: 'flex',
+              alignItems: 'stretch',
+              position: 'relative',
+              fontFamily: 'monospace',
+              overflow: 'visible',
+            }}
+          >
+            <button
+              type="button"
+              data-row-aux="true"
+              onClick={() => defaultSimpClient.togglePlayPause()}
+              title={
+                isPlaying
+                  ? 'Audio Active — Click to Pause (Silence)'
+                  : 'Paused (Silenced) — Click to Resume'
+              }
+              style={{
+                padding: '0 8px',
+                border: 'none',
+                borderRight: '1px solid #1e1e28',
+                borderTopLeftRadius: 7,
+                borderBottomLeftRadius: 7,
+                background: isPlaying ? '#141622' : '#10121a',
+                color: isPlaying ? '#e2e8f0' : '#9ca3af',
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
+            </button>
+
+            <button
+              type="button"
+              data-row-aux="true"
+              onClick={() => {
+                setBrightnessPopoverOpen(false);
+                setVolumePopoverOpen((v) => !v);
+              }}
+              title="Open vertical volume slider"
+              style={{
+                padding: '0 8px',
+                border: 'none',
+                borderTopRightRadius: 7,
+                borderBottomRightRadius: 7,
+                background: volumePopoverOpen ? '#161822' : 'transparent',
+                color: isPlaying ? '#c8c8d2' : '#8e8e99',
+                fontSize: 11.5,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>{volPct}%</span>
+              <span style={{ fontSize: 9.5, color: '#71717a' }}>▾</span>
+            </button>
+
+            {volumePopoverOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  top: 34,
+                  right: 0,
+                  width: 74,
+                  padding: '14px 10px',
+                  borderRadius: 16,
+                  background: '#0c0c12',
+                  border: '2px solid #383c52',
+                  boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 10,
+                  zIndex: 60,
+                }}
+              >
+                <span
+                  style={{ fontSize: 11, fontWeight: 800, color: isPlaying ? '#e2e8f0' : '#9ca3af' }}
+                >
+                  {volPct}%
+                </span>
+                <div
+                  style={{
+                    height: 128,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <input
+                    type="range"
+                    min={5}
+                    max={100}
+                    step={1}
+                    value={volPct}
+                    onChange={(e) => applyVolume(Number(e.target.value) / 100)}
+                    style={{
+                      width: 120,
+                      accentColor: '#94a3b8',
+                      transform: 'rotate(-90deg)',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={() => defaultSimpClient.togglePlayPause()}
+                  style={{
+                    width: '100%',
+                    padding: '4px 0',
+                    borderRadius: 8,
+                    background: '#161822',
+                    border: isPlaying ? '1px solid #383c52' : '1px solid #2a2a38',
+                    color: isPlaying ? '#e2e8f0' : '#d4d4dc',
+                    fontSize: 10,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isPlaying ? '⏸ Pause' : '▶ Play'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              data-row-aux="true"
+              onClick={() => {
+                setVolumePopoverOpen(false);
+                setBrightnessPopoverOpen((v) => !v);
+              }}
+              title="Adjust OLED screen brightness"
+              style={{
+                height: 29,
+                padding: '0 9px',
+                borderRadius: 8,
+                background: brightnessPopoverOpen ? '#161822' : '#0a0a0e',
+                border: brightnessPopoverOpen ? '1px solid #383c52' : '1px solid #22222c',
+                color: brightnessPopoverOpen ? '#e2e8f0' : '#c8c8d2',
+                fontSize: 11.5,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
+              <span>{brightnessPct}%</span>
+              <span style={{ fontSize: 9.5, color: '#71717a' }}>▾</span>
+            </button>
+
+            {brightnessPopoverOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  top: 34,
+                  right: 0,
+                  width: 68,
+                  padding: '14px 10px',
+                  borderRadius: 16,
+                  background: '#0c0c12',
+                  border: '2px solid #383c52',
+                  boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 10,
+                  zIndex: 60,
+                }}
+              >
+                <span style={{ fontSize: 11, fontWeight: 800, color: '#e2e8f0' }}>
+                  {brightnessPct}%
+                </span>
+                <div
+                  style={{
+                    height: 128,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <input
+                    type="range"
+                    min={25}
+                    max={100}
+                    step={1}
+                    value={brightnessPct}
+                    onChange={(e) => setBrightnessPct(Number(e.target.value))}
+                    style={{
+                      width: 120,
+                      accentColor: '#94a3b8',
+                      transform: 'rotate(-90deg)',
+                      cursor: 'pointer',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            data-row-aux="true"
+            onClick={() => window.dispatchEvent(new CustomEvent('simp-equalizer-toggle'))}
+            title="10-Band Audio Equalizer & Vocal Stage"
+            style={{
+              height: 29,
+              padding: '0 10px',
+              borderRadius: 8,
+              background: '#0a0a0e',
+              border: '1px solid #22222c',
+              color: '#c8c8d2',
+              fontSize: 11,
+              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              cursor: 'pointer',
+            }}
+          >
+            <ImpIcon name="sliders" size={12} color="#9ca3af" />
+            <span>EQ</span>
+          </button>
+        </div>
       </div>
     </div>
   );

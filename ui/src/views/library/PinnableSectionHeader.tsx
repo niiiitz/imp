@@ -76,9 +76,9 @@ export const PinnableSectionHeader: React.FC<PinnableSectionHeaderProps> = ({
             minHeight: 26,
             padding: '0 9px',
             borderRadius: 7,
-            background: isPinned ? '#0f222a' : '#12131c',
-            border: isPinned ? '1px solid #2aa3c4' : '1px solid #282a3a',
-            color: isPinned ? '#67e8f9' : '#cbd5e1',
+            background: isPinned ? '#161822' : '#0c0d14',
+            border: isPinned ? '1px solid #383c52' : '1px solid #222432',
+            color: isPinned ? '#e2e8f0' : '#9ca3af',
             fontSize: 10.5,
             fontWeight: 800,
             display: 'inline-flex',
@@ -90,7 +90,7 @@ export const PinnableSectionHeader: React.FC<PinnableSectionHeaderProps> = ({
           <ImpIcon
             name={isPinned ? 'check' : 'bolt'}
             size={11}
-            color={isPinned ? '#67e8f9' : '#fde047'}
+            color={isPinned ? '#e2e8f0' : '#9ca3af'}
           />
           <span>{isPinned ? 'In FYP' : '+ FYP'}</span>
         </button>

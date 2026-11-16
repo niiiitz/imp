@@ -43,7 +43,10 @@ import { LibraryMiniPlayerBar } from './library/LibraryMiniPlayerBar';
 import { LibraryContextMenuModal } from './library/LibraryContextMenuModal';
 import { LibraryArtistProfilePane } from './library/LibraryArtistProfilePane';
 import { LibraryContextLegendBar } from './library/LibraryContextLegendBar';
-import { LibraryXmbLeftColumn } from './library/panes/LibraryXmbLeftColumn';
+import {
+  LibrarySourceFilterPills,
+  LibraryXmbLeftColumn,
+} from './library/panes/LibraryXmbLeftColumn';
 import { LibraryBrowseRightPane } from './library/panes/LibraryBrowseRightPane';
 import { LibraryTracklistRightPane } from './library/panes/LibraryTracklistRightPane';
 import {
@@ -272,6 +275,19 @@ export interface LibraryBrowserViewProps {
     label?: string
   ) => Promise<void>;
   favoritedUris?: string[];
+  applyVolume: (nextVol: number) => void;
+  currentVolume: number;
+  volumePopoverOpen: boolean;
+  setVolumePopoverOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  isPlaying: boolean;
+  volPct: number;
+  brightnessPopoverOpen: boolean;
+  setBrightnessPopoverOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  brightnessPct: number;
+  setBrightnessPct: React.Dispatch<React.SetStateAction<number>>;
+  sourceModalOpen: boolean;
+  powerModalOpen: boolean;
+  setPowerModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 function computeLibraryViewportScale(): number {
@@ -405,6 +421,19 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   handleFavoriteTrack,
   handleAddAppleToCloudLibrary,
   favoritedUris = [],
+  applyVolume,
+  currentVolume,
+  volumePopoverOpen,
+  setVolumePopoverOpen,
+  isPlaying,
+  volPct,
+  brightnessPopoverOpen,
+  setBrightnessPopoverOpen,
+  brightnessPct,
+  setBrightnessPct,
+  sourceModalOpen,
+  powerModalOpen,
+  setPowerModalOpen,
 }) => {
   // Left Sidebar Collapsible Section States (persisted in localStorage)
   const [placesOpen, setPlacesOpen] = useState<boolean>(() => {
@@ -3077,7 +3106,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       style={{
         flex: 1,
         display: hidden ? 'none' : 'grid',
-        gridTemplateColumns: 'clamp(285px, 26%, 340px) minmax(0, 1fr)',
+        gridTemplateColumns: 'clamp(320px, 28%, 420px) minmax(0, 1fr)',
         gridTemplateRows: 'auto minmax(0, 1fr)',
         overflow: 'hidden',
         boxSizing: 'border-box',
@@ -3088,16 +3117,18 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       }}
     >
       {/* =====================================================================
-          PERMANENT 32% / 68% TOP HEADER SPLIT:
-          - Top-Left (32%): Unified Search Bar over Left Library Source Column
-          - Top-Right (68%): Miniplayer Bar over Right Nav/Browse Pane
+          PERMANENT 2-ROW TOP HEADER SPLIT:
+          - Top-Left: Unified Search Bar (Row 1) + Source Filter Pills (Row 2)
+          - Top-Right: Unified 2-Row Miniplayer, Transport, Volume/Brightness, SELECT/EQ & START
          ===================================================================== */}
       <div
         data-nav-col="left"
         style={{
           display: 'flex',
-          alignItems: 'center',
-          minHeight: 53,
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          gap: 5,
+          minHeight: 76,
           padding: '7px 14px',
           background: '#06070b',
           borderRight: '1px solid #16161c',
@@ -3143,7 +3174,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             }}
             style={{
               width: '100%',
-              minHeight: 36,
+              minHeight: 29,
               padding: browserSearch ? '0 58px 0 32px' : '0 34px 0 32px',
               borderRadius: 8,
               background: '#08080c',
@@ -3165,8 +3196,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             style={{
               position: 'absolute',
               right: browserSearch ? 32 : 6,
-              width: 24,
-              height: 24,
+              width: 22,
+              height: 22,
               borderRadius: 6,
               background: '#12121a',
               border: '1px solid #242432',
@@ -3187,8 +3218,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
               style={{
                 position: 'absolute',
                 right: 6,
-                width: 24,
-                height: 24,
+                width: 22,
+                height: 22,
                 borderRadius: 6,
                 background: '#161622',
                 border: '1px solid #2e2e3c',
@@ -3202,6 +3233,26 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             </button>
           )}
         </div>
+        <LibrarySourceFilterPills
+          browserSourceFilter={browserSourceFilter}
+          selectedSources={selectedSources}
+          setSelectedSources={setSelectedSources}
+          setBrowserSourceFilterRaw={setBrowserSourceFilterRaw}
+          sourceVisibility={sourceVisibility}
+          snap={snap}
+          appleAuthState={appleAuthState}
+          pushCurrentNavState={pushCurrentNavState}
+          appleSubTab={appleSubTab}
+          setAppleSubTab={setAppleSubTab}
+          soundCloudSubTab={soundCloudSubTab}
+          setSoundCloudSubTab={setSoundCloudSubTab}
+          iaSubTab={iaSubTab}
+          setIaSubTab={setIaSubTab}
+          setIaSubFilter={setIaSubFilter}
+          setRightPaneMode={setRightPaneMode}
+          setActiveMountRoot={setActiveMountRoot}
+          setImpFypActive={setImpFypActive}
+        />
       </div>
 
       <LibraryMiniPlayerBar
@@ -3211,6 +3262,20 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         desktopMode={desktopMode}
         onReturnToPlayer={() => setView('lock')}
         onTriggerScreensaver={onTriggerScreensaver}
+        applyVolume={applyVolume}
+        currentVolume={currentVolume}
+        volumePopoverOpen={volumePopoverOpen}
+        setVolumePopoverOpen={setVolumePopoverOpen}
+        isPlaying={isPlaying}
+        volPct={volPct}
+        brightnessPopoverOpen={brightnessPopoverOpen}
+        setBrightnessPopoverOpen={setBrightnessPopoverOpen}
+        brightnessPct={brightnessPct}
+        setBrightnessPct={setBrightnessPct}
+        sourceModalOpen={sourceModalOpen}
+        powerModalOpen={powerModalOpen}
+        setSourceModalOpen={setSourceModalOpen}
+        setPowerModalOpen={setPowerModalOpen}
       />
       <LibraryXmbLeftColumn
         browserSourceFilter={browserSourceFilter}

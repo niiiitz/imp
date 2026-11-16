@@ -17,6 +17,247 @@ import { cleanCollectionTitle } from "../libraryHelpers";
 import { ImpIcon, ImpIconName } from "../../../components/icons/ImpIcon";
 import { LocalSmartStation } from "../../../api/servicesCacheApi";
 
+export interface LibrarySourceFilterPillsProps {
+  browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
+  selectedSources: Array<"local" | "apple_music" | "soundcloud" | "internet_archive">;
+  setSelectedSources: React.Dispatch<
+    React.SetStateAction<Array<"local" | "apple_music" | "soundcloud" | "internet_archive">>
+  >;
+  setBrowserSourceFilterRaw: React.Dispatch<
+    React.SetStateAction<"all" | "local" | "apple_music" | "soundcloud" | "internet_archive">
+  >;
+  sourceVisibility: SourceVisibilityPrefs;
+  snap: SimpStateSnapshot | null;
+  appleAuthState: "connected" | "reauth_required" | "never_used";
+  pushCurrentNavState: () => void;
+  appleSubTab: "pinned" | "for_you" | "cloud_playlists" | "new" | "radio";
+  setAppleSubTab: React.Dispatch<
+    React.SetStateAction<"pinned" | "for_you" | "cloud_playlists" | "new" | "radio">
+  >;
+  soundCloudSubTab: "pinned" | "likes_sets" | "stream_radio" | "trending";
+  setSoundCloudSubTab: React.Dispatch<
+    React.SetStateAction<"pinned" | "likes_sets" | "stream_radio" | "trending">
+  >;
+  iaSubTab: "pinned" | "trending" | "films" | "tv" | "audio";
+  setIaSubTab: React.Dispatch<
+    React.SetStateAction<"pinned" | "trending" | "films" | "tv" | "audio">
+  >;
+  setIaSubFilter: React.Dispatch<React.SetStateAction<string>>;
+  setRightPaneMode: React.Dispatch<React.SetStateAction<"browse" | "tracks" | "artist">>;
+  setActiveMountRoot: React.Dispatch<React.SetStateAction<string | null>>;
+  setImpFypActive: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> = ({
+  browserSourceFilter,
+  selectedSources,
+  setSelectedSources,
+  setBrowserSourceFilterRaw,
+  sourceVisibility,
+  snap,
+  appleAuthState,
+  pushCurrentNavState,
+  appleSubTab,
+  setAppleSubTab,
+  soundCloudSubTab,
+  setSoundCloudSubTab,
+  iaSubTab,
+  setIaSubTab,
+  setIaSubFilter,
+  setRightPaneMode,
+  setActiveMountRoot,
+  setImpFypActive,
+}) => {
+  const sourceTabs: Array<{
+    id: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
+    label: string;
+    icon: ImpIconName;
+    accent: 'teal' | 'apple' | 'soundcloud' | 'archive';
+  }> = [
+    { id: 'all', label: 'All', icon: 'globe', accent: 'teal' },
+    { id: 'local', label: 'Local', icon: 'disc', accent: 'teal' },
+    ...(sourceVisibility.apple_music &&
+    (snap?.apple_authenticated || appleAuthState === 'reauth_required')
+      ? [
+          {
+            id: 'apple_music' as const,
+            label: appleAuthState === 'reauth_required' ? 'Apple!' : 'Apple',
+            icon: 'apple' as const,
+            accent: 'apple' as const,
+          },
+        ]
+      : []),
+    ...(sourceVisibility.soundcloud
+      ? [
+          {
+            id: 'soundcloud' as const,
+            label: 'SC',
+            icon: 'soundcloud' as const,
+            accent: 'soundcloud' as const,
+          },
+        ]
+      : []),
+    ...(sourceVisibility.internet_archive && snap?.internet_archive_authenticated
+      ? [
+          {
+            id: 'internet_archive' as const,
+            label: 'Archive',
+            icon: 'archive' as const,
+            accent: 'archive' as const,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'stretch',
+        gap: 4,
+        width: '100%',
+        minWidth: 0,
+      }}
+    >
+      {sourceTabs.map((tab) => {
+        const active =
+          tab.id === 'all'
+            ? selectedSources.length === 0 && browserSourceFilter === 'all'
+            : selectedSources.length > 0
+            ? selectedSources.includes(tab.id)
+            : browserSourceFilter === tab.id;
+        return (
+          <button
+            key={tab.id}
+            onClick={() => {
+              pushCurrentNavState();
+              if (tab.id === 'all') {
+                setSelectedSources([]);
+                setBrowserSourceFilterRaw('all');
+                setAppleSubTab('pinned');
+                setSoundCloudSubTab('pinned');
+                setIaSubTab('pinned');
+                setRightPaneMode('browse');
+                return;
+              }
+              const currentSet =
+                selectedSources.length > 0
+                  ? selectedSources
+                  : browserSourceFilter !== 'all'
+                  ? [browserSourceFilter]
+                  : [];
+              const exists = currentSet.includes(tab.id);
+              const nextSet = exists
+                ? currentSet.filter((s) => s !== tab.id)
+                : [...currentSet, tab.id];
+
+              setSelectedSources(nextSet);
+              if (nextSet.length === 0) {
+                setBrowserSourceFilterRaw('all');
+                setAppleSubTab('pinned');
+                setSoundCloudSubTab('pinned');
+                setIaSubTab('pinned');
+                setRightPaneMode('browse');
+              } else if (nextSet.length === 1) {
+                const single = nextSet[0];
+                setBrowserSourceFilterRaw(single);
+                setImpFypActive(false);
+                if (single === 'local') {
+                  setAppleSubTab('pinned');
+                  setSoundCloudSubTab('pinned');
+                  setIaSubTab('pinned');
+                  setRightPaneMode('browse');
+                } else if (single === 'soundcloud') {
+                  setActiveMountRoot(null);
+                  if (soundCloudSubTab === 'pinned') {
+                    setSoundCloudSubTab('trending');
+                  }
+                  setRightPaneMode('browse');
+                } else if (single === 'apple_music') {
+                  setActiveMountRoot(null);
+                  if (appleSubTab === 'pinned') {
+                    setAppleSubTab('for_you');
+                  }
+                  setRightPaneMode('browse');
+                } else if (single === 'internet_archive') {
+                  setActiveMountRoot(null);
+                  if (iaSubTab === 'pinned') {
+                    setIaSubTab('trending');
+                    setIaSubFilter('all');
+                  }
+                  setRightPaneMode('browse');
+                }
+              } else {
+                // Multi-source mix: show unified Imp Library / Search filtered to selected sources
+                setBrowserSourceFilterRaw('all');
+                setActiveMountRoot(null);
+                setAppleSubTab('pinned');
+                setSoundCloudSubTab('pinned');
+                setIaSubTab('pinned');
+                setRightPaneMode('browse');
+              }
+            }}
+            style={{
+              flex: '1 1 auto',
+              minWidth: 0,
+              minHeight: 29,
+              padding: '0 7px',
+              borderRadius: 8,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
+              background: active
+                ? tab.accent === 'apple'
+                  ? '#28111b'
+                  : tab.accent === 'soundcloud'
+                  ? '#2c140a'
+                  : tab.accent === 'archive'
+                  ? '#261a0b'
+                  : '#0f222a'
+                : '#0a0a0e',
+              border: active
+                ? tab.accent === 'apple'
+                  ? '1px solid #fa243c'
+                  : tab.accent === 'soundcloud'
+                  ? '1px solid #ea580c'
+                  : tab.accent === 'archive'
+                  ? '1px solid #f59e0b'
+                  : '1px solid #2aa3c4'
+                : '1px solid #1e1e26',
+              color: active
+                ? tab.accent === 'apple'
+                  ? '#fecdd3'
+                  : tab.accent === 'soundcloud'
+                  ? '#fdba74'
+                  : tab.accent === 'archive'
+                  ? '#fde68a'
+                  : '#bfeaf5'
+                : '#9ca3af',
+              fontSize: 11,
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+            }}
+          >
+            <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {tab.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 export interface LibraryXmbLeftColumnProps {
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   setBrowserSourceFilter: React.Dispatch<
@@ -209,198 +450,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
           gap: 8,
         }}
       >
-        {/* Top-Level Multi-Select Source Filter Bar (`[ 🌐 All | 💾 Local | 🍎 Apple | ☁️ SC | 🏛️ Archive ]`)
-            🌐 All resets to all sources; clicking individual pills toggles them into a custom multi-source mix. */}
-        {(() => {
-          const sourceTabs: Array<{
-            id: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
-            label: string;
-            icon: ImpIconName;
-            accent: 'teal' | 'apple' | 'soundcloud' | 'archive';
-          }> = [
-            { id: 'all', label: 'All', icon: 'globe', accent: 'teal' },
-            { id: 'local', label: 'Local', icon: 'disc', accent: 'teal' },
-            ...(sourceVisibility.apple_music &&
-            (snap?.apple_authenticated || appleAuthState === 'reauth_required')
-              ? [
-                  {
-                    id: 'apple_music' as const,
-                    label: appleAuthState === 'reauth_required' ? 'Apple!' : 'Apple',
-                    icon: 'apple' as const,
-                    accent: 'apple' as const,
-                  },
-                ]
-              : []),
-            ...(sourceVisibility.soundcloud
-              ? [
-                  {
-                    id: 'soundcloud' as const,
-                    label: 'SC',
-                    icon: 'soundcloud' as const,
-                    accent: 'soundcloud' as const,
-                  },
-                ]
-              : []),
-            ...(sourceVisibility.internet_archive && snap?.internet_archive_authenticated
-              ? [
-                  {
-                    id: 'internet_archive' as const,
-                    label: 'Archive',
-                    icon: 'archive' as const,
-                    accent: 'archive' as const,
-                  },
-                ]
-              : []),
-          ];
-          return (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'stretch',
-                gap: 4,
-                width: '100%',
-                minWidth: 0,
-              }}
-            >
-              {sourceTabs.map((tab) => {
-                const active =
-                  tab.id === 'all'
-                    ? selectedSources.length === 0 && browserSourceFilter === 'all'
-                    : selectedSources.length > 0
-                    ? selectedSources.includes(tab.id)
-                    : browserSourceFilter === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => {
-                      pushCurrentNavState();
-                      if (tab.id === 'all') {
-                        setSelectedSources([]);
-                        setBrowserSourceFilterRaw('all');
-                        setAppleSubTab('pinned');
-                        setSoundCloudSubTab('pinned');
-                        setIaSubTab('pinned');
-                        setRightPaneMode('browse');
-                        return;
-                      }
-                      const currentSet =
-                        selectedSources.length > 0
-                          ? selectedSources
-                          : browserSourceFilter !== 'all'
-                          ? [browserSourceFilter]
-                          : [];
-                      const exists = currentSet.includes(tab.id);
-                      const nextSet = exists
-                        ? currentSet.filter((s) => s !== tab.id)
-                        : [...currentSet, tab.id];
-
-                      setSelectedSources(nextSet);
-                      if (nextSet.length === 0) {
-                        setBrowserSourceFilterRaw('all');
-                        setAppleSubTab('pinned');
-                        setSoundCloudSubTab('pinned');
-                        setIaSubTab('pinned');
-                        setRightPaneMode('browse');
-                      } else if (nextSet.length === 1) {
-                        const single = nextSet[0];
-                        setBrowserSourceFilterRaw(single);
-                        setImpFypActive(false);
-                        if (single === 'local') {
-                          setAppleSubTab('pinned');
-                          setSoundCloudSubTab('pinned');
-                          setIaSubTab('pinned');
-                          setRightPaneMode('browse');
-                        } else if (single === 'soundcloud') {
-                          setActiveMountRoot(null);
-                          if (soundCloudSubTab === 'pinned') {
-                            setSoundCloudSubTab('trending');
-                          }
-                          setRightPaneMode('browse');
-                        } else if (single === 'apple_music') {
-                          setActiveMountRoot(null);
-                          if (appleSubTab === 'pinned') {
-                            setAppleSubTab('for_you');
-                          }
-                          setRightPaneMode('browse');
-                        } else if (single === 'internet_archive') {
-                          setActiveMountRoot(null);
-                          if (iaSubTab === 'pinned') {
-                            setIaSubTab('trending');
-                            setIaSubFilter('all');
-                          }
-                          setRightPaneMode('browse');
-                        }
-                      } else {
-                        // Multi-source mix (e.g. Local + Internet Archive): show unified SIMP Library / Search filtered to those sources
-                        setBrowserSourceFilterRaw('all');
-                        setActiveMountRoot(null);
-                        setAppleSubTab('pinned');
-                        setSoundCloudSubTab('pinned');
-                        setIaSubTab('pinned');
-                        setRightPaneMode('browse');
-                      }
-                    }}
-                    style={{
-                      flex: '1 1 auto',
-                      minWidth: 0,
-                      minHeight: 34,
-                      padding: '0 6px',
-                      borderRadius: 8,
-                      overflow: 'hidden',
-                      whiteSpace: 'nowrap',
-                      background: active
-                        ? tab.accent === 'apple'
-                          ? '#28111b'
-                          : tab.accent === 'soundcloud'
-                          ? '#2c140a'
-                          : tab.accent === 'archive'
-                          ? '#261a0b'
-                          : '#0f222a'
-                        : '#0a0a0e',
-                      border: active
-                        ? tab.accent === 'apple'
-                          ? '1px solid #fa243c'
-                          : tab.accent === 'soundcloud'
-                          ? '1px solid #ea580c'
-                          : tab.accent === 'archive'
-                          ? '1px solid #f59e0b'
-                          : '1px solid #2aa3c4'
-                        : '1px solid #1e1e26',
-                      color: active
-                        ? tab.accent === 'apple'
-                          ? '#fecdd3'
-                          : tab.accent === 'soundcloud'
-                          ? '#fdba74'
-                          : tab.accent === 'archive'
-                          ? '#fde68a'
-                          : '#bfeaf5'
-                        : '#9ca3af',
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 3.5,
-                    }}
-                  >
-                    <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 9.5 : 11} />
-                    <span
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {tab.label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          );
-        })()}
-
         {/* Row 2b: Media Type Filter Strip (`[ All Media | Video | Audio ]`) */}
         <div
           style={{

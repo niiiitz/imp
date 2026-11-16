@@ -2643,28 +2643,30 @@ const ConsoleMainApp: React.FC = () => {
         </div>
       )}
 
-      {/* Top Action Bar: Source Pop-Up Trigger | View Switcher (L1/R1) | Interactive Volume & Brightness */}
-      <AppTopHeaderBar
-        isNavBarHidden={isNavBarHidden || desktopScreensaverActive}
-        setVolumePopoverOpen={setVolumePopoverOpen}
-        setBrightnessPopoverOpen={setBrightnessPopoverOpen}
-        setPowerModalOpen={setPowerModalOpen}
-        setSourceModalOpen={setSourceModalOpen}
-        view={view}
-        setView={setView}
-        track={track}
-        applyVolume={applyVolume}
-        currentVolume={currentVolume}
-        volumePopoverOpen={volumePopoverOpen}
-        isPlaying={isPlaying}
-        volPct={volPct}
-        brightnessPopoverOpen={brightnessPopoverOpen}
-        brightnessPct={brightnessPct}
-        setBrightnessPct={setBrightnessPct}
-        sourceModalOpen={sourceModalOpen}
-        powerModalOpen={powerModalOpen}
-        desktopMode={desktopMode}
-      />
+      {/* Top Action Bar: Source Pop-Up Trigger | View Switcher (L1/R1) | Interactive Volume & Brightness (PlayerView only; LibraryView integrates them into its 2-row header) */}
+      {view === 'lock' && (
+        <AppTopHeaderBar
+          isNavBarHidden={isNavBarHidden || desktopScreensaverActive}
+          setVolumePopoverOpen={setVolumePopoverOpen}
+          setBrightnessPopoverOpen={setBrightnessPopoverOpen}
+          setPowerModalOpen={setPowerModalOpen}
+          setSourceModalOpen={setSourceModalOpen}
+          view={view}
+          setView={setView}
+          track={track}
+          applyVolume={applyVolume}
+          currentVolume={currentVolume}
+          volumePopoverOpen={volumePopoverOpen}
+          isPlaying={isPlaying}
+          volPct={volPct}
+          brightnessPopoverOpen={brightnessPopoverOpen}
+          brightnessPct={brightnessPct}
+          setBrightnessPct={setBrightnessPct}
+          sourceModalOpen={sourceModalOpen}
+          powerModalOpen={powerModalOpen}
+          desktopMode={desktopMode}
+        />
+      )}
 
       {/* Main Viewport: Lock Screen (PlayerView stays mounted across L1/R1 so video audio continues in background) + Persistent Split Browser */}
       <PlayerView
@@ -2699,6 +2701,19 @@ const ConsoleMainApp: React.FC = () => {
         hidden={view !== 'browser' || desktopScreensaverActive}
         desktopMode={desktopMode}
         onTriggerScreensaver={triggerDesktopScreensaver}
+        applyVolume={applyVolume}
+        currentVolume={currentVolume}
+        volumePopoverOpen={volumePopoverOpen}
+        setVolumePopoverOpen={setVolumePopoverOpen}
+        isPlaying={isPlaying}
+        volPct={volPct}
+        brightnessPopoverOpen={brightnessPopoverOpen}
+        setBrightnessPopoverOpen={setBrightnessPopoverOpen}
+        brightnessPct={brightnessPct}
+        setBrightnessPct={setBrightnessPct}
+        sourceModalOpen={sourceModalOpen}
+        powerModalOpen={powerModalOpen}
+        setPowerModalOpen={setPowerModalOpen}
         snap={snap}
           track={track}
           albums={albums}
