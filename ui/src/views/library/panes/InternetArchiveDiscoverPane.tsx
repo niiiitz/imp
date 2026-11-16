@@ -140,6 +140,7 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                             return (
                               <button
                                 data-right-filter-pill="true"
+                                data-right-pin-collection="true"
                                 onClick={() => {
                                   if (isCollPinned) {
                                     handleDeletePlaylist(collId, collTitle);

@@ -511,6 +511,7 @@ export interface LocalArtistCardProps {
   subtitle?: string;
   isSelected: boolean;
   onSelect: () => void;
+  openLibraryContextMenu?: (target: LibraryContextTarget) => void;
 }
 
 export const LocalArtistCard: React.FC<LocalArtistCardProps> = ({
@@ -519,11 +520,27 @@ export const LocalArtistCard: React.FC<LocalArtistCardProps> = ({
   subtitle,
   isSelected,
   onSelect,
+  openLibraryContextMenu,
 }) => {
   return (
     <button
       data-right-tile="true"
       data-tile-key={`artist:local:name:${artistName}`}
+      onContextMenu={(e) => {
+        if (!openLibraryContextMenu) return;
+        e.preventDefault();
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'artist',
+          id: `name:${artistName}`,
+          title: artistName,
+          subtitle: subtitle || 'Local Library Artist',
+          art_url: artUrl,
+          artistName,
+          source: 'local',
+          rawItem: { name: artistName, artUrl, subtitle },
+        });
+      }}
       onClick={onSelect}
       style={{
         minWidth: 0,

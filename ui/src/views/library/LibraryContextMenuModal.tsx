@@ -6,10 +6,15 @@ import {
   PlaylistRecord,
   TrackMetadata,
 } from '@simp/client';
-import { AppleCloudAlbumSummary, AppleCloudPlaylistSummary } from '../../drivers/appleApi';
+import {
+  AppleCloudAlbumSummary,
+  AppleCloudPlaylistSummary,
+  AppleRadioStationSummary,
+} from '../../drivers/appleApi';
+import { LocalSmartStation } from '../../api/servicesCacheApi';
 import { SoundCloudPlaylistSummary } from '../../drivers/SoundCloudDriver';
 import { BrowserTarget } from '../PlayerView';
-import type { LibraryContextTarget } from '../LibraryBrowserView';
+import type { LibraryContextTarget, LibraryShelfAction } from '../LibraryBrowserView';
 import { ImpIcon } from '../../components/icons/ImpIcon';
 
 export interface LibraryContextMenuModalProps {
@@ -62,6 +67,8 @@ export interface LibraryContextMenuModalProps {
   handlePinArchiveItem: (item: ArchiveItemSummary, preloadedTracks?: TrackMetadata[]) => Promise<void>;
   handleDeletePlaylist: (playlistId: string, name: string) => void;
   handleDeleteAlbum: (albumId: string, title: string) => void;
+  onPlayLocalSmartStation?: (st: LocalSmartStation, shuffle?: boolean) => void;
+  handleStartAppleStation?: (st: AppleRadioStationSummary) => void;
 }
 
 export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = ({
@@ -96,9 +103,79 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
   handlePinArchiveItem,
   handleDeletePlaylist,
   handleDeleteAlbum,
+  onPlayLocalSmartStation,
+  handleStartAppleStation,
 }) => {
   const activeWritable =
     writablePlaylists.find((p) => p.id === activePlaylistId) || writablePlaylists[0];
+
+  const renderShelfActionButtons = (
+    shelfActions?: LibraryShelfAction[],
+    markFirstDefaultFocus = false
+  ) => {
+    if (!shelfActions || shelfActions.length === 0) return null;
+    return shelfActions.map((sa, idx) => (
+      <React.Fragment key={sa.shelfUid}>
+        <button
+          data-focusable="true"
+          data-default-focus={markFirstDefaultFocus && idx === 0 ? 'true' : undefined}
+          onClick={() => {
+            onClose();
+            sa.triggerClick();
+          }}
+          style={{
+            minHeight: 40,
+            padding: '8px 12px',
+            borderRadius: 10,
+            background: sa.isPinned ? '#161822' : '#181509',
+            border: sa.isPinned ? '1px solid #475569' : '1px solid #ca8a04',
+            color: sa.isPinned ? '#e2e8f0' : '#fef08a',
+            fontSize: 12,
+            fontWeight: 800,
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          <ImpIcon
+            name={sa.isPinned ? 'check' : 'bolt'}
+            size={14}
+            color={sa.isPinned ? '#e2e8f0' : '#fde047'}
+          />
+          <span>
+            {sa.isPinned
+              ? `Remove "${sa.title}" from Imp FYP`
+              : `Add "${sa.title}" to Imp FYP`}
+          </span>
+        </button>
+        {sa.openSourceClick && (
+          <button
+            data-focusable="true"
+            onClick={() => {
+              onClose();
+              sa.openSourceClick?.();
+            }}
+            style={{
+              minHeight: 38,
+              padding: '8px 12px',
+              borderRadius: 10,
+              background: '#12131c',
+              border: '1px solid #26293a',
+              color: '#93c5fd',
+              fontSize: 12,
+              fontWeight: 800,
+              textAlign: 'left',
+              cursor: 'pointer',
+            }}
+          >
+            ↗ Open "{sa.title}" in Source Hub
+          </button>
+        )}
+      </React.Fragment>
+    ));
+  };
 
   return (
     <div
@@ -162,6 +239,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
               <span>
                 {libraryContextTarget.type === 'track'
                   ? 'Track Actions (SELECT)'
+                  : libraryContextTarget.type === 'shelf'
+                  ? 'Imp FYP & Section Actions (SELECT)'
                   : 'Collection Actions (SELECT)'}
               </span>
             </div>
@@ -195,7 +274,9 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       ? ` • ${libraryContextTarget.track.album}`
                       : ''
                   }`
-                : libraryContextTarget.subtitle || libraryContextTarget.artistName || ''}
+                : libraryContextTarget.type === 'collection'
+                ? libraryContextTarget.subtitle || libraryContextTarget.artistName || ''
+                : libraryContextTarget.subtitle || ''}
             </div>
           </div>
           <button
@@ -502,13 +583,137 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   <ImpIcon name="sliders" size={14} color="#38bdf8" />
                   Track Properties & Local Curation (Lyrics / Art / Overlays)
                 </button>
+
+                {renderShelfActionButtons(libraryContextTarget.shelfActions)}
               </div>
             );
           })()}
 
+        {/* Section / Top-Level Imp FYP Context Actions */}
+        {libraryContextTarget.type === 'shelf' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {libraryContextTarget.pinArchiveCollectionClick && (
+              <button
+                data-focusable="true"
+                data-default-focus="true"
+                onClick={() => {
+                  const fn = libraryContextTarget.pinArchiveCollectionClick;
+                  onClose();
+                  fn?.();
+                }}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#1c160c',
+                  border: '1px solid #d97706',
+                  color: '#fde68a',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                {libraryContextTarget.pinArchiveCollectionLabel || '📌 Pin Collection'}
+              </button>
+            )}
+            {renderShelfActionButtons(
+              libraryContextTarget.shelfActions,
+              !libraryContextTarget.pinArchiveCollectionClick
+            )}
+          </div>
+        )}
+
         {/* Collection Context Actions */}
         {libraryContextTarget.type === 'collection' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {libraryContextTarget.kind === 'local_station' && onPlayLocalSmartStation && (
+              <button
+                data-focusable="true"
+                data-default-focus="true"
+                onClick={() => {
+                  const st = libraryContextTarget.rawItem as LocalSmartStation;
+                  onClose();
+                  onPlayLocalSmartStation(st, false);
+                }}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#0f2926',
+                  border: '1px solid #14b8a6',
+                  color: '#ccfbf1',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                ▶ Play Smart Station Now
+              </button>
+            )}
+
+            {libraryContextTarget.kind === 'apple_station' && handleStartAppleStation && (
+              <button
+                data-focusable="true"
+                data-default-focus="true"
+                onClick={() => {
+                  const st = libraryContextTarget.rawItem as AppleRadioStationSummary;
+                  onClose();
+                  handleStartAppleStation(st);
+                }}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#28111b',
+                  border: '1px solid #fa243c',
+                  color: '#fecdd3',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                📻 Start Radio Station
+              </button>
+            )}
+
+            {libraryContextTarget.kind === 'artist' && (
+              <button
+                data-focusable="true"
+                data-default-focus="true"
+                onClick={() => {
+                  const target = libraryContextTarget;
+                  onClose();
+                  openArtistProfile({
+                    source:
+                      target.source === 'soundcloud'
+                        ? 'soundcloud'
+                        : target.source === 'apple_music'
+                        ? 'apple_music'
+                        : 'local',
+                    idOrName: target.id,
+                    displayName: target.title,
+                  });
+                }}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#141622',
+                  border: '1px solid #282c42',
+                  color: '#e2e8f0',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                🎤 Open Artist Profile ({libraryContextTarget.title})
+              </button>
+            )}
+
             {libraryContextTarget.kind === 'simp_playlist' &&
               libraryContextTarget.rawItem?.origin &&
               libraryContextTarget.rawItem.origin !== 'simp_local' && (
@@ -556,120 +761,127 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   Fork / Convert Pinned Collection to Hybrid Playlist
                 </button>
               )}
-            <button
-              data-focusable="true"
-              data-default-focus="true"
-              onClick={async () => {
-                const target = libraryContextTarget;
-                onClose();
-                if (target.kind === 'simp_playlist') {
-                  setPlayingContextId(`playlist:${target.id}`);
-                  defaultSimpClient.playPlaylist(target.id, true);
-                  setView('lock');
-                  return;
-                }
-                if (target.kind === 'simp_album') {
-                  setPlayingContextId(`album:${target.id}`);
-                  defaultSimpClient.playAlbum(target.id, true);
-                  setView('lock');
-                  return;
-                }
-                const tracks = await resolveCollectionTracks(target);
-                if (tracks.length > 0) {
-                  defaultSimpClient.setShuffle(true);
-                  defaultSimpClient.loadQueue(
-                    tracks.map((tr) => tr.uri),
-                    0,
-                    tracks
-                  );
-                  setView('lock');
-                } else {
-                  showToast('Could not resolve tracks to shuffle');
-                }
-              }}
-              style={{
-                minHeight: 40,
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#e0f7fc',
-                fontSize: 12,
-                fontWeight: 800,
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-            >
-              🔀 Shuffle Collection Now
-            </button>
+            {libraryContextTarget.kind !== 'apple_station' &&
+              libraryContextTarget.kind !== 'artist' && (
+                <>
+                  <button
+                    data-focusable="true"
+                    data-default-focus={
+                      libraryContextTarget.kind !== 'local_station' ? 'true' : undefined
+                    }
+                    onClick={async () => {
+                      const target = libraryContextTarget;
+                      onClose();
+                      if (target.kind === 'simp_playlist') {
+                        setPlayingContextId(`playlist:${target.id}`);
+                        defaultSimpClient.playPlaylist(target.id, true);
+                        setView('lock');
+                        return;
+                      }
+                      if (target.kind === 'simp_album') {
+                        setPlayingContextId(`album:${target.id}`);
+                        defaultSimpClient.playAlbum(target.id, true);
+                        setView('lock');
+                        return;
+                      }
+                      const tracks = await resolveCollectionTracks(target);
+                      if (tracks.length > 0) {
+                        defaultSimpClient.setShuffle(true);
+                        defaultSimpClient.loadQueue(
+                          tracks.map((tr) => tr.uri),
+                          0,
+                          tracks
+                        );
+                        setView('lock');
+                      } else {
+                        showToast('Could not resolve tracks to shuffle');
+                      }
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#0f222a',
+                      border: '1px solid #2aa3c4',
+                      color: '#e0f7fc',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🔀 Shuffle Collection Now
+                  </button>
 
-            <button
-              data-focusable="true"
-              onClick={async () => {
-                const target = libraryContextTarget;
-                onClose();
-                const tracks = await resolveCollectionTracks(target);
-                if (tracks.length > 0) {
-                  handlePlayTracksNext(tracks, `"${target.title}"`);
-                } else {
-                  showToast('Could not resolve collection tracks');
-                }
-              }}
-              style={{
-                minHeight: 40,
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: '#121824',
-                border: '1px solid #26354d',
-                color: '#bae6fd',
-                fontSize: 12,
-                fontWeight: 800,
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-            >
-              ⏭ Play Collection Next (Insert After Current Track)
-            </button>
+                  <button
+                    data-focusable="true"
+                    onClick={async () => {
+                      const target = libraryContextTarget;
+                      onClose();
+                      const tracks = await resolveCollectionTracks(target);
+                      if (tracks.length > 0) {
+                        handlePlayTracksNext(tracks, `"${target.title}"`);
+                      } else {
+                        showToast('Could not resolve collection tracks');
+                      }
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#121824',
+                      border: '1px solid #26354d',
+                      color: '#bae6fd',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ⏭ Play Collection Next (Insert After Current Track)
+                  </button>
 
-            <button
-              data-focusable="true"
-              onClick={async () => {
-                const target = libraryContextTarget;
-                onClose();
-                if (target.kind === 'simp_playlist') {
-                  await handleAddSimpPlaylistToHybrid(target.rawItem);
-                } else if (target.kind === 'simp_album') {
-                  await handleAddSimpAlbumToHybrid(target.rawItem);
-                } else if (target.kind === 'ia_item') {
-                  await handleAddArchiveItemToHybrid(target.rawItem);
-                } else {
-                  const tracks = await resolveCollectionTracks(target);
-                  if (tracks.length > 0) {
-                    await handleAddTracksToPlaylist(
-                      tracks.map((tr) => tr.uri),
-                      `all ${tracks.length} tracks from "${target.title}"`,
-                      tracks
-                    );
-                  }
-                }
-              }}
-              style={{
-                minHeight: 40,
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: '#141824',
-                border: '1px solid #2b3548',
-                color: '#e2e8f0',
-                fontSize: 12,
-                fontWeight: 800,
-                textAlign: 'left',
-                cursor: 'pointer',
-              }}
-            >
-              ★ Add All Tracks to Imp Hybrid Playlist (
-              {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
-              )
-            </button>
+                  <button
+                    data-focusable="true"
+                    onClick={async () => {
+                      const target = libraryContextTarget;
+                      onClose();
+                      if (target.kind === 'simp_playlist') {
+                        await handleAddSimpPlaylistToHybrid(target.rawItem);
+                      } else if (target.kind === 'simp_album') {
+                        await handleAddSimpAlbumToHybrid(target.rawItem);
+                      } else if (target.kind === 'ia_item') {
+                        await handleAddArchiveItemToHybrid(target.rawItem);
+                      } else {
+                        const tracks = await resolveCollectionTracks(target);
+                        if (tracks.length > 0) {
+                          await handleAddTracksToPlaylist(
+                            tracks.map((tr) => tr.uri),
+                            `all ${tracks.length} tracks from "${target.title}"`,
+                            tracks
+                          );
+                        }
+                      }
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#141824',
+                      border: '1px solid #2b3548',
+                      color: '#e2e8f0',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ★ Add All Tracks to Imp Hybrid Playlist (
+                    {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
+                    )
+                  </button>
+                </>
+              )}
 
             {(libraryContextTarget.kind === 'cloud_playlist' ||
               libraryContextTarget.kind === 'cloud_album' ||
@@ -758,7 +970,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
               </button>
             )}
 
-            {libraryContextTarget.artistName && (
+            {libraryContextTarget.artistName && libraryContextTarget.kind !== 'artist' && (
               <button
                 data-focusable="true"
                 onClick={() => {
@@ -822,6 +1034,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                 Remove from Imp Library
               </button>
             )}
+
+            {renderShelfActionButtons(libraryContextTarget.shelfActions)}
           </div>
         )}
       </div>

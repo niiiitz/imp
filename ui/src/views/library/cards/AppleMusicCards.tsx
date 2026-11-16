@@ -430,18 +430,34 @@ export interface StationCardProps {
   st: AppleRadioStationSummary;
   playingContextId: string;
   handleStartAppleStation: (st: AppleRadioStationSummary) => void;
+  openLibraryContextMenu?: (target: LibraryContextTarget) => void;
 }
 
 export const StationCard: React.FC<StationCardProps> = ({
   st,
   playingContextId,
   handleStartAppleStation,
+  openLibraryContextMenu,
 }) => {
   const isPlayingStation = playingContextId === `station:${st.id}`;
   return (
     <button
       data-right-tile="true"
       data-tile-key={`station:${st.id}`}
+      onContextMenu={(e) => {
+        if (!openLibraryContextMenu) return;
+        e.preventDefault();
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'apple_station',
+          id: st.id,
+          title: st.name,
+          subtitle: st.subtitle || 'Apple Music Station',
+          art_url: st.art_url,
+          source: 'apple_music',
+          rawItem: st,
+        });
+      }}
       onClick={() => handleStartAppleStation(st)}
       style={{
         minWidth: 0,
@@ -560,17 +576,34 @@ export interface AppleArtistCardProps {
   artist: AppleArtistSummary;
   isSelected: boolean;
   onSelect: () => void;
+  openLibraryContextMenu?: (target: LibraryContextTarget) => void;
 }
 
 export const AppleArtistCard: React.FC<AppleArtistCardProps> = ({
   artist,
   isSelected,
   onSelect,
+  openLibraryContextMenu,
 }) => {
   return (
     <button
       data-right-tile="true"
       data-tile-key={`artist:apple_music:${artist.id || `name:${artist.name}`}`}
+      onContextMenu={(e) => {
+        if (!openLibraryContextMenu) return;
+        e.preventDefault();
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'artist',
+          id: artist.id || `name:${artist.name}`,
+          title: artist.name,
+          subtitle: artist.genre || 'Apple Music Artist',
+          art_url: artist.art_url,
+          artistName: artist.name,
+          source: 'apple_music',
+          rawItem: artist,
+        });
+      }}
       onClick={onSelect}
       style={{
         minWidth: 0,

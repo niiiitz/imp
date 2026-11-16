@@ -101,11 +101,11 @@ export function formatPlaylistSourceBadge(pl: PlaylistRecord): string {
   return '★ IMP';
 }
 
-// Responsive Tile Grid Style (4 cols on Steam Deck, 5 cols on standard desktop, 6–8+ cols on ultrawide without stretched card whitespace)
+// Responsive Tile Grid Style (3–4 cols on Steam Deck 800p, 5 cols on desktop, 6–8+ cols on ultrawide)
 export const tileGridStyle: React.CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(196px, 1fr))',
-  gap: 10,
+  gridTemplateColumns: 'repeat(auto-fill, minmax(162px, 1fr))',
+  gap: 9,
   width: '100%',
   minWidth: 0,
 };

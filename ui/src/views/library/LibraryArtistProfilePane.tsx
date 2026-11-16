@@ -89,7 +89,7 @@ export const LibraryArtistProfilePane: React.FC<LibraryArtistProfilePaneProps> =
     const el = containerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const updateCols = (width: number) => {
-      const next = width >= 940 ? 3 : width >= 560 ? 2 : 1;
+      const next = width >= 620 ? 3 : width >= 400 ? 2 : 1;
       setGridCols((prev) => (prev === next ? prev : next));
     };
     updateCols(el.clientWidth);

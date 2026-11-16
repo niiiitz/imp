@@ -49,6 +49,7 @@ export interface LibraryBrowseRightPaneProps {
   sourceVisibility: SourceVisibilityPrefs;
   localDiscover: LocalDiscoverResponse;
   onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
+  openLibraryContextMenu: any;
   appleRadioFilter: "all" | "genre" | "live" | "shows" | "mixes";
   appleRadioGenre: string;
   appleRecentlyPlayedTracks: TrackMetadata[];
@@ -204,6 +205,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   sourceVisibility,
   localDiscover,
   onPlayLocalSmartStation,
+  openLibraryContextMenu,
   appleRadioFilter,
   appleRadioGenre,
   appleRecentlyPlayedTracks,
@@ -725,6 +727,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 renderArchiveItemCard={renderArchiveItemCard}
                 renderLocalArtistCard={renderLocalArtistCard}
                 onPlayLocalSmartStation={onPlayLocalSmartStation}
+                openLibraryContextMenu={openLibraryContextMenu}
               />
             ) : (
               <>
@@ -1212,6 +1215,19 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                                     data-tile-key={`local_station:${st.id}`}
                                     role="button"
                                     tabIndex={0}
+                                    onContextMenu={(e) => {
+                                      e.preventDefault();
+                                      openLibraryContextMenu({
+                                        type: 'collection',
+                                        kind: 'local_station',
+                                        id: st.id,
+                                        title: st.title,
+                                        subtitle: `${st.track_count} tracks • ${st.subtitle}`,
+                                        art_url: st.art_url,
+                                        source: 'local',
+                                        rawItem: st,
+                                      });
+                                    }}
                                     onClick={() => onPlayLocalSmartStation(st, false)}
                                     onKeyDown={(e) => {
                                       if (e.key === 'Enter' || e.key === ' ') {

@@ -12,6 +12,7 @@ import { ImpIcon } from '../../../components/icons/ImpIcon';
 import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
 import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
 import { SourceVisibilityPrefs } from '../../SettingsModal';
+import type { LibraryContextTarget } from '../../LibraryBrowserView';
 
 export interface ImpFypPaneProps {
   browserSourceFilter: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
@@ -37,6 +38,7 @@ export interface ImpFypPaneProps {
   renderArchiveItemCard: (item: any) => React.ReactNode;
   renderLocalArtistCard: (name: string) => React.ReactNode;
   onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
+  openLibraryContextMenu?: (target: LibraryContextTarget) => void;
 }
 
 function parseDescriptor(rec: FypShelfRecord): FypShelfDescriptor | null {
@@ -66,6 +68,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
   renderArchiveItemCard,
   renderLocalArtistCard,
   onPlayLocalSmartStation,
+  openLibraryContextMenu,
 }) => {
   const {
     shelves,
@@ -85,7 +88,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
     const el = containerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const updateCols = (w: number) => {
-      const next = w >= 940 ? 3 : w >= 560 ? 2 : 1;
+      const next = w >= 620 ? 3 : w >= 400 ? 2 : 1;
       setGridCols((prev) => (prev === next ? prev : next));
     };
     updateCols(el.clientWidth);
@@ -201,6 +204,20 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
         data-tile-key={`fyp:${shelfUid}:station:${st.id}`}
         role="button"
         tabIndex={0}
+        onContextMenu={(e) => {
+          if (!openLibraryContextMenu) return;
+          e.preventDefault();
+          openLibraryContextMenu({
+            type: 'collection',
+            kind: 'local_station',
+            id: st.id,
+            title: st.title,
+            subtitle: `${st.track_count} tracks • ${st.subtitle}`,
+            art_url: st.art_url,
+            source: 'local',
+            rawItem: st,
+          });
+        }}
         onClick={() => onPlayLocalSmartStation(st, false)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -808,6 +825,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
               key={rec.shelf_uid}
               ref={(el) => registerShelfElement(el, descriptor)}
               data-fyp-shelf-uid={rec.shelf_uid}
+              data-fyp-shelf-title={rec.title}
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
             >
               <div
@@ -846,32 +864,62 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
-                  data-focusable="true"
-                  data-row-aux="true"
-                  onClick={() =>
-                    window.dispatchEvent(
-                      new CustomEvent('simp-restore-origin-route', {
-                        detail: descriptor.originRoute,
-                      })
-                    )
-                  }
-                  title="Open this shelf inside its source hub"
-                  style={{
-                    minHeight: 26,
-                    padding: '0 9px',
-                    borderRadius: 7,
-                    background: '#12131c',
-                    border: '1px solid #26293a',
-                    color: '#93c5fd',
-                    fontSize: 10.5,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Open Source ▸
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    data-right-filter-pill="true"
+                    data-fyp-pin-btn="true"
+                    data-fyp-shelf-uid={rec.shelf_uid}
+                    data-fyp-shelf-title={rec.title}
+                    data-fyp-shelf-pinned="true"
+                    onClick={() => unpinShelf(rec.shelf_uid)}
+                    title={`Remove "${rec.title}" from Imp FYP`}
+                    style={{
+                      minHeight: 26,
+                      padding: '0 8px',
+                      borderRadius: 7,
+                      background: '#161822',
+                      border: '1px solid #383c52',
+                      color: '#e2e8f0',
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <ImpIcon name="check" size={11} color="#e2e8f0" />
+                    <span>In FYP</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-right-filter-pill="true"
+                    data-fyp-open-source-btn="true"
+                    data-fyp-shelf-title={rec.title}
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent('simp-restore-origin-route', {
+                          detail: descriptor.originRoute,
+                        })
+                      )
+                    }
+                    title="Open this shelf inside its source hub"
+                    style={{
+                      minHeight: 26,
+                      padding: '0 9px',
+                      borderRadius: 7,
+                      background: '#12131c',
+                      border: '1px solid #26293a',
+                      color: '#93c5fd',
+                      fontSize: 10.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Open Source ▸
+                  </button>
+                </div>
               </div>
               {renderShelfBody(descriptor, items)}
             </section>

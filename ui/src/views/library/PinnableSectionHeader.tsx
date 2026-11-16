@@ -56,8 +56,11 @@ export const PinnableSectionHeader: React.FC<PinnableSectionHeaderProps> = ({
         {trailing}
         <button
           type="button"
-          data-focusable="true"
-          data-row-aux="true"
+          data-right-filter-pill="true"
+          data-fyp-pin-btn="true"
+          data-fyp-shelf-uid={descriptor.shelfUid}
+          data-fyp-shelf-title={descriptor.title}
+          data-fyp-shelf-pinned={isPinned ? 'true' : 'false'}
           onClick={() => {
             if (isPinned) {
               unpinShelf(descriptor.shelfUid);

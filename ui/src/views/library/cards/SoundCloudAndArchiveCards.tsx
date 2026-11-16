@@ -207,18 +207,35 @@ export interface SoundCloudUserCardProps {
   user: SoundCloudUserSummary;
   browserTarget: BrowserTarget | null;
   selectSoundCloudUser: (user: SoundCloudUserSummary) => void;
+  openLibraryContextMenu?: (target: LibraryContextTarget) => void;
 }
 
 export const SoundCloudUserCard: React.FC<SoundCloudUserCardProps> = ({
   user,
   browserTarget,
   selectSoundCloudUser,
+  openLibraryContextMenu,
 }) => {
   const isSelected = browserTarget?.kind === 'soundcloud_user' && browserTarget.id === user.id;
   return (
     <button
       data-right-tile="true"
       data-tile-key={`artist:soundcloud:${user.id}`}
+      onContextMenu={(e) => {
+        if (!openLibraryContextMenu) return;
+        e.preventDefault();
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'artist',
+          id: user.id,
+          title: `@${user.username}`,
+          subtitle: user.description || `${user.track_count} tracks`,
+          art_url: user.avatar_url,
+          artistName: user.username,
+          source: 'soundcloud',
+          rawItem: user,
+        });
+      }}
       onClick={() => selectSoundCloudUser(user)}
       style={{
         minWidth: 0,

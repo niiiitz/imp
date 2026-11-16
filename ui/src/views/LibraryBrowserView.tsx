@@ -93,12 +93,21 @@ import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { BrowserTarget, isUiVideoTrack } from './PlayerView';
 import { SourceVisibilityPrefs } from './SettingsModal';
 
+export interface LibraryShelfAction {
+  shelfUid: string;
+  title: string;
+  isPinned: boolean;
+  triggerClick: () => void;
+  openSourceClick?: () => void;
+}
+
 export type LibraryContextTarget =
   | {
       type: 'track';
       track: TrackMetadata;
       peerList: TrackMetadata[];
       isViewingLocalPlaylist?: boolean;
+      shelfActions?: LibraryShelfAction[];
     }
   | {
       type: 'collection';
@@ -108,7 +117,10 @@ export type LibraryContextTarget =
         | 'cloud_playlist'
         | 'cloud_album'
         | 'sc_playlist'
-        | 'ia_item';
+        | 'ia_item'
+        | 'local_station'
+        | 'apple_station'
+        | 'artist';
       id: string;
       title: string;
       subtitle?: string;
@@ -116,6 +128,15 @@ export type LibraryContextTarget =
       artistName?: string;
       source: 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
       rawItem: any;
+      shelfActions?: LibraryShelfAction[];
+    }
+  | {
+      type: 'shelf';
+      title: string;
+      subtitle?: string;
+      shelfActions: LibraryShelfAction[];
+      pinArchiveCollectionClick?: () => void;
+      pinArchiveCollectionLabel?: string;
     };
 
 export interface LibraryBrowserViewProps {
@@ -2651,9 +2672,59 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     [handleAddTracksToPlaylist, setCloudLoading]
   );
 
+  const collectShelfActionsFromDom = useCallback(
+    (focusedEl: HTMLElement | null, includeAllRightPaneShelves: boolean): LibraryShelfAction[] => {
+      const toAction = (btn: HTMLElement): LibraryShelfAction | null => {
+        const shelfUid = btn.dataset.fypShelfUid;
+        if (!shelfUid) return null;
+        const rect = btn.getBoundingClientRect();
+        if (rect.width <= 0 && rect.height <= 0) return null;
+        const sectionEl = btn.closest<HTMLElement>('section');
+        const openBtn = sectionEl?.querySelector<HTMLElement>('[data-fyp-open-source-btn="true"]');
+        return {
+          shelfUid,
+          title: btn.dataset.fypShelfTitle || sectionEl?.dataset.fypShelfTitle || 'Section',
+          isPinned: btn.dataset.fypShelfPinned === 'true',
+          triggerClick: () => btn.click(),
+          openSourceClick: openBtn ? () => openBtn.click() : undefined,
+        };
+      };
+
+      const sectionEl = focusedEl?.closest<HTMLElement>('[data-nav-col="right"] section');
+      const sectionBtn = sectionEl?.querySelector<HTMLElement>('[data-fyp-pin-btn="true"]');
+      if (sectionBtn) {
+        const one = toAction(sectionBtn);
+        if (one) return [one];
+      }
+      if (!includeAllRightPaneShelves) return [];
+
+      const seen = new Set<string>();
+      const actions: LibraryShelfAction[] = [];
+      document
+        .querySelectorAll<HTMLElement>('[data-nav-col="right"] [data-fyp-pin-btn="true"]')
+        .forEach((btn) => {
+          const action = toAction(btn);
+          if (action && !seen.has(action.shelfUid)) {
+            seen.add(action.shelfUid);
+            actions.push(action);
+          }
+        });
+      return actions;
+    },
+    []
+  );
+
   const openLibraryContextMenu = useCallback(
     (target: LibraryContextTarget) => {
-      setLibraryContextTarget(target);
+      let enriched = target;
+      if (target.type !== 'shelf' && !target.shelfActions?.length) {
+        const focusedEl = document.querySelector<HTMLElement>('[data-simp-active-focus="true"]');
+        const shelfActions = collectShelfActionsFromDom(focusedEl, false);
+        if (shelfActions.length > 0) {
+          enriched = { ...target, shelfActions };
+        }
+      }
+      setLibraryContextTarget(enriched);
       window.setTimeout(() => {
         const firstBtn = document.querySelector<HTMLElement>(
           '[data-library-context-modal="true"] button[data-default-focus="true"], [data-library-context-modal="true"] button:not([disabled])'
@@ -2661,7 +2732,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (firstBtn) applyFocusMarker(firstBtn);
       }, 30);
     },
-    [applyFocusMarker]
+    [applyFocusMarker, collectShelfActionsFromDom]
   );
 
   // Inserts one or more tracks into the active playback queue immediately after the current track
@@ -2736,6 +2807,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         const d = await resp.json();
         const detail: ArchiveItemDetail | undefined = d?.detail || d?.data;
         return detail?.tracks || [];
+      }
+      if (target.kind === 'local_station') {
+        const st = target.rawItem as LocalSmartStation;
+        return st.tracks || [];
       }
       return [];
     },
@@ -2817,6 +2892,48 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           return;
         }
 
+        // 3b. Focused in the Right Pane (Section header/FYP button or top-level filter/hub controls) -> open Imp FYP / Collection Actions modal
+        if (focused?.closest('[data-nav-col="right"]')) {
+          if (focused.dataset.fypPinBtn === 'true' || focused.dataset.fypOpenSourceBtn === 'true') {
+            const shelfActions = collectShelfActionsFromDom(focused, false);
+            if (shelfActions.length > 0) {
+              openLibraryContextMenu({
+                type: 'shelf',
+                title: focused.dataset.fypShelfTitle || shelfActions[0].title,
+                subtitle: 'Section & Imp FYP Options',
+                shelfActions,
+              });
+              return;
+            }
+          }
+
+          if (rightPaneMode === 'browse' || rightPaneMode === 'artist') {
+            const shelfActions = collectShelfActionsFromDom(focused, true);
+            const pinCollBtn = document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] [data-right-pin-collection="true"]'
+            );
+            const pinCollRect = pinCollBtn?.getBoundingClientRect();
+            const hasPinCollBtn =
+              Boolean(pinCollBtn && pinCollRect && pinCollRect.width > 0 && pinCollRect.height > 0);
+            if (shelfActions.length > 0 || hasPinCollBtn) {
+              openLibraryContextMenu({
+                type: 'shelf',
+                title:
+                  rightPaneMode === 'artist'
+                    ? activeArtistProfile?.displayName || 'Artist Profile'
+                    : activeHubLabel || 'Imp Library',
+                subtitle: 'Imp FYP & Collection Actions',
+                shelfActions,
+                pinArchiveCollectionClick: hasPinCollBtn && pinCollBtn ? () => pinCollBtn.click() : undefined,
+                pinArchiveCollectionLabel: hasPinCollBtn && pinCollBtn
+                  ? pinCollBtn.textContent?.trim() || 'Pin Collection'
+                  : undefined,
+              });
+              return;
+            }
+          }
+        }
+
         // 4. In Tracklist view (`rightPaneMode === 'tracks'`) -> trigger collection-level `[data-collection-select="true"]`
         if (rightPaneMode === 'tracks') {
           const collSelectBtn = document.querySelector<HTMLElement>(
@@ -2868,6 +2985,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     rightPaneMode,
     handleDeletePlaylist,
     libraryContextTarget,
+    collectShelfActionsFromDom,
+    openLibraryContextMenu,
+    activeHubLabel,
+    activeArtistProfile,
   ]);
 
   // Context Legend & Collection Action Bar (Target pill retired; SELECT/Y badges hidden in mouse mode)
@@ -2966,6 +3087,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       st={st}
       playingContextId={playingContextId}
       handleStartAppleStation={handleStartAppleStation}
+      openLibraryContextMenu={openLibraryContextMenu}
     />
   );
 
@@ -2989,6 +3111,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       user={user}
       browserTarget={browserTarget}
       selectSoundCloudUser={selectSoundCloudUser}
+      openLibraryContextMenu={openLibraryContextMenu}
     />
   );
 
@@ -3001,6 +3124,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         activeArtistProfile?.source === "apple_music" &&
         activeArtistProfile?.idOrName === artist.id
       }
+      openLibraryContextMenu={openLibraryContextMenu}
       onSelect={() =>
         openArtistProfile({
           source: "apple_music",
@@ -3026,6 +3150,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         activeArtistProfile?.source === "local" &&
         activeArtistProfile?.displayName.toLowerCase() === artistName.toLowerCase()
       }
+      openLibraryContextMenu={openLibraryContextMenu}
       onSelect={() =>
         openArtistProfile({
           source: "local",
@@ -3106,7 +3231,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       style={{
         flex: 1,
         display: hidden ? 'none' : 'grid',
-        gridTemplateColumns: 'clamp(320px, 28%, 420px) minmax(0, 1fr)',
+        gridTemplateColumns: 'clamp(276px, 24.5%, 360px) minmax(0, 1fr)',
         gridTemplateRows: 'auto minmax(0, 1fr)',
         overflow: 'hidden',
         boxSizing: 'border-box',
@@ -3514,6 +3639,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             radioStations={radioStations}
             recentlyAddedCloudAlbums={recentlyAddedCloudAlbums}
             recentlyPlayed={recentlyPlayed}
+            openLibraryContextMenu={openLibraryContextMenu}
             renderAppleArtistCard={renderAppleArtistCard}
             renderArchiveItemCard={renderArchiveItemCard}
             renderCloudAlbumCard={renderCloudAlbumCard}
@@ -3720,6 +3846,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           handlePinArchiveItem={handlePinArchiveItem}
           handleDeletePlaylist={handleDeletePlaylist}
           handleDeleteAlbum={handleDeleteAlbum}
+          onPlayLocalSmartStation={handlePlayLocalSmartStation}
+          handleStartAppleStation={handleStartAppleStation}
         />
       )}
     </main>

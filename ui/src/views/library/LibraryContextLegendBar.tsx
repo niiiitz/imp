@@ -82,11 +82,6 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
   handleTogglePinLocalAlbum,
   setRightPaneMode,
 }) => {
-  const isViewingLocalPlaylist =
-    rightPaneMode === 'tracks' &&
-    browserTarget?.kind === 'playlist' &&
-    selectedPlaylistObj?.origin === 'simp_local';
-
   const isCloudPlaylistPinned =
     rightPaneMode === 'tracks' &&
     browserTarget?.kind === 'cloud_playlist' &&
