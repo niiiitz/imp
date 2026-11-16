@@ -612,4 +612,39 @@ mod tests {
         let mapped_track = map_apple_item_to_track(&explicit_track).expect("track with rating");
         assert_eq!(mapped_track.content_rating.as_deref(), Some("explicit"));
     }
+
+    #[test]
+    fn test_parse_apple_album_summary_falls_back_to_catalog_track_count_and_date_added() {
+        let lib_album_stub = serde_json::json!({
+            "id": "l.stub001",
+            "type": "library-albums",
+            "attributes": {
+                "name": "Sample Catalog Fallback Album",
+                "artistName": "Example Artist",
+                "trackCount": 0
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [{
+                        "id": "1700000999",
+                        "type": "albums",
+                        "attributes": {
+                            "trackCount": 14,
+                            "releaseDate": "2024-02-14",
+                            "dateAdded": "2026-11-16T22:00:00Z",
+                            "artwork": {
+                                "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/cover.jpg/{w}x{h}bb.jpg"
+                            }
+                        }
+                    }]
+                }
+            }
+        });
+
+        let summary = parse_apple_album_summary(&lib_album_stub, "library")
+            .expect("should parse library stub");
+        assert_eq!(summary.track_count, 14);
+        assert_eq!(summary.release_year, Some(2024));
+        assert_eq!(summary.date_added.as_deref(), Some("2026-11-16T22:00:00Z"));
+    }
 }

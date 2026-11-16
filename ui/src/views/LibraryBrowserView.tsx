@@ -50,6 +50,7 @@ import {
 import { LibraryBrowseRightPane } from './library/panes/LibraryBrowseRightPane';
 import { LibraryTracklistRightPane } from './library/panes/LibraryTracklistRightPane';
 import {
+  cacheAppleRecentLibraryShelf,
   fetchLocalDiscover,
   FypOriginRoute,
   LocalDiscoverResponse,
@@ -668,12 +669,56 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     recentLoadedRef.current = true;
     fetchAppleLibraryRecentlyAdded()
       .then((albs) => {
-        if (Array.isArray(albs)) setRecentlyAddedCloudAlbums(albs);
+        if (Array.isArray(albs)) {
+          setRecentlyAddedCloudAlbums(albs);
+          cacheAppleRecentLibraryShelf(albs);
+        }
       })
       .catch(() => {
         recentLoadedRef.current = false;
       });
   }, [snap?.apple_authenticated, isSourceIncluded, appleSubTab, recentlyAddedCloudAlbums.length]);
+
+  useEffect(() => {
+    let followUpTimer: number | null = null;
+    const syncRecentLibrary = () => {
+      fetchAppleLibraryRecentlyAdded()
+        .then((albs) => {
+          if (Array.isArray(albs)) {
+            recentLoadedRef.current = true;
+            setRecentlyAddedCloudAlbums(albs);
+            cacheAppleRecentLibraryShelf(albs);
+          }
+        })
+        .catch(() => {});
+    };
+    const onAppleLibraryUpdated = () => {
+      syncRecentLibrary();
+      if (followUpTimer !== null) {
+        window.clearTimeout(followUpTimer);
+      }
+      followUpTimer = window.setTimeout(syncRecentLibrary, 2000);
+    };
+    const onFypShelfUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ cacheKey?: string; items?: unknown[] }>).detail;
+      if (
+        detail?.cacheKey === 'apple:for_you:recent_library' &&
+        Array.isArray(detail.items)
+      ) {
+        recentLoadedRef.current = true;
+        setRecentlyAddedCloudAlbums(detail.items as AppleCloudAlbumSummary[]);
+      }
+    };
+    window.addEventListener('simp-apple-library-updated', onAppleLibraryUpdated);
+    window.addEventListener('simp-fyp-shelf-updated', onFypShelfUpdated);
+    return () => {
+      if (followUpTimer !== null) {
+        window.clearTimeout(followUpTimer);
+      }
+      window.removeEventListener('simp-apple-library-updated', onAppleLibraryUpdated);
+      window.removeEventListener('simp-fyp-shelf-updated', onFypShelfUpdated);
+    };
+  }, []);
 
   // Clear activeMountRoot if user switches source filter away from Local
   useEffect(() => {

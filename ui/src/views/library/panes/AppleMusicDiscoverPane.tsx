@@ -20,6 +20,7 @@ import {
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { PinnableSectionHeader } from "../PinnableSectionHeader";
 import {
+  cacheAppleRecentLibraryShelf,
   inferAppleShelfItemKind,
   mapAppleShelfToFypItems,
   TTL_CATALOG_FEED_SEC,
@@ -451,8 +452,10 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                     .catch(() => {}),
                                   fetchAppleLibraryRecentlyAdded()
                                     .then((albs) => {
-                                      if (Array.isArray(albs))
+                                      if (Array.isArray(albs)) {
                                         setRecentlyAddedCloudAlbums(albs);
+                                        cacheAppleRecentLibraryShelf(albs);
+                                      }
                                     })
                                     .catch(() => {}),
                                 ]).finally(() => setCloudLoading(false));

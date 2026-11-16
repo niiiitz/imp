@@ -344,6 +344,22 @@ export async function writeCachedShelves(
   if (shelves.length === 0) return;
   try {
     const nowUnix = Math.floor(Date.now() / 1000);
+    let updatedSnapshots = false;
+    const nextSnapshots = { ...fypStore.snapshots };
+    for (const s of shelves) {
+      if (Array.isArray(s.data)) {
+        nextSnapshots[s.cacheKey] = {
+          items: s.data,
+          fetchedAt: nowUnix,
+          ttlSec: s.ttlSec,
+        };
+        updatedSnapshots = true;
+      }
+    }
+    if (updatedSnapshots) {
+      fypStore.snapshots = nextSnapshots;
+      notifyFypListeners();
+    }
     const records: CachedShelfRecord[] = shelves.map((s) => ({
       cache_key: s.cacheKey,
       provider: s.provider,
@@ -361,6 +377,19 @@ export async function writeCachedShelves(
   } catch {
     // Non-fatal cache write error
   }
+}
+
+export function cacheAppleRecentLibraryShelf(albums: unknown[]): Promise<void> {
+  return writeCachedShelves([
+    {
+      cacheKey: 'apple:for_you:recent_library',
+      provider: 'apple_music',
+      shelfId: 'apple:for_you:recent_library',
+      title: 'Apple Music • Recently Added Library',
+      data: albums,
+      ttlSec: TTL_CATALOG_FEED_SEC,
+    },
+  ]);
 }
 
 // =========================================================================
@@ -713,6 +742,13 @@ export function queueFypRevalidation(descriptor: FypShelfDescriptor, force = fal
             ttlSec: descriptor.ttlSec,
           },
         };
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('simp-fyp-shelf-updated', {
+              detail: { cacheKey: descriptor.cacheKey, items },
+            })
+          );
+        }
         await writeCachedShelves([
           {
             cacheKey: descriptor.cacheKey,

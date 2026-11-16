@@ -196,6 +196,7 @@ pub(crate) fn parse_apple_album_summary(alb: &Value, default_kind: &str) -> Opti
         .and_then(|y| y.parse::<u32>().ok());
     let date_added = attrs
         .get("dateAdded")
+        .or_else(|| alb.pointer("/relationships/catalog/data/0/attributes/dateAdded"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let content_rating = extract_apple_content_rating(alb);
@@ -207,6 +208,19 @@ pub(crate) fn parse_apple_album_summary(alb: &Value, default_kind: &str) -> Opti
         default_kind
     }
     .to_string();
+    let attr_track_count = attrs
+        .get("trackCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let rel_track_count = alb
+        .pointer("/relationships/catalog/data/0/attributes/trackCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+    let track_count = if attr_track_count > 0 {
+        attr_track_count
+    } else {
+        rel_track_count
+    };
 
     Some(AppleCloudAlbumSummary {
         id: id.to_string(),
@@ -221,10 +235,7 @@ pub(crate) fn parse_apple_album_summary(alb: &Value, default_kind: &str) -> Opti
             .unwrap_or("Unknown Artist")
             .to_string(),
         art_url: format_apple_art_url(raw_art, 300),
-        track_count: attrs
-            .get("trackCount")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize,
+        track_count,
         release_year,
         kind,
         date_added,
@@ -826,13 +837,78 @@ pub fn search_catalog(settings: &SimpSettings, term: &str) -> Result<AppleCatalo
     })
 }
 
+static RECENT_USER_ADDED_ALBUMS: OnceLock<Mutex<Vec<AppleCloudAlbumSummary>>> = OnceLock::new();
+
+fn recent_user_added_albums() -> &'static Mutex<Vec<AppleCloudAlbumSummary>> {
+    RECENT_USER_ADDED_ALBUMS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn album_dedup_key(alb: &AppleCloudAlbumSummary) -> (String, String) {
+    (
+        alb.title.trim().to_ascii_lowercase(),
+        alb.artist.trim().to_ascii_lowercase(),
+    )
+}
+
+/// Records an album added via `POST /v1/me/library?ids[albums]=...` in the in-memory session list
+/// so "Recently Added to Your Apple Cloud Library" surfaces it immediately while Apple's CDN index updates.
+pub(crate) fn record_user_added_apple_album(settings: &SimpSettings, album_id: &str) {
+    let clean = album_id.trim();
+    if clean.is_empty() {
+        return;
+    }
+    let Ok((dev_token, user_token)) = resolve_tokens(settings) else {
+        return;
+    };
+    let summary = if clean.starts_with("l.") {
+        apple_get_json(
+            &format!("/v1/me/library/albums/{}?include=catalog", urlencode(clean)),
+            &dev_token,
+            &user_token,
+        )
+        .or_else(|_| {
+            apple_get_json(
+                &format!("/v1/me/library/albums/{}", urlencode(clean)),
+                &dev_token,
+                &user_token,
+            )
+        })
+        .ok()
+        .and_then(|j| j.pointer("/data/0").and_then(|v| parse_apple_album_summary(v, "library")))
+    } else {
+        let storefront = get_storefront(&dev_token, &user_token);
+        apple_get_json(
+            &format!(
+                "/v1/catalog/{}/albums/{}",
+                urlencode(&storefront),
+                urlencode(clean)
+            ),
+            &dev_token,
+            &user_token,
+        )
+        .ok()
+        .and_then(|j| j.pointer("/data/0").and_then(|v| parse_apple_album_summary(v, "catalog")))
+    };
+
+    if let Some(alb) = summary {
+        if let Ok(mut guard) = recent_user_added_albums().lock() {
+            let key = album_dedup_key(&alb);
+            guard.retain(|existing| existing.id != alb.id && album_dedup_key(existing) != key);
+            guard.insert(0, alb);
+            if guard.len() > 25 {
+                guard.truncate(25);
+            }
+        }
+    }
+}
+
 /// Fetches the user's "Recently Added" personal Cloud Library albums (`/v1/me/library/recently-added?include=catalog&limit=25`
-/// + `/v1/me/library/albums?include=catalog&limit=50`), automatically filtering out 1-track single-song playlist stubs
-/// when full (`2+` track) albums are present.
+/// + `/v1/me/library/albums?sort=-dateAdded&include=catalog&limit=25`), automatically filtering out 1-track single-song stubs
+/// when full (`2+` track or pending-metadata `0` track) albums are present.
 pub fn fetch_library_recently_added(settings: &SimpSettings) -> Result<Vec<AppleCloudAlbumSummary>> {
     let (dev_token, user_token) = resolve_tokens(settings)?;
-    let mut raw_albums = Vec::new();
-    let mut seen_ids = HashSet::new();
+    let mut rec_added_albums = Vec::new();
+    let mut rec_seen_ids = HashSet::new();
 
     for url in [
         "/v1/me/library/recently-added?include=catalog&limit=25",
@@ -856,8 +932,8 @@ pub fn fetch_library_recently_added(settings: &SimpSettings) -> Result<Vec<Apple
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if item_type == "library-albums" || item_type == "albums" {
                     if let Some(alb) = parse_apple_album_summary(item, "library") {
-                        if seen_ids.insert(alb.id.clone()) {
-                            raw_albums.push(alb);
+                        if rec_seen_ids.insert(alb.id.clone()) {
+                            rec_added_albums.push(alb);
                         }
                     }
                 }
@@ -865,9 +941,104 @@ pub fn fetch_library_recently_added(settings: &SimpSettings) -> Result<Vec<Apple
         }
     }
 
+    // Also query `/v1/me/library/albums` sorted by `dateAdded` descending because Apple CDN-caches
+    // `/v1/me/library/recently-added` behind API additions (and omits albums if a track was already saved).
+    let mut used_sorted_endpoint = false;
+    let lib_albums_json = match apple_get_json(
+        "/v1/me/library/albums?sort=-dateAdded&include=catalog&limit=25",
+        &dev_token,
+        &user_token,
+    ) {
+        Ok(j) => {
+            used_sorted_endpoint = true;
+            Some(j)
+        }
+        Err(_) => apple_get_json(
+            "/v1/me/library/albums?include=catalog&limit=50",
+            &dev_token,
+            &user_token,
+        )
+        .ok(),
+    };
+
+    let mut sorted_lib_albums = Vec::new();
+    if let Some(json) = lib_albums_json {
+        if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(alb) = parse_apple_album_summary(item, "library") {
+                    sorted_lib_albums.push(alb);
+                }
+            }
+        }
+    }
+    sorted_lib_albums.sort_by(|a, b| {
+        b.date_added
+            .as_deref()
+            .unwrap_or("")
+            .cmp(a.date_added.as_deref().unwrap_or(""))
+    });
+
+    let newest_rec_date = rec_added_albums
+        .iter()
+        .filter_map(|a| a.date_added.as_deref())
+        .max()
+        .unwrap_or("");
+
+    let mut raw_albums = Vec::new();
+    let mut seen_ids = HashSet::new();
+    let mut seen_keys = HashSet::new();
+
+    // 1. Prepend freshly added `/v1/me/library/albums` entries missing from `/v1/me/library/recently-added`
+    // (either returned by `sort=-dateAdded` or having a newer/equal `dateAdded`).
+    let rec_key_set: HashSet<(String, String)> =
+        rec_added_albums.iter().map(album_dedup_key).collect();
+    for alb in &sorted_lib_albums {
+        let key = album_dedup_key(alb);
+        let missing_from_rec = !rec_seen_ids.contains(&alb.id) && !rec_key_set.contains(&key);
+        let is_newer_or_sorted = used_sorted_endpoint
+            || alb
+                .date_added
+                .as_deref()
+                .map(|d| !d.is_empty() && d >= newest_rec_date)
+                .unwrap_or(false);
+        if missing_from_rec && is_newer_or_sorted {
+            if seen_ids.insert(alb.id.clone()) && seen_keys.insert(key) {
+                raw_albums.push(alb.clone());
+            }
+        }
+    }
+
+    // 2. Seed session-added albums (`POST /v1/me/library`) that aren't already present via genuine library IDs.
+    let mut library_known_keys: HashSet<(String, String)> = seen_keys.clone();
+    for alb in &rec_added_albums {
+        library_known_keys.insert(album_dedup_key(alb));
+    }
+    if let Ok(guard) = recent_user_added_albums().lock() {
+        for alb in guard.iter() {
+            let key = album_dedup_key(alb);
+            if !library_known_keys.contains(&key)
+                && !rec_seen_ids.contains(&alb.id)
+                && seen_ids.insert(alb.id.clone())
+                && seen_keys.insert(key)
+            {
+                raw_albums.push(alb.clone());
+            }
+        }
+    }
+
+    // 3. Append Apple's `/v1/me/library/recently-added` list in its native order.
+    for alb in rec_added_albums {
+        let key = album_dedup_key(&alb);
+        if seen_ids.insert(alb.id.clone()) && seen_keys.insert(key) {
+            raw_albums.push(alb);
+        }
+    }
+
+    // Filter out 1-track single-song stubs (`track_count == 1`), keeping `track_count >= 2`
+    // and newly created `track_count == 0` stubs whose catalog trackCount isn't indexed yet.
     let full_albums: Vec<AppleCloudAlbumSummary> = raw_albums
         .iter()
-        .filter(|a| a.track_count >= 2)
+        .filter(|a| a.track_count >= 2 || a.track_count == 0)
         .cloned()
         .collect();
 

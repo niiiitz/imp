@@ -186,6 +186,9 @@ pub fn add_to_apple_cloud_library(
 
     crate::http_pool::http_custom_bytes("POST", &url, &headers, Some(b""), 15)
         .with_context(|| format!("Failed to add {clean_id} to Apple Music Cloud Library"))?;
+    if query_type == "albums" {
+        super::catalog::record_user_added_apple_album(settings, clean_id);
+    }
     Ok(())
 }
 

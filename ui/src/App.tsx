@@ -2333,6 +2333,27 @@ const ConsoleMainApp: React.FC = () => {
         await addAppleItemToCloudLibrary(idOrUri, kind, (msg) => {
           showToast(label ? `☁️ Added "${label}" to Apple Music Cloud Library!` : msg);
         });
+        window.dispatchEvent(
+          new CustomEvent('simp-apple-library-updated', { detail: { idOrUri, kind } })
+        );
+        if (kind === 'playlists') {
+          fetchAppleCloudPlaylists()
+            .then((list) => {
+              setCloudPlaylists(list);
+              applePlaylistsFetchedAtRef.current = Math.floor(Date.now() / 1000);
+              writeCachedShelves([
+                {
+                  cacheKey: 'apple:bundle:cloud_playlists',
+                  provider: 'apple_music',
+                  shelfId: 'bundle:cloud_playlists',
+                  title: 'Apple Cloud Playlists',
+                  data: list,
+                  ttlSec: TTL_CATALOG_FEED_SEC,
+                },
+              ]);
+            })
+            .catch(() => {});
+        }
       } catch (err: any) {
         showToast(err?.message || 'Could not add to Apple Music Cloud Library');
       }
