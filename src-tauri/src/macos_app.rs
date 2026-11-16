@@ -2,9 +2,8 @@
 #![allow(unexpected_cfgs)]
 
 use cocoa::appkit::{
-    NSApp, NSApplication, NSApplicationActivationPolicyAccessory,
-    NSApplicationActivationPolicyRegular, NSBackingStoreType, NSMenu, NSMenuItem, NSStatusBar,
-    NSWindow, NSWindowStyleMask,
+    NSApp, NSApplication, NSApplicationActivationPolicyRegular, NSBackingStoreType, NSMenu,
+    NSMenuItem, NSStatusBar, NSWindow, NSWindowStyleMask,
 };
 use cocoa::base::{id, nil, BOOL, NO, YES};
 use cocoa::foundation::{NSAutoreleasePool, NSPoint, NSRect, NSSize, NSString};
@@ -58,13 +57,11 @@ pub fn show_simp_macos_window() {
     });
 }
 
-/// Hides the main SIMP window to the Menu Bar and hides the Dock icon (`NSApplicationActivationPolicyAccessory`).
+/// Hides the main SIMP window to the Menu Bar while keeping the Dock tile and bundle icon stable.
 pub unsafe fn hide_simp_macos_window_to_tray(win: id) {
     if win != nil {
         let _: () = msg_send![win, orderOut: nil];
     }
-    let app = NSApp();
-    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory);
 }
 
 /// Toggles the main SIMP window between visible/focused and hidden in the Menu Bar.
@@ -128,28 +125,6 @@ fn resolve_tray_icon_path() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
-fn resolve_dock_icon_path() -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            candidates.push(exe_dir.join("../Resources/SIMP.icns"));
-            candidates.push(exe_dir.join("../Resources/ui/simp-icon-macos-squircle.png"));
-            candidates.push(exe_dir.join("../../dist/SIMP.app/Contents/Resources/SIMP.icns"));
-            candidates.push(exe_dir.join("../../ui/public/simp-icon-macos-squircle.png"));
-            candidates.push(exe_dir.join("../../ui/dist/simp-icon-macos-squircle.png"));
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        candidates.push(cwd.join("dist/SIMP.app/Contents/Resources/SIMP.icns"));
-        candidates.push(cwd.join("ui/public/simp-icon-macos-squircle.png"));
-        candidates.push(cwd.join("ui/dist/simp-icon-macos-squircle.png"));
-    }
-    if let Some(icns) = candidates.into_iter().find(|p| p.is_file()) {
-        return Some(icns);
-    }
-    resolve_tray_icon_path()
-}
-
 unsafe fn load_simp_nsimage(size_pt: f64) -> id {
     if let Some(path) = resolve_tray_icon_path() {
         if let Some(path_str) = path.to_str() {
@@ -158,20 +133,6 @@ unsafe fn load_simp_nsimage(size_pt: f64) -> id {
             let img: id = msg_send![img, initWithContentsOfFile: ns_path];
             if img != nil {
                 let _: () = msg_send![img, setSize: NSSize::new(size_pt, size_pt)];
-                return img;
-            }
-        }
-    }
-    nil
-}
-
-unsafe fn load_simp_dock_nsimage() -> id {
-    if let Some(path) = resolve_dock_icon_path() {
-        if let Some(path_str) = path.to_str() {
-            let ns_path = ns_string(path_str);
-            let img: id = msg_send![class!(NSImage), alloc];
-            let img: id = msg_send![img, initWithContentsOfFile: ns_path];
-            if img != nil {
                 return img;
             }
         }
@@ -575,12 +536,6 @@ pub fn run_macos_native_app(ui_url: &str) {
         let _pool = NSAutoreleasePool::new(nil);
         let app = NSApp();
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
-
-        // Set application Dock icon from SIMP.icns (with proper macOS 824x824 squircle padding)
-        let dock_icon = load_simp_dock_nsimage();
-        if dock_icon != nil {
-            let _: () = msg_send![app, setApplicationIconImage: dock_icon];
-        }
 
         let delegate_cls = register_delegate_class();
         let delegate: id = msg_send![delegate_cls, new];
