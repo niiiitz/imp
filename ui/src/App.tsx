@@ -411,6 +411,7 @@ const ConsoleMainApp: React.FC = () => {
 
   // OLED auto-dim, active luminance percentage, popovers & sub-pixel orbit state
   const [isDimmed, setIsDimmed] = useState(false);
+  const [libraryIdleDimmed, setLibraryIdleDimmed] = useState(false);
   const [brightnessPct, setBrightnessPct] = useState<number>(() => {
     try {
       const saved = window.localStorage.getItem('simp_brightness_pct_v2');
@@ -469,7 +470,11 @@ const ConsoleMainApp: React.FC = () => {
     [-1, 1],
   ];
   const [orbitX, orbitY] = ORBIT_OFFSETS[orbitStep % ORBIT_OFFSETS.length];
-  const activeOpacity = Math.max(0.25, Math.min(1, brightnessPct / 100));
+  const baseOpacity = Math.max(0.25, Math.min(1, brightnessPct / 100));
+  const activeOpacity =
+    view === 'browser' && libraryIdleDimmed && !desktopScreensaverActive
+      ? Math.max(0.12, baseOpacity * 0.5)
+      : baseOpacity;
 
   const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
@@ -1704,11 +1709,23 @@ const ConsoleMainApp: React.FC = () => {
   }, [desktopMode, snap?.current_track]);
 
   useEffect(() => {
-    if (!desktopMode || view !== 'browser' || desktopVizIdleSec <= 0) {
+    if (view !== 'browser') {
       setDesktopScreensaverActive(false);
+      setLibraryIdleDimmed(false);
       return;
     }
 
+    if (!isPlaying) {
+      setDesktopScreensaverActive(false);
+    }
+
+    if (isPlaying && desktopMode && desktopVizIdleSec <= 0) {
+      setDesktopScreensaverActive(false);
+      setLibraryIdleDimmed(false);
+      return;
+    }
+
+    const idleSec = desktopVizIdleSec > 0 ? desktopVizIdleSec : 30;
     let timerId: number | undefined;
     const armTimer = () => {
       if (timerId) window.clearTimeout(timerId);
@@ -1724,9 +1741,15 @@ const ConsoleMainApp: React.FC = () => {
           armTimer();
           return;
         }
-        screensaverEnteredAtRef.current = performance.now();
-        setDesktopScreensaverActive(true);
-      }, desktopVizIdleSec * 1000);
+        if (isPlaying && desktopMode && desktopVizIdleSec > 0) {
+          screensaverEnteredAtRef.current = performance.now();
+          setDesktopScreensaverActive(true);
+          setLibraryIdleDimmed(false);
+        } else {
+          setDesktopScreensaverActive(false);
+          setLibraryIdleDimmed(true);
+        }
+      }, idleSec * 1000);
     };
 
     const onUserActivity = (ev?: Event) => {
@@ -1737,6 +1760,7 @@ const ConsoleMainApp: React.FC = () => {
         return;
       }
       setDesktopScreensaverActive(false);
+      setLibraryIdleDimmed(false);
       armTimer();
     };
 
@@ -1774,7 +1798,7 @@ const ConsoleMainApp: React.FC = () => {
       window.removeEventListener('touchstart', onUserActivity);
       window.removeEventListener('simp-wake-idle', onUserActivity);
     };
-  }, [desktopMode, view, desktopVizIdleSec, isOverlayOrPopoverOpen]);
+  }, [desktopMode, view, desktopVizIdleSec, isOverlayOrPopoverOpen, isPlaying]);
 
   // 6 & 7. Gamepad / Spatial Focus Navigation Hook
   const { applyFocusMarker } = useGamepadNavigation({
@@ -2524,7 +2548,7 @@ const ConsoleMainApp: React.FC = () => {
         flexDirection: 'column',
         opacity: activeOpacity,
         transform: isActiveVideoPlayback ? undefined : `translate3d(${orbitX}px, ${orbitY}px, 0)`,
-        transition: 'opacity 200ms ease, transform 4000ms linear',
+        transition: 'opacity 450ms ease, transform 4000ms linear',
         position: 'relative',
       }}
     >
