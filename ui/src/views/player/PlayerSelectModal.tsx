@@ -73,8 +73,11 @@ export interface PlayerSelectModalProps {
   currentQueueIdx: number;
   queueModalItems: PlayerSelectQueueItem[];
   setRightColMode: React.Dispatch<React.SetStateAction<'queue' | 'chapters'>>;
-  togglePlayerFullscreen: () => void;
-  isFullscreen: boolean;
+  isDeckyEmbedded?: boolean;
+  desktopMode?: boolean;
+  onToggleDesktopMode?: (next: boolean) => void;
+  desktopVizIdleSec?: number;
+  onChangeDesktopVizIdleSec?: (sec: number) => void;
   setVizDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   vizMode: VisualizerMode;
   enabledVizScenes: VisualizerEngine[];
@@ -151,8 +154,11 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
   currentQueueIdx,
   queueModalItems,
   setRightColMode,
-  togglePlayerFullscreen,
-  isFullscreen,
+  isDeckyEmbedded = false,
+  desktopMode = false,
+  onToggleDesktopMode,
+  desktopVizIdleSec = 30,
+  onChangeDesktopVizIdleSec,
   setVizDrawerOpen,
   vizMode,
   enabledVizScenes,
@@ -414,7 +420,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       🖥️ Interface
                     </span>
                     <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                      Fullscreen, Visualizer, Lyrics, Factoids
+                      {!isDeckyEmbedded ? 'Desktop Mode, ' : ''}Visualizer, Lyrics, Factoids
                       {isSoundCloudTrack ? ', Comments' : ''}
                       {isVideoTrack ? ', Stream' : ''}
                     </span>
@@ -893,40 +899,138 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       boxSizing: 'border-box',
                     }}
                   >
-                    {/* 1. Full Screen */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPlayerActionsOpen(false);
-                        togglePlayerFullscreen();
-                      }}
-                      style={{
-                        ...actionRowBtnStyle,
-                        minHeight: 46,
-                        padding: '8px 12px',
-                        background: isFullscreen ? '#0f222a' : '#101018',
-                        border: isFullscreen ? '1px solid #2aa3c4' : '1px solid #222230',
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <span style={{ fontSize: 12.5, fontWeight: 800, color: '#bfeaf5' }}>
-                          ⛶ {isFullscreen ? 'Exit Full Screen' : 'Full Screen'}
-                        </span>
-                        <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                          Shortcut: F / F11 / Alt+F or double-click background
-                        </span>
+                    {/* 1. Desktop Mode & Idle Visualizer Screensaver (Hidden inside Decky plugin iframe) */}
+                    {!isDeckyEmbedded && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => onToggleDesktopMode?.(!desktopMode)}
+                          style={{
+                            ...actionRowBtnStyle,
+                            minHeight: 46,
+                            padding: '8px 12px',
+                            background: desktopMode ? '#0f222a' : '#101018',
+                            border: desktopMode ? '1px solid #2aa3c4' : '1px solid #222230',
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 800, color: '#bfeaf5' }}>
+                              🖥️ Desktop Mode
+                            </span>
+                            <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
+                              Stay in Library on play &amp; hide top Player/Library tabs
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              fontWeight: 800,
+                              color: desktopMode ? '#67e8f9' : '#71717a',
+                            }}
+                          >
+                            {desktopMode ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
+
+                        {desktopMode && (
+                          <div
+                            style={{
+                              padding: '10px 12px',
+                              borderRadius: 12,
+                              background: '#0b141a',
+                              border: '1px solid #1e3a4a',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 10,
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span style={{ fontSize: 11.5, fontWeight: 800, color: '#bfeaf5' }}>
+                                  ✨ Idle Visualizer Screensaver Timer
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: 10.5,
+                                    fontFamily: 'monospace',
+                                    color: '#67e8f9',
+                                  }}
+                                >
+                                  {desktopVizIdleSec === 0
+                                    ? 'Disabled'
+                                    : desktopVizIdleSec >= 60 && desktopVizIdleSec % 60 === 0
+                                      ? `${desktopVizIdleSec / 60}m idle`
+                                      : `${desktopVizIdleSec}s idle`}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                {[
+                                  { sec: 0, label: 'Off' },
+                                  { sec: 15, label: '15s' },
+                                  { sec: 30, label: '30s' },
+                                  { sec: 60, label: '60s' },
+                                  { sec: 120, label: '2m' },
+                                  { sec: 300, label: '5m' },
+                                ].map((preset) => {
+                                  const active = desktopVizIdleSec === preset.sec;
+                                  return (
+                                    <button
+                                      key={preset.sec}
+                                      type="button"
+                                      data-focusable="true"
+                                      onClick={() => onChangeDesktopVizIdleSec?.(preset.sec)}
+                                      style={{
+                                        minHeight: 30,
+                                        padding: '0 10px',
+                                        borderRadius: 8,
+                                        background: active ? '#122934' : '#10121a',
+                                        border: active ? '1px solid #2aa3c4' : '1px solid #242636',
+                                        color: active ? '#67e8f9' : '#a1a1aa',
+                                        fontSize: 11,
+                                        fontFamily: 'monospace',
+                                        fontWeight: 800,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              data-focusable="true"
+                              onClick={() => {
+                                onToggleDesktopMode?.(false);
+                                setPlayerActionsOpen(false);
+                              }}
+                              style={{
+                                minHeight: 34,
+                                padding: '0 12px',
+                                borderRadius: 8,
+                                background: '#14141e',
+                                border: '1px solid #2e3244',
+                                color: '#d4d4dc',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                textAlign: 'center',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Restore Dual Player + Library Mode
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <span
-                        style={{
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                          fontWeight: 800,
-                          color: isFullscreen ? '#67e8f9' : '#71717a',
-                        }}
-                      >
-                        {isFullscreen ? 'ON' : 'OFF'}
-                      </span>
-                    </button>
+                    )}
 
                     {/* 2. Visualizer Scene Queue & Rotation Drawer (Audio tracks) */}
                     {!isVideoTrack && (

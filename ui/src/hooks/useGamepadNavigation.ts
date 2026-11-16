@@ -930,6 +930,15 @@ export function useGamepadNavigation({
         setIsSleeping(false);
         return;
       }
+      if (
+        document.documentElement.dataset.impDesktopScreensaver === 'true' &&
+        action !== 'vol_up' &&
+        action !== 'volume_up' &&
+        action !== 'vol_down' &&
+        action !== 'volume_down'
+      ) {
+        return;
+      }
 
       const isDvdModalOpen = Boolean(document.querySelector('[data-dvd-modal="true"]'));
       const isPlayerActionsModalOpen = Boolean(
@@ -1369,7 +1378,11 @@ export function useGamepadNavigation({
         }
         case 'l1':
           setOskTarget(null);
-          setView('lock');
+          if (document.documentElement.dataset.impDesktopMode === 'true') {
+            window.dispatchEvent(new CustomEvent('simp-wake-idle'));
+          } else {
+            setView('lock');
+          }
           break;
         case 'r1':
           setView('browser');

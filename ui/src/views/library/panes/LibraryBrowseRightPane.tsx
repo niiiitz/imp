@@ -29,12 +29,26 @@ import { UniversalSearchResultsPane } from "./UniversalSearchResultsPane";
 import { AppleMusicDiscoverPane } from "./AppleMusicDiscoverPane";
 import { SoundCloudDiscoverPane } from "./SoundCloudDiscoverPane";
 import { InternetArchiveDiscoverPane } from "./InternetArchiveDiscoverPane";
+import { ImpFypPane } from "./ImpFypPane";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
+import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
+import { SourceVisibilityPrefs } from "../../SettingsModal";
+import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import {
+  DEFAULT_STARTER_FYP_DESCRIPTORS,
+  LocalDiscoverResponse,
+  LocalSmartStation,
+} from "../../../api/servicesCacheApi";
 
 export interface LibraryBrowseRightPaneProps {
   activeHubLabel: string;
   activeMountPlaceObj: { mount_root: string; label: string; track_count: number; is_online: boolean } | null | undefined;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  impFypActive: boolean;
+  selectedSources: Array<"local" | "apple_music" | "soundcloud" | "internet_archive">;
+  sourceVisibility: SourceVisibilityPrefs;
+  localDiscover: LocalDiscoverResponse;
+  onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
   appleRadioFilter: "all" | "genre" | "live" | "shows" | "mixes";
   appleRadioGenre: string;
   appleRecentlyPlayedTracks: TrackMetadata[];
@@ -109,7 +123,9 @@ export interface LibraryBrowseRightPaneProps {
   renderSoundCloudPlaylistCard: any;
   renderSoundCloudUserCard: any;
   renderStationCard: any;
-  safeCloudPage: number;
+  resetCloudPlaylistsLimit: () => void;
+  hasMoreCloudPlaylists: boolean;
+  loadMoreCloudPlaylists: () => void;
   scCatalogSearchResults: SoundCloudCatalogSearchResults;
   scDiscoverNextHref: string | null | undefined;
   scFollowings: SoundCloudUserSummary[];
@@ -137,7 +153,6 @@ export interface LibraryBrowseRightPaneProps {
   setArtistRadioShows: any;
   setCloudAlpha: any;
   setCloudLoading: any;
-  setCloudPage: React.Dispatch<React.SetStateAction<number>>;
   setCloudPlaylists: React.Dispatch<React.SetStateAction<AppleCloudPlaylistSummary[]>>;
   setClubMixes: any;
   setForYouAlbums: any;
@@ -178,13 +193,17 @@ export interface LibraryBrowseRightPaneProps {
   simpHubFilter: "all" | "recent" | "hybrid" | "pinned" | "albums" | "videos";
   snap: SimpStateSnapshot | null;
   soundCloudSubTab: "pinned" | "likes_sets" | "stream_radio" | "trending";
-  totalCloudPages: number;
 }
 
 export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   activeHubLabel,
   activeMountPlaceObj,
   appleAuthState,
+  impFypActive,
+  selectedSources,
+  sourceVisibility,
+  localDiscover,
+  onPlayLocalSmartStation,
   appleRadioFilter,
   appleRadioGenre,
   appleRecentlyPlayedTracks,
@@ -259,7 +278,9 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   renderSoundCloudPlaylistCard,
   renderSoundCloudUserCard,
   renderStationCard,
-  safeCloudPage,
+  resetCloudPlaylistsLimit,
+  hasMoreCloudPlaylists,
+  loadMoreCloudPlaylists,
   scCatalogSearchResults,
   scDiscoverNextHref,
   scFollowings,
@@ -287,7 +308,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   setArtistRadioShows,
   setCloudAlpha,
   setCloudLoading,
-  setCloudPage,
   setCloudPlaylists,
   setClubMixes,
   setForYouAlbums,
@@ -328,7 +348,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   simpHubFilter,
   snap,
   soundCloudSubTab,
-  totalCloudPages,
 }) => {
   useLibraryLyricsStatus();
   const [activeSmartFacet, setActiveSmartFacet] = React.useState<
@@ -449,8 +468,9 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: '#fdba74' }}>
-                      ☁️ Connect SoundCloud (OAuth 2.1 PKCE or Public Mode)
+                    <div style={{ fontSize: 13, fontWeight: 800, color: '#fdba74', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <SoundCloudLogo width={30} color="#ffffff" />
+                      <span>Connect SoundCloud (OAuth 2.1 PKCE or Public Mode)</span>
                     </div>
                     <div style={{ fontSize: 11, color: '#a1a1aa', marginTop: 2 }}>
                       Sign in with SoundCloud to access your Likes, Sets & Activity Stream, or enable Public Mode for Trending, DJ Mixes & Search.
@@ -685,6 +705,27 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                   </>
                 )}
               </>
+            ) : impFypActive ? (
+              <ImpFypPane
+                browserSourceFilter={browserSourceFilter}
+                selectedSources={selectedSources}
+                sourceVisibility={sourceVisibility}
+                snap={snap}
+                localDiscover={localDiscover}
+                tileGridStyle={tileGridStyle}
+                renderSingleSongRow={renderSingleSongRow}
+                renderSimpAlbumCard={renderSimpAlbumCard}
+                renderSimpPlaylistCard={renderSimpPlaylistCard}
+                renderCloudAlbumCard={renderCloudAlbumCard}
+                renderCloudPlaylistCard={renderCloudPlaylistCard}
+                renderStationCard={renderStationCard}
+                renderAppleArtistCard={renderAppleArtistCard}
+                renderSoundCloudPlaylistCard={renderSoundCloudPlaylistCard}
+                renderSoundCloudUserCard={renderSoundCloudUserCard}
+                renderArchiveItemCard={renderArchiveItemCard}
+                renderLocalArtistCard={renderLocalArtistCard}
+                onPlayLocalSmartStation={onPlayLocalSmartStation}
+              />
             ) : (
               <>
                 {/* ---------------------------------------------------------
@@ -714,9 +755,13 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                             fontWeight: 800,
                             color: '#bfeaf5',
                             marginRight: 6,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
                           }}
                         >
-                          📌 {activeHubLabel}
+                          <ImpIcon name="imp" size={15} color="#bfeaf5" />
+                          <span>{activeHubLabel}</span>
                         </span>
                         {(
                           [
@@ -1133,12 +1178,204 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                     {(simpHubFilter === 'all' || simpHubFilter === 'pinned') &&
                       pinnedPlaylistsList.length > 0 && (
                         <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af' }}>
-                            📌 PINNED CLOUD PLAYLISTS ({pinnedPlaylistsList.length})
+                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <ImpIcon name="imp" size={12} color="#fda4af" />
+                            <span>PINNED CLOUD PLAYLISTS ({pinnedPlaylistsList.length})</span>
                           </div>
                           <div style={tileGridStyle}>
                             {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
                           </div>
+                        </>
+                      )}
+
+                    {/* Local Discovery Shelves (Smart Stations, Rediscover Local Gems & Recently Added Releases) */}
+                    {simpHubFilter === 'all' &&
+                      isSourceIncluded('local') &&
+                      mediaTypeFilter !== 'video' && (
+                        <>
+                          {localDiscover.smart_stations.length > 0 && (
+                            <section
+                              data-section-anchor="local_smart_stations"
+                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                            >
+                              <PinnableSectionHeader
+                                title={`📻 LOCAL SMART STATIONS (${localDiscover.smart_stations.length})`}
+                                accentColor="#5eead4"
+                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[0]}
+                                liveItems={localDiscover.smart_stations}
+                              />
+                              <div style={tileGridStyle}>
+                                {localDiscover.smart_stations.map((st) => (
+                                  <div
+                                    key={st.id}
+                                    data-right-tile="true"
+                                    data-tile-key={`local_station:${st.id}`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => onPlayLocalSmartStation(st, false)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        onPlayLocalSmartStation(st, false);
+                                      }
+                                    }}
+                                    style={{
+                                      borderRadius: 12,
+                                      background: 'linear-gradient(155deg, #0d1d1c 0%, #090d14 100%)',
+                                      border: '1px solid #1e3a38',
+                                      padding: 12,
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: 8,
+                                      cursor: 'pointer',
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                      {st.art_url ? (
+                                        <img
+                                          src={st.art_url}
+                                          alt=""
+                                          loading="lazy"
+                                          style={{
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: 8,
+                                            objectFit: 'cover',
+                                            border: '1px solid #2dd4bf',
+                                            flexShrink: 0,
+                                          }}
+                                        />
+                                      ) : (
+                                        <div
+                                          style={{
+                                            width: 44,
+                                            height: 44,
+                                            borderRadius: 8,
+                                            background: '#112927',
+                                            border: '1px solid #2dd4bf',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            flexShrink: 0,
+                                          }}
+                                        >
+                                          <ImpIcon name="radio" size={18} color="#5eead4" />
+                                        </div>
+                                      )}
+                                      <div style={{ minWidth: 0, flex: 1 }}>
+                                        <div
+                                          style={{
+                                            fontSize: 12.5,
+                                            fontWeight: 800,
+                                            color: '#ecfeff',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {st.title}
+                                        </div>
+                                        <div
+                                          style={{
+                                            fontSize: 10.5,
+                                            color: '#94a3b8',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {st.subtitle}
+                                        </div>
+                                        <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#5eead4' }}>
+                                          {st.track_count} tracks
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 6 }}>
+                                      <button
+                                        type="button"
+                                        data-row-aux="true"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onPlayLocalSmartStation(st, false);
+                                        }}
+                                        style={{
+                                          flex: 1,
+                                          minHeight: 28,
+                                          borderRadius: 7,
+                                          background: '#0f2926',
+                                          border: '1px solid #14b8a6',
+                                          color: '#ccfbf1',
+                                          fontSize: 10.5,
+                                          fontWeight: 800,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        ▶ Play Station
+                                      </button>
+                                      <button
+                                        type="button"
+                                        data-row-aux="true"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onPlayLocalSmartStation(st, true);
+                                        }}
+                                        title="Shuffle Station"
+                                        style={{
+                                          minHeight: 28,
+                                          padding: '0 9px',
+                                          borderRadius: 7,
+                                          background: '#111622',
+                                          border: '1px solid #263145',
+                                          color: '#cbd5e1',
+                                          fontSize: 10.5,
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        🔀
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          )}
+
+                          {localDiscover.rediscover_albums.length > 0 && (
+                            <section
+                              data-section-anchor="local_rediscover"
+                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                            >
+                              <PinnableSectionHeader
+                                title={`✨ REDISCOVER LOCAL GEMS (${localDiscover.rediscover_albums.length})`}
+                                accentColor="#67e8f9"
+                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[1]}
+                                liveItems={localDiscover.rediscover_albums}
+                              />
+                              <div style={tileGridStyle}>
+                                {localDiscover.rediscover_albums.map(renderSimpAlbumCard)}
+                              </div>
+                            </section>
+                          )}
+
+                          {localDiscover.recent_albums.length > 0 && (
+                            <section
+                              data-section-anchor="local_recent_releases"
+                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                            >
+                              <PinnableSectionHeader
+                                title={`🆕 RECENTLY ADDED LOCAL RELEASES (${localDiscover.recent_albums.length})`}
+                                accentColor="#67e8f9"
+                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[2]}
+                                liveItems={localDiscover.recent_albums}
+                              />
+                              <div style={tileGridStyle}>
+                                {localDiscover.recent_albums.map(renderSimpAlbumCard)}
+                              </div>
+                            </section>
+                          )}
                         </>
                       )}
 
@@ -1206,14 +1443,15 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 renderCloudPlaylistCard={renderCloudPlaylistCard}
                 renderSingleSongRow={renderSingleSongRow}
                 renderStationCard={renderStationCard}
-                safeCloudPage={safeCloudPage}
+                resetCloudPlaylistsLimit={resetCloudPlaylistsLimit}
+                hasMoreCloudPlaylists={hasMoreCloudPlaylists}
+                loadMoreCloudPlaylists={loadMoreCloudPlaylists}
                 setAppleRadioFilter={setAppleRadioFilter}
                 setAppleRadioGenre={setAppleRadioGenre}
                 setAppleRecentlyPlayedTracks={setAppleRecentlyPlayedTracks}
                 setArtistRadioShows={setArtistRadioShows}
                 setCloudAlpha={setCloudAlpha}
                 setCloudLoading={setCloudLoading}
-                setCloudPage={setCloudPage}
                 setCloudPlaylists={setCloudPlaylists}
                 setClubMixes={setClubMixes}
                 setForYouAlbums={setForYouAlbums}
@@ -1232,7 +1470,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 setRadioStations={setRadioStations}
                 setRecentlyAddedCloudAlbums={setRecentlyAddedCloudAlbums}
                 snap={snap}
-                totalCloudPages={totalCloudPages}
               />
               <SoundCloudDiscoverPane
                 browserSourceFilter={browserSourceFilter}

@@ -167,6 +167,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const json = await resp.json();
       if (json?.ok) {
         showToast(`Purged ${label} database records (${json.removed || 0} items)`);
+        window.dispatchEvent(new CustomEvent('simp-source-purged', { detail: { source } }));
         refreshLibraryData();
       } else {
         showToast(`Failed to purge ${label} DB`);

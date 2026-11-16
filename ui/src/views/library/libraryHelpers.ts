@@ -98,7 +98,7 @@ export function formatPlaylistSourceBadge(pl: PlaylistRecord): string {
   if (parts.length > 0) {
     return parts.join(' + ');
   }
-  return '★ SIMP';
+  return '★ IMP';
 }
 
 // Responsive Tile Grid Style (4 columns on Steam Deck 1280x800, up to 6 columns on ultrawide displays)

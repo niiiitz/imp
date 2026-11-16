@@ -5,7 +5,7 @@ export const failedPlaylistCoverLookupIds = new Set<string>();
 
 export interface ResilientTileArtworkProps {
   src?: string | null;
-  fallbackIcon: string;
+  fallbackIcon: React.ReactNode;
   bg: string;
   border: string;
   playlistCoverId?: string;

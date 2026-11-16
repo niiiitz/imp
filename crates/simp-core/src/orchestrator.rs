@@ -515,6 +515,13 @@ impl AudioOrchestrator {
                     .to_string_lossy()
                     .to_string();
                 if !normalized.is_empty() {
+                    let mut existing_roots: Vec<String> = self
+                        .db
+                        .get_mounts()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|m| m.mount_root)
+                        .collect();
                     let mut cfg = self.settings.lock().unwrap();
                     let mut unique_paths: Vec<String> = Vec::new();
                     for existing in cfg.library.custom_paths.values() {
@@ -524,6 +531,15 @@ impl AudioOrchestrator {
                         if !norm_existing.is_empty() && !unique_paths.contains(&norm_existing) {
                             unique_paths.push(norm_existing);
                         }
+                    }
+                    existing_roots.extend(unique_paths.iter().cloned());
+                    if let Some(covering_parent) =
+                        crate::library::vdf::find_covering_parent_path(&normalized, &existing_roots)
+                    {
+                        tracing::info!(
+                            "Skipping AddLibraryPath '{normalized}' — already covered by parent mount '{covering_parent}'"
+                        );
+                        return;
                     }
                     if !unique_paths.contains(&normalized) {
                         unique_paths.push(normalized.clone());

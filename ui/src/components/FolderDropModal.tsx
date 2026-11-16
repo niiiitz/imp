@@ -16,7 +16,7 @@ export interface FolderDropModalProps {
   showToast: (msg: string) => void;
   pendingDroppedFolder: string | null;
   setPendingDroppedFolder: React.Dispatch<React.SetStateAction<string | null>>;
-  handleAddFolder: (folderPath: string) => void;
+  handleAddFolder: (folderPath: string, opts?: { navigateAfterAdd?: boolean }) => void;
 }
 
 export const FolderDropModal: React.FC<FolderDropModalProps> = ({
@@ -240,7 +240,7 @@ export const FolderDropModal: React.FC<FolderDropModalProps> = ({
                 onClick={() => {
                   const pathToAdd = pendingDroppedFolder;
                   setPendingDroppedFolder(null);
-                  handleAddFolder(pathToAdd);
+                  handleAddFolder(pathToAdd, { navigateAfterAdd: true });
                 }}
                 style={{
                   padding: '8px 16px',

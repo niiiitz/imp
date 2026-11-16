@@ -212,7 +212,12 @@ pub(super) async fn soundcloud_playlists_handler(State(state): State<DaemonIpcSt
     .await;
     sync_soundcloud_tokens_into_daemon_state(&state);
     match res {
-        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Ok(data)) => {
+            state
+                .db
+                .sync_soundcloud_comment_hints_for_known_tracks(&data.liked_tracks_preview);
+            Json(serde_json::json!({ "ok": true, "data": data }))
+        }
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
@@ -332,18 +337,17 @@ pub(super) async fn soundcloud_comments_handler(
     let res = tokio::task::spawn_blocking(move || {
         let res = simp_core::sinks::soundcloud_api::fetch_track_comments(&cfg, &id);
         if let Ok(ref list) = res {
-            let uri_key = if id_for_db.starts_with("soundcloud://") {
-                id_for_db
-            } else {
-                format!("soundcloud://track/{}", id_for_db.trim())
-            };
-            let _ = db.upsert_track_properties_patch(
-                &uri_key,
-                &simp_core::library::db::TrackPropertiesPatch {
-                    has_comments: Some(!list.is_empty()),
-                    ..Default::default()
-                },
-            );
+            let clean_id = simp_core::sinks::soundcloud_api::clean_soundcloud_id(&id_for_db);
+            if !clean_id.is_empty() {
+                let uri_key = format!("soundcloud:track:{clean_id}");
+                let _ = db.upsert_track_properties_patch(
+                    &uri_key,
+                    &simp_core::library::db::TrackPropertiesPatch {
+                        has_comments: Some(!list.is_empty()),
+                        ..Default::default()
+                    },
+                );
+            }
         }
         res
     })

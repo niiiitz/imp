@@ -6,6 +6,8 @@ import {
 import {
   tileGridStyle,
 } from "../libraryHelpers";
+import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import { TTL_ARCHIVE_SEC } from "../../../api/servicesCacheApi";
 
 export interface InternetArchiveDiscoverPaneProps {
   activeHubLabel: string;
@@ -180,7 +182,38 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                     </div>
 
                     {filteredIaItems.length > 0 ? (
-                      <>
+                      <section
+                        data-section-anchor="ia_discover_grid"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                      >
+                        <PinnableSectionHeader
+                          title={`ARCHIVE ITEMS (${filteredIaItems.length})`}
+                          accentColor="#fde68a"
+                          descriptor={{
+                            shelfUid: `ia:discover:${iaSubTab}:${iaSubFilter || 'all'}`,
+                            cacheKey: `ia:discover:${iaSubTab}:${iaSubFilter || 'all'}`,
+                            provider: 'internet_archive',
+                            title: `Internet Archive • ${activeHubLabel}${
+                              iaSubFilter && iaSubFilter !== 'all'
+                                ? ` (${iaSubFilter.replace('_', ' ')})`
+                                : ''
+                            }`,
+                            itemKind: 'ia_items',
+                            fetchSpec: {
+                              kind: 'ia_discover',
+                              tab: iaSubTab,
+                              subFilter: iaSubFilter || 'all',
+                            },
+                            originRoute: {
+                              sourceFilter: 'internet_archive',
+                              iaSubTab,
+                              iaSubFilter: iaSubFilter || 'all',
+                              sectionAnchor: 'ia_discover_grid',
+                            },
+                            ttlSec: TTL_ARCHIVE_SEC,
+                          }}
+                          liveItems={filteredIaItems}
+                        />
                         <div style={tileGridStyle}>{filteredIaItems.map(renderArchiveItemCard)}</div>
                         {iaHasMore && !browserSearch.trim() && (
                           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
@@ -205,7 +238,7 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                             </button>
                           </div>
                         )}
-                      </>
+                      </section>
                     ) : (
                       !iaLoading && (
                         <div style={{ fontSize: 12, color: '#8e8e99', padding: '12px 4px' }}>

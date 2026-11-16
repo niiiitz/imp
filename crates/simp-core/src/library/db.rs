@@ -15,6 +15,24 @@ pub struct LocalArtistProfile {
     pub related_artists: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalSmartStation {
+    pub id: String,
+    pub title: String,
+    pub subtitle: String,
+    pub station_kind: String,
+    pub art_url: Option<String>,
+    pub track_count: usize,
+    pub tracks: Vec<TrackMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LocalDiscoverResponse {
+    pub recent_albums: Vec<AlbumRecord>,
+    pub rediscover_albums: Vec<AlbumRecord>,
+    pub smart_stations: Vec<LocalSmartStation>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrackPropertiesRecord {
     pub uri: String,
@@ -290,6 +308,33 @@ impl LibraryDatabase {
             let _ = conn.execute_batch(
                 "DELETE FROM apple_catalog_map;
                  PRAGMA user_version = 5;",
+            );
+        }
+        if user_version < 6 {
+            // Normalize legacy `soundcloud://track/<id>` track_properties rows to canonical `soundcloud:track:<id>`.
+            let _ = conn.execute_batch(
+                "INSERT INTO track_properties (
+                    uri, has_art, has_lyrics, has_synced_lyrics, has_comments, has_factoids,
+                    suppress_lyrics, suppress_comments, suppress_factoids, lyrics_offset_ms,
+                    custom_art_url, preferred_viz_mode, updated_at
+                 )
+                 SELECT
+                    REPLACE(uri, 'soundcloud://track/', 'soundcloud:track:'),
+                    has_art, has_lyrics, has_synced_lyrics, has_comments, has_factoids,
+                    suppress_lyrics, suppress_comments, suppress_factoids, lyrics_offset_ms,
+                    custom_art_url, preferred_viz_mode, updated_at
+                 FROM track_properties
+                 WHERE uri LIKE 'soundcloud://track/%'
+                 ON CONFLICT(uri) DO UPDATE SET
+                    has_art = MAX(track_properties.has_art, excluded.has_art),
+                    has_lyrics = MAX(track_properties.has_lyrics, excluded.has_lyrics),
+                    has_synced_lyrics = MAX(track_properties.has_synced_lyrics, excluded.has_synced_lyrics),
+                    has_comments = MAX(track_properties.has_comments, excluded.has_comments),
+                    has_factoids = MAX(track_properties.has_factoids, excluded.has_factoids),
+                    suppress_comments = MAX(track_properties.suppress_comments, excluded.suppress_comments),
+                    updated_at = MAX(track_properties.updated_at, excluded.updated_at);
+                 DELETE FROM track_properties WHERE uri LIKE 'soundcloud://track/%';
+                 PRAGMA user_version = 6;",
             );
         }
 
@@ -983,6 +1028,17 @@ impl LibraryDatabase {
                 t.album_id = None;
             }
             self.upsert_track(&t, None, None)?;
+            if t.source == "soundcloud"
+                && crate::sinks::soundcloud_api::track_has_comments_hint(&t.uri)
+            {
+                let _ = self.upsert_track_properties_patch(
+                    &t.uri,
+                    &TrackPropertiesPatch {
+                        has_comments: Some(true),
+                        ..Default::default()
+                    },
+                );
+            }
             normalized_uris.push(t.uri.clone());
         }
 
@@ -1317,6 +1373,11 @@ impl LibraryDatabase {
              )",
             [],
         );
+        if track.source == "soundcloud"
+            && crate::sinks::soundcloud_api::track_has_comments_hint(&track.uri)
+        {
+            Self::mark_track_has_comments_with_conn(&conn, &track.uri);
+        }
         Ok(())
     }
 
@@ -1378,6 +1439,11 @@ impl LibraryDatabase {
                    added_at = excluded.added_at",
                 params![uri, track_json, track.source, now_ms],
             )?;
+            if track.source == "soundcloud"
+                && crate::sinks::soundcloud_api::track_has_comments_hint(uri)
+            {
+                Self::mark_track_has_comments_with_conn(&conn, uri);
+            }
             Ok(true)
         } else {
             conn.execute("DELETE FROM local_favorites WHERE uri = ?1", params![uri])?;
@@ -1930,6 +1996,461 @@ impl LibraryDatabase {
         );
 
         Ok(removed)
+    }
+
+    fn mark_track_has_comments_with_conn(conn: &Connection, uri: &str) {
+        let trimmed = uri.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let _ = conn.execute(
+            "INSERT INTO track_properties (uri, has_comments, updated_at)
+             VALUES (?1, 1, strftime('%s', 'now'))
+             ON CONFLICT(uri) DO UPDATE SET
+                has_comments = 1,
+                updated_at = strftime('%s', 'now')",
+            params![trimmed],
+        );
+    }
+
+    /// Marks `has_comments = 1` in `track_properties` for any SoundCloud tracks returned from API fetches
+    /// that already reside in `tracks`, `play_history`, or `local_favorites` and carry `comment_count > 0`.
+    pub fn sync_soundcloud_comment_hints_for_known_tracks(&self, tracks: &[TrackMetadata]) {
+        let candidates: Vec<&str> = tracks
+            .iter()
+            .filter(|t| {
+                t.source == "soundcloud"
+                    && crate::sinks::soundcloud_api::track_has_comments_hint(&t.uri)
+            })
+            .map(|t| t.uri.as_str())
+            .collect();
+        if candidates.is_empty() {
+            return;
+        }
+        let conn = self.conn.lock().unwrap();
+        for uri in candidates {
+            let known: bool = conn
+                .query_row(
+                    "SELECT EXISTS(
+                        SELECT 1 FROM tracks WHERE uri = ?1
+                        UNION ALL
+                        SELECT 1 FROM play_history WHERE uri = ?1
+                        UNION ALL
+                        SELECT 1 FROM local_favorites WHERE uri = ?1
+                     )",
+                    params![uri],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map(|v| v != 0)
+                .unwrap_or(false);
+            if known {
+                Self::mark_track_has_comments_with_conn(&conn, uri);
+            }
+        }
+    }
+
+    /// Generates daily local discovery shelves (`recent_albums`, `rediscover_albums`, `smart_stations`)
+    /// from online local storage mounts without network requests.
+    pub fn get_local_discovery_shelves(&self, day_seed: u64) -> Result<LocalDiscoverResponse> {
+        fn deterministic_day_hash(key: &str, day_seed: u64) -> u64 {
+            let mut h: u64 = 0xcbf29ce484222325 ^ day_seed.wrapping_mul(0x9e3779b97f4a7c15);
+            for &b in key.as_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+            h ^ (h >> 30)
+        }
+
+        fn build_smart_station(
+            id: &str,
+            title: &str,
+            subtitle: &str,
+            station_kind: &str,
+            mut tracks: Vec<TrackMetadata>,
+            day_seed: u64,
+        ) -> Option<LocalSmartStation> {
+            if tracks.is_empty() {
+                return None;
+            }
+            let kind_hash = deterministic_day_hash(station_kind, day_seed);
+            tracks.sort_by_key(|t| deterministic_day_hash(&t.uri, kind_hash));
+            tracks.truncate(40);
+            let art_url = tracks
+                .iter()
+                .find_map(|t| t.art_url.as_ref().filter(|u| !u.trim().is_empty()).cloned());
+            Some(LocalSmartStation {
+                id: id.to_string(),
+                title: title.to_string(),
+                subtitle: subtitle.to_string(),
+                station_kind: station_kind.to_string(),
+                art_url,
+                track_count: tracks.len(),
+                tracks,
+            })
+        }
+
+        let conn = self.conn.lock().unwrap();
+
+        let mut album_stmt = conn.prepare(
+            "SELECT a.id, a.title, a.album_artist, a.release_year, a.steam_app_id, a.art_cache_path,
+                    COUNT(DISTINCT t.uri) as track_count,
+                    MAX(CASE WHEN LOWER(t.content_rating) IN ('explicit', 'e') THEN 'explicit'
+                             WHEN LOWER(t.content_rating) = 'clean' THEN 'clean'
+                             ELSE t.content_rating END) as content_rating,
+                    a.created_at,
+                    COALESCE(MAX(h.played_at), 0) as last_played_at
+             FROM albums a
+             JOIN tracks t ON t.album_id = a.id
+             LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
+             LEFT JOIN play_history h ON h.uri = t.uri
+             WHERE (t.mount_root IS NULL OR m.is_online = 1)
+               AND t.source NOT IN ('apple_music', 'soundcloud', 'internet_archive', 'ia_video', 'local_video', 'dvd')
+             GROUP BY a.id
+             ORDER BY a.created_at DESC, a.title COLLATE NOCASE ASC",
+        )?;
+
+        struct AlbumWithStats {
+            record: AlbumRecord,
+            created_at: i64,
+            last_played_at: i64,
+        }
+
+        let album_rows = album_stmt.query_map([], |row| {
+            Ok(AlbumWithStats {
+                record: AlbumRecord {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    album_artist: row.get(2)?,
+                    release_year: row.get(3)?,
+                    steam_app_id: row.get(4)?,
+                    art_url: row.get(5)?,
+                    track_count: row.get::<_, i64>(6)? as usize,
+                    content_rating: row.get(7).unwrap_or(None),
+                },
+                created_at: row.get::<_, i64>(8).unwrap_or(0),
+                last_played_at: row.get::<_, i64>(9).unwrap_or(0),
+            })
+        })?;
+        let mut all_albums: Vec<AlbumWithStats> = album_rows.filter_map(Result::ok).collect();
+
+        all_albums.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| a.record.title.to_lowercase().cmp(&b.record.title.to_lowercase()))
+        });
+        let recent_albums: Vec<AlbumRecord> =
+            all_albums.iter().take(12).map(|x| x.record.clone()).collect();
+
+        all_albums.sort_by(|a, b| {
+            let a_day = if a.last_played_at <= 0 {
+                0
+            } else {
+                a.last_played_at / 86_400
+            };
+            let b_day = if b.last_played_at <= 0 {
+                0
+            } else {
+                b.last_played_at / 86_400
+            };
+            a_day.cmp(&b_day).then_with(|| {
+                deterministic_day_hash(&a.record.id, day_seed)
+                    .cmp(&deterministic_day_hash(&b.record.id, day_seed))
+            })
+        });
+        let rediscover_albums: Vec<AlbumRecord> =
+            all_albums.iter().take(12).map(|x| x.record.clone()).collect();
+
+        let mut track_stmt = conn.prepare(
+            "SELECT t.uri, t.title, t.artists_json, t.album_title, t.album_id, t.track_number,
+                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating,
+                    COALESCE(tp.has_synced_lyrics, 0) as has_synced_lyrics,
+                    COALESCE(tp.suppress_lyrics, 0) as suppress_lyrics,
+                    a.steam_app_id as steam_app_id
+             FROM tracks t
+             LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
+             LEFT JOIN track_properties tp ON tp.uri = t.uri
+             LEFT JOIN albums a ON t.album_id = a.id
+             WHERE (t.mount_root IS NULL OR m.is_online = 1)
+               AND t.source NOT IN ('apple_music', 'soundcloud', 'internet_archive', 'ia_video', 'local_video', 'dvd')",
+        )?;
+
+        struct AnnotatedLocalTrack {
+            meta: TrackMetadata,
+            has_synced_lyrics: bool,
+            suppress_lyrics: bool,
+            steam_app_id: Option<u32>,
+        }
+
+        let track_rows = track_stmt.query_map([], |row| {
+            let artists_str: String = row.get(2)?;
+            let artists: Vec<String> = serde_json::from_str(&artists_str).unwrap_or_default();
+            Ok(AnnotatedLocalTrack {
+                meta: TrackMetadata {
+                    uri: row.get(0)?,
+                    title: row.get(1)?,
+                    artists,
+                    album: row.get(3)?,
+                    album_id: row.get(4)?,
+                    track_number: row.get(5)?,
+                    disc_number: row.get(6)?,
+                    art_url: row.get(7)?,
+                    duration_ms: row.get(8)?,
+                    source: row.get(9)?,
+                    mount_root: row.get(10)?,
+                    content_rating: row.get(11)?,
+                },
+                has_synced_lyrics: row.get::<_, i64>(12).unwrap_or(0) != 0,
+                suppress_lyrics: row.get::<_, i64>(13).unwrap_or(0) != 0,
+                steam_app_id: row.get(14).ok().flatten(),
+            })
+        })?;
+
+        let mut all_local_tracks = Vec::new();
+        let mut lossless_tracks = Vec::new();
+        let mut karaoke_tracks = Vec::new();
+        let mut soundtrack_tracks = Vec::new();
+
+        for item in track_rows.filter_map(Result::ok) {
+            let uri_lower = item.meta.uri.to_ascii_lowercase();
+            let is_lossless = uri_lower.ends_with(".flac")
+                || uri_lower.ends_with(".wav")
+                || uri_lower.ends_with(".alac")
+                || uri_lower.ends_with(".aiff")
+                || uri_lower.ends_with(".aif");
+            if is_lossless {
+                lossless_tracks.push(item.meta.clone());
+            }
+            if item.has_synced_lyrics && !item.suppress_lyrics {
+                karaoke_tracks.push(item.meta.clone());
+            }
+            let album_lower = item.meta.album.to_ascii_lowercase();
+            if item.steam_app_id.is_some()
+                || item.meta.source == "steam_ost"
+                || album_lower.contains("soundtrack")
+                || album_lower.contains(" ost")
+                || album_lower.ends_with("ost")
+                || album_lower.contains("score")
+            {
+                soundtrack_tracks.push(item.meta.clone());
+            }
+            all_local_tracks.push(item.meta);
+        }
+
+        let mut smart_stations = Vec::new();
+        if let Some(st) = build_smart_station(
+            "local_station:mix",
+            "Local Mix Station",
+            "Daily shuffle across your local folders",
+            "mix",
+            all_local_tracks,
+            day_seed,
+        ) {
+            smart_stations.push(st);
+        }
+        if let Some(st) = build_smart_station(
+            "local_station:lossless",
+            "Lossless & Hi-Res Showcase",
+            "FLAC, WAV, ALAC & AIFF masters in your library",
+            "lossless",
+            lossless_tracks,
+            day_seed,
+        ) {
+            smart_stations.push(st);
+        }
+        if let Some(st) = build_smart_station(
+            "local_station:karaoke",
+            "Karaoke-Ready Local",
+            "Local tracks with synced LRC lyrics",
+            "karaoke",
+            karaoke_tracks,
+            day_seed,
+        ) {
+            smart_stations.push(st);
+        }
+        if let Some(st) = build_smart_station(
+            "local_station:soundtracks",
+            "Soundtracks & Scores",
+            "Game soundtracks, OSTs & score albums",
+            "soundtracks",
+            soundtrack_tracks,
+            day_seed,
+        ) {
+            smart_stations.push(st);
+        }
+
+        Ok(LocalDiscoverResponse {
+            recent_albums,
+            rediscover_albums,
+            smart_stations,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_comments_facet_migration_and_resolution() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "simp_db_comments_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("library.db");
+
+        // Seed legacy `soundcloud://track/12345` row under user_version = 5
+        {
+            let db = LibraryDatabase::open(&db_path).unwrap();
+            let track = TrackMetadata {
+                uri: "soundcloud:track:12345".to_string(),
+                title: "Sample Track".to_string(),
+                artists: vec!["Example Artist".to_string()],
+                album: "Sample Release".to_string(),
+                album_id: None,
+                track_number: None,
+                disc_number: Some(1),
+                art_url: None,
+                duration_ms: 180_000,
+                source: "soundcloud".to_string(),
+                mount_root: None,
+                content_rating: None,
+            };
+            db.record_play_history(&track).unwrap();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO track_properties (uri, has_comments, updated_at) VALUES (?1, 1, 100)",
+                params!["soundcloud://track/12345"],
+            )
+            .unwrap();
+            conn.execute_batch("PRAGMA user_version = 5;").unwrap();
+        }
+
+        // Re-open DB and verify migration normalizes key & `has_comments` resolves the track
+        let db = LibraryDatabase::open(&db_path).unwrap();
+        let uris = db.get_facet_matching_uris("has_comments").unwrap();
+        assert_eq!(uris, vec!["soundcloud:track:12345".to_string()]);
+        let matched = db.get_facet_matching_tracks("has_comments").unwrap();
+        assert_eq!(matched.len(), 1);
+        assert_eq!(matched[0].uri, "soundcloud:track:12345");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_local_discovery_shelves_determinism_and_empty_fallback() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "simp_db_local_discover_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("library.db");
+        let db = LibraryDatabase::open(&db_path).unwrap();
+
+        // Empty DB fallback
+        let empty = db.get_local_discovery_shelves(20_000).unwrap();
+        assert!(empty.recent_albums.is_empty());
+        assert!(empty.rediscover_albums.is_empty());
+        assert!(empty.smart_stations.is_empty());
+
+        // Seed 2 local albums: a lossless LP and a soundtrack with synced lyrics
+        let alb1 = AlbumRecord {
+            id: "local_alb_1".to_string(),
+            title: "Sample Album One".to_string(),
+            album_artist: "Example Artist".to_string(),
+            release_year: Some(2024),
+            steam_app_id: None,
+            art_url: Some("http://127.0.0.1:18888/art/alb1.jpg".to_string()),
+            track_count: 1,
+            content_rating: None,
+        };
+        let alb2 = AlbumRecord {
+            id: "local_alb_2".to_string(),
+            title: "Sample Game Soundtrack".to_string(),
+            album_artist: "Composer Example".to_string(),
+            release_year: Some(2023),
+            steam_app_id: Some(420),
+            art_url: None,
+            track_count: 1,
+            content_rating: None,
+        };
+        db.upsert_album(
+            &alb1.id,
+            &alb1.title,
+            &alb1.album_artist,
+            alb1.release_year,
+            alb1.steam_app_id,
+            alb1.art_url.as_deref(),
+        )
+        .unwrap();
+        db.upsert_album(
+            &alb2.id,
+            &alb2.title,
+            &alb2.album_artist,
+            alb2.release_year,
+            alb2.steam_app_id,
+            alb2.art_url.as_deref(),
+        )
+        .unwrap();
+
+        let tr1 = TrackMetadata {
+            uri: "file:///path/to/Media/SampleArtist/track01.flac".to_string(),
+            title: "Track 01".to_string(),
+            artists: vec!["Example Artist".to_string()],
+            album: "Sample Album One".to_string(),
+            album_id: Some(alb1.id.clone()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            art_url: Some("http://127.0.0.1:18888/art/alb1.jpg".to_string()),
+            duration_ms: 210_000,
+            source: "local".to_string(),
+            mount_root: None,
+            content_rating: None,
+        };
+        let tr2 = TrackMetadata {
+            uri: "file:///path/to/Media/SampleOst/theme.mp3".to_string(),
+            title: "Main Theme".to_string(),
+            artists: vec!["Composer Example".to_string()],
+            album: "Sample Game Soundtrack".to_string(),
+            album_id: Some(alb2.id.clone()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            art_url: None,
+            duration_ms: 195_000,
+            source: "local".to_string(),
+            mount_root: None,
+            content_rating: None,
+        };
+        db.upsert_track(&tr1, None, None).unwrap();
+        db.upsert_track(&tr2, None, None).unwrap();
+        db.record_indexed_track_capabilities(&tr2.uri, false, true, true)
+            .unwrap();
+
+        let d1 = db.get_local_discovery_shelves(20_000).unwrap();
+        let d1_repeat = db.get_local_discovery_shelves(20_000).unwrap();
+        assert_eq!(d1.recent_albums.len(), 2);
+        assert_eq!(d1.rediscover_albums.len(), 2);
+        assert_eq!(
+            d1.rediscover_albums.iter().map(|a| &a.id).collect::<Vec<_>>(),
+            d1_repeat
+                .rediscover_albums
+                .iter()
+                .map(|a| &a.id)
+                .collect::<Vec<_>>()
+        );
+        let station_ids: Vec<&str> = d1.smart_stations.iter().map(|s| s.id.as_str()).collect();
+        assert!(station_ids.contains(&"local_station:mix"));
+        assert!(station_ids.contains(&"local_station:lossless"));
+        assert!(station_ids.contains(&"local_station:karaoke"));
+        assert!(station_ids.contains(&"local_station:soundtracks"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
 

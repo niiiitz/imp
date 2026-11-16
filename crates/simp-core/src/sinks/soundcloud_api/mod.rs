@@ -262,6 +262,7 @@ pub(crate) struct TrackHintEntry {
     pub playback_count: Option<u64>,
     pub user_id: Option<String>,
     pub chapters: Vec<SoundCloudMixChapter>,
+    pub has_comments: bool,
 }
 
 static TOKEN_CACHE: OnceLock<Mutex<Option<SoundCloudTokenBundle>>> = OnceLock::new();
@@ -632,6 +633,12 @@ pub fn map_soundcloud_item_to_track(item: &Value) -> Option<TrackMetadata> {
         .and_then(|v| v.as_u64())
         .filter(|&c| c > 0);
 
+    let has_comments = obj
+        .get("comment_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        > 0;
+
     let mut album_label = if duration_ms >= 20 * 60 * 1000 {
         match genre {
             Some(g) => format!("SoundCloud Mix • {g}"),
@@ -728,11 +735,25 @@ pub fn map_soundcloud_item_to_track(item: &Value) -> Option<TrackMetadata> {
                 playback_count,
                 user_id,
                 chapters,
+                has_comments,
             },
         );
     }
 
     Some(meta)
+}
+
+/// Returns `true` if recent SoundCloud track metadata indicated `comment_count > 0`.
+pub fn track_has_comments_hint(uri_or_id: &str) -> bool {
+    let id = clean_soundcloud_id(uri_or_id);
+    if id.is_empty() {
+        return false;
+    }
+    track_hints()
+        .lock()
+        .ok()
+        .and_then(|g| g.get(&id).map(|e| e.has_comments))
+        .unwrap_or(false)
 }
 
 pub fn map_soundcloud_item_to_playlist(item: &Value, default_kind: &str) -> Option<SoundCloudPlaylistSummary> {

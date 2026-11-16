@@ -17,7 +17,7 @@ use axum::{
     Json, Router,
 };
 use simp_core::{
-    library::db::LibraryDatabase,
+    library::{db::LibraryDatabase, services_cache::ServicesCacheDatabase},
     orchestrator::OrchestratorSnapshot,
 };
 use simp_protocol::{
@@ -37,6 +37,7 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 #[derive(Clone)]
 pub struct DaemonIpcState {
     pub db: LibraryDatabase,
+    pub services_cache: ServicesCacheDatabase,
     pub settings: Arc<Mutex<SimpSettings>>,
     pub orchestrator_state: Arc<Mutex<OrchestratorSnapshot>>,
     pub cmd_tx: mpsc::UnboundedSender<AudioCommand>,
@@ -208,6 +209,15 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
             post(convert_playlist_to_hybrid_handler),
         )
         .route("/api/library/purge-source", post(purge_source_handler))
+        .route("/api/library/local-discover", get(local_discover_handler))
+        .route(
+            "/api/cache/shelves",
+            get(cache_shelves_get_handler).post(cache_shelves_post_handler),
+        )
+        .route(
+            "/api/fyp/shelves",
+            get(fyp_shelves_get_handler).post(fyp_shelves_post_handler),
+        )
         .route("/api/auth/probe", get(auth_probe_handler))
         .route("/api/fs/roots", get(fs_roots_handler))
         .route("/api/fs/list", get(fs_list_handler))

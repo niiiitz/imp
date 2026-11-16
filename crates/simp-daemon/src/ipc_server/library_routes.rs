@@ -436,6 +436,10 @@ pub(super) async fn purge_source_handler(
     State(state): State<DaemonIpcState>,
     Json(body): Json<PurgeSourceBody>,
 ) -> impl IntoResponse {
+    let purged_cache = state
+        .services_cache
+        .purge_provider_cache(&body.source)
+        .unwrap_or(0);
     match state.db.purge_source_data(&body.source) {
         Ok(removed) => {
             let (total_albums, total_tracks) = state.db.get_library_counts().unwrap_or((0, 0));
@@ -445,8 +449,158 @@ pub(super) async fn purge_source_handler(
                     total_albums,
                     total_tracks,
                 });
-            Json(serde_json::json!({ "ok": true, "removed": removed }))
+            Json(serde_json::json!({
+                "ok": true,
+                "removed": removed,
+                "purged_cache": purged_cache
+            }))
         }
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn cache_shelves_get_handler(
+    State(state): State<DaemonIpcState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let now_unix = simp_core::library::services_cache::current_unix_sec();
+    if let Some(key) = params.get("key").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        return match state.services_cache.get_cached_shelf(key) {
+            Ok(shelf) => Json(serde_json::json!({
+                "ok": true,
+                "now_unix": now_unix,
+                "shelf": shelf,
+            })),
+            Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        };
+    }
+    let provider = params
+        .get("provider")
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
+    match state.services_cache.list_cached_shelves(provider) {
+        Ok(shelves) => Json(serde_json::json!({
+            "ok": true,
+            "now_unix": now_unix,
+            "shelves": shelves,
+        })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+pub(super) enum CacheShelvesPostBody {
+    Batch {
+        shelves: Vec<simp_core::library::services_cache::CachedShelfRecord>,
+    },
+    Single(simp_core::library::services_cache::CachedShelfRecord),
+}
+
+pub(super) async fn cache_shelves_post_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<CacheShelvesPostBody>,
+) -> impl IntoResponse {
+    let items = match body {
+        CacheShelvesPostBody::Batch { shelves } => shelves,
+        CacheShelvesPostBody::Single(s) => vec![s],
+    };
+    let mut updated = 0usize;
+    for item in &items {
+        if let Err(e) = state.services_cache.upsert_cached_shelf(item) {
+            return Json(serde_json::json!({ "ok": false, "error": e.to_string() }));
+        }
+        updated += 1;
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "updated": updated,
+        "now_unix": simp_core::library::services_cache::current_unix_sec(),
+    }))
+}
+
+pub(super) async fn fyp_shelves_get_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
+    let now_unix = simp_core::library::services_cache::current_unix_sec();
+    match (
+        state.services_cache.list_fyp_shelves(),
+        state.services_cache.list_cached_shelves(None),
+    ) {
+        (Ok(shelves), Ok(snapshots)) => Json(serde_json::json!({
+            "ok": true,
+            "now_unix": now_unix,
+            "shelves": shelves,
+            "snapshots": snapshots,
+        })),
+        (Err(e), _) | (_, Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct FypShelvesPostBody {
+    action: String,
+    shelf: Option<simp_core::library::services_cache::FypShelfRecord>,
+    snapshot: Option<simp_core::library::services_cache::CachedShelfRecord>,
+    shelf_uid: Option<String>,
+    shelves: Option<Vec<simp_core::library::services_cache::FypShelfRecord>>,
+}
+
+pub(super) async fn fyp_shelves_post_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<FypShelvesPostBody>,
+) -> impl IntoResponse {
+    let op_res: anyhow::Result<()> = (|| {
+        match body.action.as_str() {
+            "pin" => {
+                if let Some(snap) = &body.snapshot {
+                    state.services_cache.upsert_cached_shelf(snap)?;
+                }
+                if let Some(shelf) = &body.shelf {
+                    state.services_cache.upsert_fyp_shelf(shelf)?;
+                }
+            }
+            "unpin" => {
+                if let Some(uid) = body.shelf_uid.as_deref() {
+                    state.services_cache.delete_fyp_shelf(uid)?;
+                }
+            }
+            "save_all" => {
+                if let Some(list) = &body.shelves {
+                    state.services_cache.save_fyp_shelves(list)?;
+                }
+            }
+            other => {
+                anyhow::bail!("Unknown FYP action: {}", other);
+            }
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = op_res {
+        return Json(serde_json::json!({ "ok": false, "error": e.to_string() }));
+    }
+
+    let now_unix = simp_core::library::services_cache::current_unix_sec();
+    match (
+        state.services_cache.list_fyp_shelves(),
+        state.services_cache.list_cached_shelves(None),
+    ) {
+        (Ok(shelves), Ok(snapshots)) => Json(serde_json::json!({
+            "ok": true,
+            "now_unix": now_unix,
+            "shelves": shelves,
+            "snapshots": snapshots,
+        })),
+        (Err(e), _) | (_, Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn local_discover_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
+    let day_seed = (simp_core::library::services_cache::current_unix_sec().max(0) as u64) / 86_400;
+    let db = state.db.clone();
+    let res = tokio::task::spawn_blocking(move || db.get_local_discovery_shelves(day_seed)).await;
+    match res {
+        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }

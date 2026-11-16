@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   defaultSimpClient,
   SimpStateSnapshot,
@@ -12,16 +12,202 @@ export interface LibraryMiniPlayerBarProps {
   track: TrackMetadata | null;
   snap: SimpStateSnapshot | null;
   hidden?: boolean;
+  desktopMode?: boolean;
   onReturnToPlayer: () => void;
+  onTriggerScreensaver?: () => void;
 }
+
+const MiniSpectrumCanvas: React.FC<{
+  isPlaying: boolean;
+  hidden: boolean;
+  trackUri: string | null;
+  accentColor: string;
+  idleColor: string;
+}> = ({ isPlaying, hidden, trackUri, accentColor, idleColor }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const targetBandsRef = useRef<Float32Array>(new Float32Array(16));
+  const curBandsRef = useRef<Float32Array>(new Float32Array(16));
+  const lastSpecPerfRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (hidden || !trackUri) return;
+    const unsub = defaultSimpClient.subscribeSpectrum((frame) => {
+      lastSpecPerfRef.current = performance.now();
+      const len = Math.min(16, frame.bands.length);
+      for (let i = 0; i < len; i++) {
+        targetBandsRef.current[i] = Math.max(0, Math.min(1, frame.bands[i] / 255));
+      }
+    });
+    return unsub;
+  }, [hidden, trackUri]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const dpr = Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, 2);
+    const logicalW = 96;
+    const logicalH = 26;
+    if (canvas.width !== logicalW * dpr || canvas.height !== logicalH * dpr) {
+      canvas.width = logicalW * dpr;
+      canvas.height = logicalH * dpr;
+    }
+
+    const drawBars = (playing: boolean) => {
+      ctx.save();
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, logicalW, logicalH);
+
+      const barCount = 16;
+      const barW = 4;
+      const gap = 2;
+      const startX = 1;
+      const now = performance.now();
+      const usingFallback = playing && now - lastSpecPerfRef.current > 450;
+      const t = now * 0.001;
+
+      for (let i = 0; i < barCount; i++) {
+        let target = targetBandsRef.current[i];
+        if (!playing) {
+          target = 0;
+        } else if (usingFallback) {
+          target =
+            0.18 +
+            0.55 * Math.abs(Math.sin(t * 2.7 + i * 0.55)) * Math.abs(Math.cos(t * 1.6 - i * 0.3));
+        }
+        const prev = curBandsRef.current[i];
+        const next = playing ? prev + (target - prev) * (target > prev ? 0.38 : 0.16) : 0;
+        curBandsRef.current[i] = next;
+
+        const barH = playing ? Math.max(2.5, next * (logicalH - 4)) : 2.5;
+        const x = startX + i * (barW + gap);
+        const y = logicalH - 2 - barH;
+        ctx.fillStyle = playing ? accentColor : idleColor;
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, barH, 1.5);
+        ctx.fill();
+      }
+      ctx.restore();
+    };
+
+    if (hidden || !isPlaying) {
+      drawBars(false);
+      return;
+    }
+
+    let rafId = 0;
+    const tick = () => {
+      drawBars(true);
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, hidden, accentColor, idleColor]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        width: 96,
+        height: 26,
+        display: 'block',
+        pointerEvents: 'none',
+      }}
+    />
+  );
+};
 
 export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   track,
   snap,
   hidden = false,
+  desktopMode = false,
   onReturnToPlayer,
+  onTriggerScreensaver,
 }) => {
   const theme = getSourceThemeForTrack(track?.uri, track?.source);
+  const isVideoTrack = Boolean(
+    track &&
+      (track.source === 'ia_video' ||
+        track.source === 'local_video' ||
+        track.source === 'dvd' ||
+        track.uri.startsWith('ia:video:') ||
+        track.uri.startsWith('ia://video/') ||
+        track.uri.startsWith('video://local/') ||
+        track.uri.startsWith('dvd://'))
+  );
+
+  const handleArtOrVizClick = () => {
+    if (desktopMode && !isVideoTrack && onTriggerScreensaver) {
+      onTriggerScreensaver();
+    } else {
+      onReturnToPlayer();
+    }
+  };
+
+  const openInterfaceOptions = () => {
+    window.dispatchEvent(
+      new CustomEvent('simp-select-category-focus', { detail: { category: 'interface' } })
+    );
+    window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
+  };
+
+  const renderUtilityButtons = () => (
+    <>
+      <button
+        type="button"
+        data-row-aux="true"
+        onClick={() => window.dispatchEvent(new CustomEvent('simp-equalizer-toggle'))}
+        title="10-Band Audio Equalizer & Vocal Stage"
+        style={{
+          minHeight: 32,
+          padding: '0 9px',
+          borderRadius: 8,
+          background: '#101420',
+          border: '1px solid #263145',
+          color: '#67e8f9',
+          fontSize: 11,
+          fontWeight: 800,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        <ImpIcon name="sliders" size={13} color="#67e8f9" />
+        <span>EQ</span>
+      </button>
+      {desktopMode && (
+        <button
+          type="button"
+          data-row-aux="true"
+          onClick={openInterfaceOptions}
+          title="Interface & Desktop Mode Options (SELECT)"
+          style={{
+            minHeight: 32,
+            padding: '0 9px',
+            borderRadius: 8,
+            background: '#0f222a',
+            border: '1px solid #2aa3c4',
+            color: '#bfeaf5',
+            fontSize: 11,
+            fontWeight: 800,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <ImpIcon name="gamepad-select" size={13} color="#67e8f9" />
+          <span>Options</span>
+        </button>
+      )}
+    </>
+  );
 
   if (!track) {
     return (
@@ -43,6 +229,9 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#64748b', fontSize: 12 }}>
           <ImpIcon name="disc" size={16} color="#38bdf8" />
           <span>No track playing — select any album, playlist, or song below</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {renderUtilityButtons()}
         </div>
       </div>
     );
@@ -77,8 +266,12 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
       >
         <button
           data-row-aux="true"
-          onClick={onReturnToPlayer}
-          title="Return to Player View"
+          onClick={handleArtOrVizClick}
+          title={
+            desktopMode && !isVideoTrack
+              ? 'Launch Visualizer Screensaver'
+              : 'Return to Player View'
+          }
           style={{
             padding: 0,
             border: 'none',
@@ -163,7 +356,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
       </div>
 
       {/* Center: Compact Progress Scrubber */}
-      <div style={{ flex: '1 1 320px', minWidth: 160, maxWidth: 460 }}>
+      <div style={{ flex: '1 1 240px', minWidth: 140, maxWidth: 420 }}>
         <ProgressBarRaf
           durationMs={track.duration_ms || 0}
           trackUri={track.uri}
@@ -172,7 +365,39 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         />
       </div>
 
-      {/* Right: Transport Controls + Repeat Mode Overlay + Return to Player */}
+      {/* Micro-Scale Live Audio Visualizer */}
+      <button
+        type="button"
+        data-row-aux="true"
+        onClick={handleArtOrVizClick}
+        title={
+          desktopMode && !isVideoTrack
+            ? 'Launch Visualizer Screensaver'
+            : 'Open Visualizer / Player View'
+        }
+        style={{
+          padding: '2px 5px',
+          height: 32,
+          borderRadius: 8,
+          background: '#0a0c14',
+          border: `1px solid ${snap?.is_playing ? theme.accentBorder : '#1e2230'}`,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <MiniSpectrumCanvas
+          isPlaying={Boolean(snap?.is_playing)}
+          hidden={hidden}
+          trackUri={track.uri}
+          accentColor={theme.accent}
+          idleColor={theme.accentBorder}
+        />
+      </button>
+
+      {/* Right: Transport Controls + Repeat Mode Overlay + EQ / Desktop Options */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <button
           data-row-aux="true"
@@ -284,6 +509,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             </span>
           )}
         </button>
+        {renderUtilityButtons()}
       </div>
     </div>
   );

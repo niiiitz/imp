@@ -203,12 +203,13 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
           )}
           <span className="simp-gp-badge" style={{ display: 'inline-flex', alignItems: 'center' }}>
             {gpSelectBadge}
-            <span>+ Add tile to SIMP Playlist</span>
+            <span>to see Options</span>
           </span>
         </div>
-        <span className="simp-gp-badge" style={{ display: 'inline-flex', alignItems: 'center' }}>
+        <span className="simp-gp-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {gpYBadge}
-          <span>📌 Pin / Unpin focused tile</span>
+          <ImpIcon name="imp" size={11} color="#fcd34d" />
+          <span>Pin / Unpin focused tile</span>
         </span>
       </div>
     );
@@ -250,11 +251,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span className="simp-gp-badge" style={{ display: 'inline-flex', alignItems: 'center' }}>
           {gpSelectBadge}
-          <span>
-            {isViewingLocalPlaylist
-              ? '− Remove focused track'
-              : '+ Add focused track / collection'}
-          </span>
+          <span>to see Options</span>
         </span>
 
         {canAddAllTracks && (
@@ -267,7 +264,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 browserTracks
               )
             }
-            title={`Add all ${browserTracks.length} tracks to SIMP Hybrid Playlist`}
+            title={`Add all ${browserTracks.length} tracks to Imp Hybrid Playlist`}
             style={{
               padding: '3px 9px',
               borderRadius: 6,
@@ -297,7 +294,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   });
                 } catch {}
               }}
-              title="Convert this pinned collection into an editable Hybrid SIMP Playlist"
+              title="Convert this pinned collection into an editable Hybrid Imp Playlist"
               style={{
                 padding: '3px 9px',
                 borderRadius: 6,
@@ -343,7 +340,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     handlePinCloudPlaylist(activeCloudPlaylist, browserTracks);
                   }
                 }}
-                title="Pin or Unpin this playlist in SIMP"
+                title="Pin or Unpin this playlist in Imp"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -358,7 +355,14 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 }}
               >
                 {gpYBadge}
-                <span>{isCloudPlaylistPinned ? '✓ Pinned (Unpin)' : '📌 Pin to SIMP'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ImpIcon
+                    name={isCloudPlaylistPinned ? 'check' : 'imp'}
+                    size={11}
+                    color={isCloudPlaylistPinned ? '#67e8f9' : '#fecdd3'}
+                  />
+                  <span>{isCloudPlaylistPinned ? 'Pinned (Unpin)' : 'Pin to Imp'}</span>
+                </span>
               </button>
             )}
 
@@ -375,7 +379,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     handlePinSoundCloudPlaylist(activeScPlaylist, browserTracks);
                   }
                 }}
-                title="Pin or Unpin this SoundCloud set in SIMP"
+                title="Pin or Unpin this SoundCloud set in Imp"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -390,7 +394,14 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 }}
               >
                 {gpYBadge}
-                <span>{isScPlaylistPinned ? '✓ Pinned (Unpin)' : '📌 Pin Set to SIMP'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ImpIcon
+                    name={isScPlaylistPinned ? 'check' : 'imp'}
+                    size={11}
+                    color={isScPlaylistPinned ? '#67e8f9' : '#fdba74'}
+                  />
+                  <span>{isScPlaylistPinned ? 'Pinned (Unpin)' : 'Pin Set to Imp'}</span>
+                </span>
               </button>
             )}
 
@@ -407,7 +418,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     handlePinCloudAlbum(activeCloudAlbum, browserTracks);
                   }
                 }}
-                title="Pin or Unpin this album in SIMP"
+                title="Pin or Unpin this album in Imp"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -422,7 +433,14 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 }}
               >
                 {gpYBadge}
-                <span>{isCloudAlbumPinned ? '✓ Pinned (Unpin)' : '📌 Pin Album to SIMP'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ImpIcon
+                    name={isCloudAlbumPinned ? 'check' : 'imp'}
+                    size={11}
+                    color={isCloudAlbumPinned ? '#67e8f9' : '#fecdd3'}
+                  />
+                  <span>{isCloudAlbumPinned ? 'Pinned (Unpin)' : 'Pin Album to Imp'}</span>
+                </span>
               </button>
             )}
 
@@ -439,7 +457,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     handlePinArchiveItem(activeIaDetail.summary, browserTracks);
                   }
                 }}
-                title="Pin or Unpin this Internet Archive audio collection in SIMP"
+                title="Pin or Unpin this Internet Archive audio collection in Imp"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -454,7 +472,14 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 }}
               >
                 {gpYBadge}
-                <span>{isArchiveItemPinned ? '✓ Pinned (Unpin)' : '📌 Pin to SIMP'}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ImpIcon
+                    name={isArchiveItemPinned ? 'check' : 'imp'}
+                    size={11}
+                    color={isArchiveItemPinned ? '#67e8f9' : '#fde68a'}
+                  />
+                  <span>{isArchiveItemPinned ? 'Pinned (Unpin)' : 'Pin to Imp'}</span>
+                </span>
               </button>
             )}
 
@@ -467,8 +492,8 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 }}
                 title={
                   selectedPlaylistObj.origin === 'simp_local'
-                    ? 'Delete this SIMP Playlist'
-                    : 'Unpin this playlist from SIMP'
+                    ? 'Delete this Imp Playlist'
+                    : 'Unpin this playlist from Imp'
                 }
                 style={{
                   display: 'inline-flex',
@@ -501,7 +526,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     handleDeleteAlbum(selectedAlbumObj.id, selectedAlbumObj.title);
                     setRightPaneMode('browse');
                   }}
-                  title="Unpin this album from SIMP"
+                  title="Unpin this album from Imp"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -528,7 +553,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   onClick={() => {
                     handleTogglePinLocalAlbum(selectedAlbumObj, browserTracks);
                   }}
-                  title="Pin or Unpin this local album in SIMP Library"
+                  title="Pin or Unpin this local album in Imp Library"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -543,7 +568,14 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   }}
                 >
                   {gpYBadge}
-                  <span>{isLocalAlbumPinned ? '✓ Pinned (Unpin)' : '📌 Pin Album to SIMP'}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <ImpIcon
+                      name={isLocalAlbumPinned ? 'check' : 'imp'}
+                      size={11}
+                      color={isLocalAlbumPinned ? '#67e8f9' : '#bfeaf5'}
+                    />
+                    <span>{isLocalAlbumPinned ? 'Pinned (Unpin)' : 'Pin Album to Imp'}</span>
+                  </span>
                 </button>
               )}
           </>

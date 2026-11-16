@@ -9,11 +9,13 @@ import {
 import { AppleCloudPlaylistSummary } from "../../../drivers/AppleMusicDriver";
 import { SoundCloudPlaylistSummary } from "../../../drivers/SoundCloudDriver";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
+import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { OskTargetKind } from "../../../hooks/useGamepadNavigation";
 import { BrowserTarget } from "../../PlayerView";
 import { SourceVisibilityPrefs } from "../../SettingsModal";
 import { cleanCollectionTitle } from "../libraryHelpers";
 import { ImpIcon, ImpIconName } from "../../../components/icons/ImpIcon";
+import { LocalSmartStation } from "../../../api/servicesCacheApi";
 
 export interface LibraryXmbLeftColumnProps {
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
@@ -81,6 +83,10 @@ export interface LibraryXmbLeftColumnProps {
   handleCreatePlaylist: () => Promise<void>;
   activePlaylistId: string;
   setActivePlaylistId: React.Dispatch<React.SetStateAction<string>>;
+  impFypActive: boolean;
+  setImpFypActive: React.Dispatch<React.SetStateAction<boolean>>;
+  localSmartStations: LocalSmartStation[];
+  onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
 }
 
 export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
@@ -137,7 +143,52 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   handleCreatePlaylist,
   activePlaylistId,
   setActivePlaylistId,
+  impFypActive,
+  setImpFypActive,
+  localSmartStations,
+  onPlayLocalSmartStation,
 }) => {
+  const [albumsSecOpen, setAlbumsSecOpen] = React.useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('simp_sec_albums') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const [stationsSecOpen, setStationsSecOpen] = React.useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('simp_sec_stations') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const [showAllRailAlbums, setShowAllRailAlbums] = React.useState<boolean>(false);
+
+  const toggleAlbumsSecOpen = () => {
+    setAlbumsSecOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('simp_sec_albums', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleStationsSecOpen = () => {
+    setStationsSecOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('simp_sec_stations', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+
+  const savedStationsAndSets = filteredPlaylists.filter(
+    (p) => p.origin === 'soundcloud_remote' || p.origin === 'archive_remote'
+  );
+  const railSmartStations = isSourceIncluded('local') ? localSmartStations : [];
+  const totalStationsAndSets = railSmartStations.length + savedStationsAndSets.length;
   return (
     <>
       {/* =====================================================================
@@ -253,6 +304,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       } else if (nextSet.length === 1) {
                         const single = nextSet[0];
                         setBrowserSourceFilterRaw(single);
+                        setImpFypActive(false);
                         if (single === 'local') {
                           setAppleSubTab('pinned');
                           setSoundCloudSubTab('pinned');
@@ -419,12 +471,72 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
 
         {placesOpen && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {/* Top-Level Customizable Imp FYP Entry above Imp Library */}
+            {(() => {
+              const fypIsActive =
+                impFypActive && !activeMountRoot && rightPaneMode === 'browse';
+              return (
+                <button
+                  data-default-focus={impFypActive ? 'true' : undefined}
+                  data-left-active={fypIsActive ? 'true' : undefined}
+                  data-xmb-preview="true"
+                  onClick={() => {
+                    const isPreview = xmbPreviewTriggerRef.current;
+                    if (
+                      !isPreview &&
+                      (!impFypActive || activeMountRoot !== null || rightPaneMode !== 'browse')
+                    ) {
+                      pushCurrentNavState();
+                    }
+                    setActiveMountRoot(null);
+                    setImpFypActive(true);
+                    setRightPaneMode('browse');
+                    if (!isPreview) {
+                      focusRightPaneFirstTile();
+                    }
+                  }}
+                  style={{
+                    minHeight: 34,
+                    padding: '0 10px',
+                    borderRadius: 8,
+                    background: fypIsActive ? '#1c1808' : '#0a0a0e',
+                    border: fypIsActive ? '1px solid #eab308' : '1px solid #181820',
+                    color: fypIsActive ? '#fef08a' : '#e2e8f0',
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <ImpIcon
+                      name="bolt"
+                      size={13}
+                      color={fypIsActive ? '#fde047' : '#94a3b8'}
+                    />
+                    <span>Imp FYP</span>
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      color: fypIsActive ? '#fde047' : '#71717a',
+                    }}
+                  >
+                    ⊞
+                  </span>
+                </button>
+              );
+            })()}
             {browserSourceFilter === 'internet_archive' ? (
               (
                 [
                   {
                     id: 'pinned' as const,
-                    label: `IMP Library (${filteredPlaylists.length})`,
+                    label: `Imp Library (${filteredPlaylists.length})`,
                     isSimp: true,
                     defaultSub: 'all',
                   },
@@ -455,23 +567,25 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 ] as const
               ).map((hub) => {
                 const active =
-                  !activeMountRoot && iaSubTab === hub.id && rightPaneMode === 'browse';
+                  !impFypActive && !activeMountRoot && iaSubTab === hub.id && rightPaneMode === 'browse';
                 return (
                   <button
                     key={hub.id}
-                    data-default-focus={hub.id === 'pinned' ? 'true' : undefined}
+                    data-default-focus={!impFypActive && hub.id === 'pinned' ? 'true' : undefined}
                     data-left-active={active ? 'true' : undefined}
                     data-xmb-preview="true"
                     onClick={() => {
                       const isPreview = xmbPreviewTriggerRef.current;
                       if (
                         !isPreview &&
-                        (activeMountRoot !== null ||
+                        (impFypActive ||
+                          activeMountRoot !== null ||
                           iaSubTab !== hub.id ||
                           rightPaneMode !== 'browse')
                       ) {
                         pushCurrentNavState();
                       }
+                      setImpFypActive(false);
                       setActiveMountRoot(null);
                       setIaSubTab(hub.id);
                       setIaSubFilter(hub.defaultSub);
@@ -508,7 +622,16 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       alignItems: 'center',
                     }}
                   >
-                    <span>{hub.label}</span>
+                    <span>
+                      {hub.isSimp ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <ImpIcon name="imp" size={13} color={active ? '#bfeaf5' : '#67e8f9'} />
+                          <span>{hub.label}</span>
+                        </span>
+                      ) : (
+                        hub.label
+                      )}
+                    </span>
                     <span
                       style={{
                         fontSize: 10,
@@ -526,7 +649,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 [
                   {
                     id: 'pinned' as const,
-                    label: `📌 IMP Library (${filteredPlaylists.length})`,
+                    label: `Imp Library (${filteredPlaylists.length})`,
                     isSimp: true,
                   },
                   {
@@ -551,23 +674,25 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 ] as const
               ).map((hub) => {
                 const active =
-                  !activeMountRoot && soundCloudSubTab === hub.id && rightPaneMode === 'browse';
+                  !impFypActive && !activeMountRoot && soundCloudSubTab === hub.id && rightPaneMode === 'browse';
                 return (
                   <button
                     key={hub.id}
-                    data-default-focus={hub.id === 'pinned' ? 'true' : undefined}
+                    data-default-focus={!impFypActive && hub.id === 'pinned' ? 'true' : undefined}
                     data-left-active={active ? 'true' : undefined}
                     data-xmb-preview="true"
                     onClick={() => {
                       const isPreview = xmbPreviewTriggerRef.current;
                       if (
                         !isPreview &&
-                        (activeMountRoot !== null ||
+                        (impFypActive ||
+                          activeMountRoot !== null ||
                           soundCloudSubTab !== hub.id ||
                           rightPaneMode !== 'browse')
                       ) {
                         pushCurrentNavState();
                       }
+                      setImpFypActive(false);
                       setActiveMountRoot(null);
                       setSoundCloudSubTab(hub.id);
                       setRightPaneMode('browse');
@@ -603,7 +728,16 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       alignItems: 'center',
                     }}
                   >
-                    <span>{hub.label}</span>
+                    <span>
+                      {hub.isSimp ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <ImpIcon name="imp" size={13} color={active ? '#bfeaf5' : '#67e8f9'} />
+                          <span>{hub.label}</span>
+                        </span>
+                      ) : (
+                        hub.label
+                      )}
+                    </span>
                     <span
                       style={{
                         fontSize: 10,
@@ -621,13 +755,13 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 ? [
                     {
                       id: 'pinned' as const,
-                      label: `📌 IMP Library (${filteredPlaylists.length + pinnedAppleAlbumCount})`,
+                      label: `Imp Library (${filteredPlaylists.length + pinnedAppleAlbumCount})`,
                       isSimp: true,
                     },
                     { id: 'for_you' as const, label: '✨ For You', isSimp: false },
                     {
                       id: 'cloud_playlists' as const,
-                      label: `☁️ Apple Playlists${
+                      label: `Apple Playlists${
                         cloudPlaylists.length ? ` (${cloudPlaylists.length})` : ''
                       }`,
                       isSimp: false,
@@ -641,29 +775,31 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       label:
                         browserSourceFilter === 'local'
                           ? `💾 All Local Albums (${filteredAlbums.length})`
-                          : `📌 My IMP Library (${filteredPlaylists.length + pinnedAppleAlbumCount})`,
+                          : `Imp Library (${filteredPlaylists.length + pinnedAppleAlbumCount})`,
                       isSimp: true,
                     },
                   ]
               ).map((hub) => {
                 const active =
-                  !activeMountRoot && appleSubTab === hub.id && rightPaneMode === 'browse';
+                  !impFypActive && !activeMountRoot && appleSubTab === hub.id && rightPaneMode === 'browse';
                 return (
                   <button
                     key={hub.id}
-                    data-default-focus={hub.id === 'pinned' ? 'true' : undefined}
+                    data-default-focus={!impFypActive && hub.id === 'pinned' ? 'true' : undefined}
                     data-left-active={active ? 'true' : undefined}
                     data-xmb-preview="true"
                     onClick={() => {
                       const isPreview = xmbPreviewTriggerRef.current;
                       if (
                         !isPreview &&
-                        (activeMountRoot !== null ||
+                        (impFypActive ||
+                          activeMountRoot !== null ||
                           appleSubTab !== hub.id ||
                           rightPaneMode !== 'browse')
                       ) {
                         pushCurrentNavState();
                       }
+                      setImpFypActive(false);
                       setActiveMountRoot(null);
                       setAppleSubTab(hub.id);
                       setRightPaneMode('browse');
@@ -699,7 +835,21 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       alignItems: 'center',
                     }}
                   >
-                    <span>{hub.label}</span>
+                    <span>
+                      {hub.isSimp && browserSourceFilter !== 'local' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <ImpIcon name="imp" size={13} color={active ? '#bfeaf5' : '#67e8f9'} />
+                          <span>{hub.label}</span>
+                        </span>
+                      ) : hub.id === 'cloud_playlists' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <AppleMusicLogo size={13} />
+                          <span>{hub.label}</span>
+                        </span>
+                      ) : (
+                        hub.label
+                      )}
+                    </span>
                     <span
                       style={{
                         fontSize: 10,
@@ -722,6 +872,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 data-xmb-drill-right="true"
                 onClick={() => {
                   pushCurrentNavState();
+                  setImpFypActive(false);
                   setActiveMountRoot(null);
                   setBrowserSourceFilter('apple_music');
                   setAppleSubTab('for_you');
@@ -745,7 +896,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 }}
               >
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <ImpIcon name="apple" size={13} color="#fda4af" />
+                  <AppleMusicLogo size={13} />
                   <span>Apple Music</span>
                 </span>
                 <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af' }}>▸</span>
@@ -758,6 +909,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 data-xmb-drill-right="true"
                 onClick={() => {
                   pushCurrentNavState();
+                  setImpFypActive(false);
                   setActiveMountRoot(null);
                   setBrowserSourceFilter('soundcloud');
                   setSoundCloudSubTab('trending');
@@ -795,6 +947,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 data-xmb-drill-right="true"
                 onClick={() => {
                   pushCurrentNavState();
+                  setImpFypActive(false);
                   setActiveMountRoot(null);
                   setBrowserSourceFilter('internet_archive');
                   setIaSubTab('trending');
@@ -827,7 +980,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             {isSourceIncluded('local') &&
               snap?.mounts.map((m) => {
                 const isMountActive =
-                  activeMountRoot === m.mount_root && rightPaneMode === 'browse';
+                  !impFypActive && activeMountRoot === m.mount_root && rightPaneMode === 'browse';
                 return (
                   <button
                     key={m.mount_root}
@@ -841,6 +994,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       ) {
                         pushCurrentNavState();
                       }
+                      setImpFypActive(false);
                       setActiveMountRoot(m.mount_root);
                       setRightPaneMode('browse');
                       if (!isPreview) {
@@ -1201,12 +1355,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             const isLocalPlaylist = pl.origin === 'simp_local';
             const isActiveTarget = isLocalPlaylist && activePlaylistId === pl.id;
             const cleanTitle = cleanCollectionTitle(pl.name);
-            const inlineSourceIcons = isLocalPlaylist
-              ? `${pl.has_local ? '💾' : ''}${pl.has_apple ? '🍎' : ''}${
-                  pl.has_soundcloud ? '☁️' : ''
-                }${pl.has_archive ? '🏛️' : ''}`
-              : '';
-            const inlineSources = inlineSourceIcons ? `${inlineSourceIcons} ` : '';
             return (
               <button
                 key={pl.id}
@@ -1219,6 +1367,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   if (isLocalPlaylist) {
                     setActivePlaylistId(pl.id);
                   }
+                  setImpFypActive(false);
                   selectLocalCollection({ kind: 'playlist', id: pl.id });
                 }}
                 style={{
@@ -1247,17 +1396,29 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     whiteSpace: 'nowrap',
                     minWidth: 0,
                     flex: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
                   }}
                 >
-                  {isLocalPlaylist
-                    ? `${isActiveTarget ? '★ ' : '🎵 '}${cleanTitle}`
-                    : pl.origin === 'local_pinned'
-                    ? `💾 ${cleanTitle}`
-                    : pl.origin === 'soundcloud_remote'
-                    ? `☁️ ${cleanTitle}`
-                    : pl.origin === 'archive_remote'
-                    ? `🏛️ ${cleanTitle}`
-                    : `🍎 ${cleanTitle}`}
+                  {isLocalPlaylist ? (
+                    <ImpIcon
+                      name={isActiveTarget ? 'star' : 'imp'}
+                      size={12}
+                      color={isActiveTarget ? '#67e8f9' : '#94a3b8'}
+                    />
+                  ) : pl.origin === 'local_pinned' ? (
+                    <ImpIcon name="local" size={12} color="#34d399" />
+                  ) : pl.origin === 'soundcloud_remote' ? (
+                    <ImpIcon name="soundcloud" size={11} color="#fdba74" />
+                  ) : pl.origin === 'archive_remote' ? (
+                    <ImpIcon name="archive" size={12} color="#facc15" />
+                  ) : (
+                    <AppleMusicLogo size={12} />
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {cleanTitle}
+                  </span>
                 </span>
                 <span
                   style={{
@@ -1265,14 +1426,294 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     fontFamily: 'monospace',
                     color: '#2aa3c4',
                     flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
                   }}
                 >
-                  {inlineSources}
-                  {pl.track_count}
+                  {isLocalPlaylist && pl.has_local && <ImpIcon name="local" size={10} color="#34d399" />}
+                  {isLocalPlaylist && pl.has_apple && <AppleMusicLogo size={10} />}
+                  {isLocalPlaylist && pl.has_soundcloud && <ImpIcon name="soundcloud" size={9} color="#fdba74" />}
+                  {isLocalPlaylist && pl.has_archive && <ImpIcon name="archive" size={10} color="#facc15" />}
+                  <span>{pl.track_count}</span>
                 </span>
               </button>
             );
           })}
+
+        {/* =================================================================
+            COLLAPSIBLE BUCKET 2: ▾ IMP ALBUMS & SOUNDTRACKS
+           ================================================================= */}
+        {filteredAlbums.length > 0 && (
+          <button
+            data-xmb-drill-right="true"
+            onClick={toggleAlbumsSecOpen}
+            style={{
+              marginTop: 4,
+              background: '#0d0d14',
+              border: '1px solid #1e1e28',
+              borderRadius: 8,
+              padding: '6px 10px',
+              color: '#c8c8d4',
+              fontSize: 11,
+              fontFamily: 'monospace',
+              fontWeight: 800,
+              textAlign: 'left',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>
+              {albumsSecOpen ? '▾' : '▸'} IMP ALBUMS &amp; SOUNDTRACKS ({filteredAlbums.length})
+            </span>
+          </button>
+        )}
+
+        {albumsSecOpen &&
+          (showAllRailAlbums ? filteredAlbums : filteredAlbums.slice(0, 20)).map((alb) => {
+            const isSelected =
+              rightPaneMode === 'tracks' &&
+              browserTarget?.kind === 'album' &&
+              browserTarget.id === alb.id;
+            const isApple = alb.id.startsWith('apple_album:');
+            return (
+              <button
+                key={alb.id}
+                data-left-active={isSelected ? 'true' : undefined}
+                data-xmb-preview="true"
+                onClick={() => {
+                  setImpFypActive(false);
+                  selectLocalCollection({
+                    kind: 'album',
+                    id: alb.id,
+                    title: alb.title,
+                    subtitle: alb.album_artist,
+                    art_url: alb.art_url,
+                  });
+                }}
+                style={{
+                  minHeight: 34,
+                  padding: '0 10px',
+                  borderRadius: 9,
+                  background: isSelected ? '#0d1b22' : '#0a0a0e',
+                  border: isSelected ? '1px solid #2aa3c4' : '1px solid #181820',
+                  color: '#d4d4dc',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                    flex: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {isApple ? (
+                    <AppleMusicLogo size={11} />
+                  ) : (
+                    <ImpIcon
+                      name="disc"
+                      size={11}
+                      color={alb.steam_app_id != null ? '#a78bfa' : '#34d399'}
+                    />
+                  )}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {cleanCollectionTitle(alb.title)}
+                  </span>
+                </span>
+                <span
+                  style={{
+                    fontSize: 10.5,
+                    fontFamily: 'monospace',
+                    color: alb.steam_app_id != null ? '#c4b5fd' : '#64748b',
+                    flexShrink: 0,
+                  }}
+                >
+                  {alb.steam_app_id != null ? 'OST ' : ''}
+                  {alb.track_count}
+                </span>
+              </button>
+            );
+          })}
+
+        {albumsSecOpen && filteredAlbums.length > 20 && (
+          <button
+            type="button"
+            onClick={() => setShowAllRailAlbums((v) => !v)}
+            style={{
+              minHeight: 28,
+              padding: '0 10px',
+              borderRadius: 8,
+              background: '#0d1018',
+              border: '1px solid #202432',
+              color: '#7dd3fc',
+              fontSize: 10.5,
+              fontFamily: 'monospace',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            {showAllRailAlbums
+              ? 'Show Top 20 Albums ▴'
+              : `Show All Albums (${filteredAlbums.length}) ▾`}
+          </button>
+        )}
+
+        {/* =================================================================
+            COLLAPSIBLE BUCKET 3: ▾ IMP STATIONS & SETS
+           ================================================================= */}
+        {totalStationsAndSets > 0 && (
+          <button
+            data-xmb-drill-right="true"
+            onClick={toggleStationsSecOpen}
+            style={{
+              marginTop: 4,
+              background: '#0d0d14',
+              border: '1px solid #1e1e28',
+              borderRadius: 8,
+              padding: '6px 10px',
+              color: '#c8c8d4',
+              fontSize: 11,
+              fontFamily: 'monospace',
+              fontWeight: 800,
+              textAlign: 'left',
+              cursor: 'pointer',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <span>
+              {stationsSecOpen ? '▾' : '▸'} IMP STATIONS &amp; SETS ({totalStationsAndSets})
+            </span>
+          </button>
+        )}
+
+        {stationsSecOpen && (
+          <>
+            {railSmartStations.map((st) => (
+              <button
+                key={st.id}
+                onClick={() => onPlayLocalSmartStation(st, false)}
+                title={`${st.title} — ${st.subtitle}`}
+                style={{
+                  minHeight: 34,
+                  padding: '0 10px',
+                  borderRadius: 9,
+                  background: '#0a0f12',
+                  border: '1px solid #17282b',
+                  color: '#ccfbf1',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 700,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    minWidth: 0,
+                    flex: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <ImpIcon name="radio" size={11} color="#5eead4" />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {st.title}
+                  </span>
+                </span>
+                <span style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#5eead4', flexShrink: 0 }}>
+                  ▶ {st.track_count}
+                </span>
+              </button>
+            ))}
+            {savedStationsAndSets.map((pl) => {
+              const isSelected =
+                rightPaneMode === 'tracks' &&
+                browserTarget?.kind === 'playlist' &&
+                browserTarget.id === pl.id;
+              return (
+                <button
+                  key={`station-set-${pl.id}`}
+                  data-left-active={isSelected ? 'true' : undefined}
+                  onClick={() => {
+                    setImpFypActive(false);
+                    selectLocalCollection({ kind: 'playlist', id: pl.id });
+                  }}
+                  style={{
+                    minHeight: 34,
+                    padding: '0 10px',
+                    borderRadius: 9,
+                    background: isSelected ? '#0d1b22' : '#0a0a0e',
+                    border: isSelected ? '1px solid #2aa3c4' : '1px solid #181820',
+                    color: '#d4d4dc',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 8,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    width: '100%',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      minWidth: 0,
+                      flex: 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    {pl.origin === 'soundcloud_remote' ? (
+                      <ImpIcon name="soundcloud" size={11} color="#fdba74" />
+                    ) : (
+                      <ImpIcon name="archive" size={12} color="#facc15" />
+                    )}
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {cleanCollectionTitle(pl.name)}
+                    </span>
+                  </span>
+                  <span style={{ fontSize: 10.5, fontFamily: 'monospace', color: '#94a3b8', flexShrink: 0 }}>
+                    {pl.track_count}
+                  </span>
+                </button>
+              );
+            })}
+          </>
+        )}
       </div>
     </>
   );

@@ -5,6 +5,9 @@ import { LibraryContextTarget } from '../../LibraryBrowserView';
 import { cleanCollectionTitle, formatPlaylistSourceBadge } from '../libraryHelpers';
 import { ContentRatingBadge } from '../ContentRatingBadge';
 import { ResilientTileArtwork } from '../ResilientTileArtwork';
+import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
+import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
+import { ImpIcon } from '../../../components/icons/ImpIcon';
 
 export interface SimpPlaylistCardProps {
   pl: PlaylistRecord;
@@ -94,7 +97,17 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
       >
         <ResilientTileArtwork
           src={pl.cover_art_url}
-          fallbackIcon={isLocal ? '🎵' : '🍎'}
+          fallbackIcon={
+            isLocal ? (
+              <ImpIcon name="imp" size={20} color="#67e8f9" />
+            ) : pl.origin === 'soundcloud_remote' ? (
+              <SoundCloudLogo width={30} color="#fdba74" />
+            ) : pl.origin === 'archive_remote' ? (
+              <ImpIcon name="archive" size={20} color="#fde68a" />
+            ) : (
+              <AppleMusicLogo size={20} />
+            )
+          }
           bg={isLocal ? '#0f222a' : '#251018'}
           border={isLocal ? '1px solid #2aa3c4' : '1px solid #4c1d2e'}
           playlistCoverId={
@@ -124,9 +137,21 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
               fontFamily: 'monospace',
               fontWeight: 800,
               whiteSpace: 'nowrap',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
             }}
           >
-            {isActiveTarget ? `★ ${sourceBadge}` : sourceBadge}
+            {pl.origin === 'apple_remote' ? (
+              <AppleMusicLogo size={11} />
+            ) : pl.origin === 'soundcloud_remote' ? (
+              <SoundCloudLogo width={30} color="#ffffff" />
+            ) : (
+              <>
+                <ImpIcon name="imp" size={11} color={isLocal ? '#67e8f9' : '#fda4af'} />
+                <span>{isActiveTarget ? `★ ${sourceBadge}` : sourceBadge}</span>
+              </>
+            )}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             {!isLocal ? (
@@ -134,7 +159,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
                 role="button"
                 data-tile-aux="true"
                 data-tile-select="true"
-                title="Add all tracks to active ★ SIMP Hybrid Playlist (SELECT)"
+                title="Add all tracks to active ★ Imp Hybrid Playlist"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleAddSimpPlaylistToHybrid(pl);
@@ -157,7 +182,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
                 role="button"
                 data-tile-aux="true"
                 data-tile-select="true"
-                title="Set as active ★ target playlist (SELECT)"
+                title="Set as active ★ target playlist"
                 onClick={(e) => {
                   e.stopPropagation();
                   setActivePlaylistId(pl.id);
@@ -179,46 +204,8 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
             <span
               role="button"
               data-tile-aux="true"
-              data-context-select="true"
-              title="Collection Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'simp_playlist',
-                  id: pl.id,
-                  title: cleanTitle,
-                  subtitle: `${pl.track_count} tracks`,
-                  art_url: pl.cover_art_url,
-                  source:
-                    pl.origin === 'apple_remote'
-                      ? 'apple_music'
-                      : pl.origin === 'soundcloud_remote'
-                      ? 'soundcloud'
-                      : pl.origin === 'archive_remote'
-                      ? 'internet_archive'
-                      : 'local',
-                  rawItem: pl,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
               data-tile-y="true"
-              title={isLocal ? 'Delete SIMP Playlist (Y)' : 'Unpin Playlist from SIMP (Y)'}
+              title={isLocal ? 'Delete Imp Playlist (Y)' : 'Unpin Playlist from Imp (Y)'}
               onClick={(e) => {
                 e.stopPropagation();
                 handleDeletePlaylist(pl.id, cleanTitle);
@@ -381,60 +368,28 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
               fontFamily: 'monospace',
               fontWeight: 800,
               whiteSpace: 'nowrap',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {isAppleAlbum
-              ? '🍎'
-              : (() => {
-                  const fmtMatch = alb.album_artist.match(
-                    /•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i
-                  );
-                  return fmtMatch ? `💾 ${fmtMatch[1].toUpperCase()}` : '💾';
-                })()}
+            {isAppleAlbum ? (
+              <AppleMusicLogo size={12} />
+            ) : (
+              (() => {
+                const fmtMatch = alb.album_artist.match(
+                  /•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i
+                );
+                return fmtMatch ? `💾 ${fmtMatch[1].toUpperCase()}` : '💾';
+              })()
+            )}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
               role="button"
               data-tile-aux="true"
-              data-context-select="true"
-              title="Album Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'simp_album',
-                  id: alb.id,
-                  title: cleanTitle,
-                  subtitle: `${alb.album_artist} • ${alb.track_count} tracks`,
-                  art_url: alb.art_url,
-                  artistName: alb.album_artist
-                    .replace(
-                      /\s*•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i,
-                      ''
-                    )
-                    .trim(),
-                  source: isAppleAlbum ? 'apple_music' : 'local',
-                  rawItem: alb,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
               data-tile-select="true"
-              title="Add album tracks to active ★ SIMP Hybrid Playlist"
+              title="Add album tracks to active ★ Imp Hybrid Playlist"
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddSimpAlbumToHybrid(alb);
@@ -457,7 +412,7 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
                 role="button"
                 data-tile-aux="true"
                 data-tile-y="true"
-                title="Unpin Album from SIMP (Y)"
+                title="Unpin Album from Imp (Y)"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleDeleteAlbum(alb.id, cleanTitle);
@@ -482,25 +437,30 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
                 data-tile-y="true"
                 title={
                   isLocalPinned
-                    ? 'Unpin Local Album from SIMP Library (Y)'
-                    : 'Pin Local Album to SIMP Library (Y)'
+                    ? 'Unpin Local Album from Imp Library (Y)'
+                    : 'Pin Local Album to Imp Library (Y)'
                 }
                 onClick={(e) => {
                   e.stopPropagation();
                   handleTogglePinLocalAlbum(alb);
                 }}
                 style={{
-                  padding: '2px 6px',
+                  padding: '3px 6px',
                   borderRadius: 6,
                   background: isLocalPinned ? '#0f222a' : '#121820',
                   border: isLocalPinned ? '1px solid #2aa3c4' : '1px solid #283848',
                   color: isLocalPinned ? '#67e8f9' : '#bfeaf5',
-                  fontSize: 10,
-                  fontWeight: 800,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   cursor: 'pointer',
                 }}
               >
-                {isLocalPinned ? '✓' : '📌'}
+                <ImpIcon
+                  name={isLocalPinned ? 'check' : 'imp'}
+                  size={11}
+                  color={isLocalPinned ? '#67e8f9' : '#bfeaf5'}
+                />
               </span>
             )}
           </div>

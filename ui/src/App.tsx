@@ -55,6 +55,13 @@ import { HybridPlaylistPickerModal } from './components/HybridPlaylistPickerModa
 import { FolderDropModal } from './components/FolderDropModal';
 import { AppOnScreenKeyboardBar } from './components/AppOnScreenKeyboardBar';
 import { applySkinPackToDocument, loadActiveSkinPackId } from './theme/skinPacks';
+import {
+  readProviderCachedShelves,
+  refreshFypFromDb,
+  TTL_CATALOG_FEED_SEC,
+  TTL_FAST_FEED_SEC,
+  writeCachedShelves,
+} from './api/servicesCacheApi';
 
 const isCompanionPairRoute =
   typeof window !== 'undefined' &&
@@ -87,8 +94,53 @@ export const App: React.FC = () => {
 };
 
 const ConsoleMainApp: React.FC = () => {
+  const isDeckyEmbedded = typeof window !== 'undefined' && window.parent !== window;
   const [snap, setSnap] = useState<SimpStateSnapshot | null>(null);
-  const [view, setView] = useState<'lock' | 'browser'>('lock');
+  const snapRef = useRef<SimpStateSnapshot | null>(null);
+  snapRef.current = snap;
+  const [desktopModeRaw, setDesktopModeRaw] = useState<boolean>(() => {
+    if (isDeckyEmbedded) return false;
+    try {
+      return window.localStorage.getItem('simp_desktop_mode') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const desktopMode = !isDeckyEmbedded && desktopModeRaw;
+  const [desktopVizIdleSec, setDesktopVizIdleSecState] = useState<number>(() => {
+    try {
+      const raw = window.localStorage.getItem('simp_desktop_viz_idle_sec');
+      if (raw === null) return 30;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 30;
+    } catch {
+      return 30;
+    }
+  });
+  const [desktopScreensaverActive, setDesktopScreensaverActive] = useState<boolean>(false);
+  const screensaverEnteredAtRef = useRef<number>(0);
+  const [view, setViewState] = useState<'lock' | 'browser'>(() =>
+    desktopMode ? 'browser' : 'lock'
+  );
+  const setView: React.Dispatch<React.SetStateAction<'lock' | 'browser'>> = useCallback(
+    (action) => {
+      setViewState((prev) => {
+        const resolved = typeof action === 'function' ? action(prev) : action;
+        if (resolved === 'browser') {
+          setDesktopScreensaverActive(false);
+        }
+        if (
+          desktopMode &&
+          resolved === 'lock' &&
+          !isUiVideoTrack(snapRef.current?.current_track)
+        ) {
+          return 'browser';
+        }
+        return resolved;
+      });
+    },
+    [desktopMode]
+  );
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [powerModalOpen, setPowerModalOpen] = useState(false);
   const [initialOpenFoldersAccounts, setInitialOpenFoldersAccounts] = useState(false);
@@ -425,6 +477,54 @@ const ConsoleMainApp: React.FC = () => {
       setToastMsg((prev) => (prev === msg ? null : prev));
     }, 2600);
   }, []);
+
+  useEffect(() => {
+    const onToast = (ev: Event) => {
+      const msg = (ev as CustomEvent<{ message?: string }>).detail?.message;
+      if (msg) showToast(msg);
+    };
+    window.addEventListener('simp-show-toast', onToast);
+    return () => window.removeEventListener('simp-show-toast', onToast);
+  }, [showToast]);
+
+  const handleToggleDesktopMode = useCallback(
+    (next: boolean) => {
+      if (isDeckyEmbedded) return;
+      setDesktopModeRaw(next);
+      setDesktopScreensaverActive(false);
+      try {
+        window.localStorage.setItem('simp_desktop_mode', next ? '1' : '0');
+      } catch {
+        // Ignore storage errors
+      }
+      if (next) {
+        setViewState('browser');
+        showToast('Desktop Mode enabled — audio plays stay in Library');
+      } else {
+        showToast('Restored Player + Library dual view');
+      }
+    },
+    [isDeckyEmbedded, showToast]
+  );
+
+  const handleChangeDesktopVizIdleSec = useCallback((sec: number) => {
+    const safeSec = Number.isFinite(sec) && sec >= 0 ? Math.round(sec) : 30;
+    setDesktopVizIdleSecState(safeSec);
+    if (safeSec === 0) {
+      setDesktopScreensaverActive(false);
+    }
+    try {
+      window.localStorage.setItem('simp_desktop_viz_idle_sec', String(safeSec));
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+
+  const triggerDesktopScreensaver = useCallback(() => {
+    if (!desktopMode) return;
+    screensaverEnteredAtRef.current = performance.now();
+    setDesktopScreensaverActive(true);
+  }, [desktopMode]);
 
   const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>({ channel: 'stable' });
 
@@ -894,27 +994,181 @@ const ConsoleMainApp: React.FC = () => {
     handleScanOpticalDisc,
   ]);
 
-  // 3b. Apple Music Cloud Hub data loader
+  const applePlaylistsFetchedAtRef = useRef<number>(0);
+  const appleForYouFetchedAtRef = useRef<number>(0);
+  const appleNewFetchedAtRef = useRef<number>(0);
+  const scLikesFetchedAtRef = useRef<number>(0);
+  const scStreamFetchedAtRef = useRef<number>(0);
+  const scTrendingFetchedAtRef = useRef<Record<string, number>>({});
+  const swrInFlightRef = useRef<Set<string>>(new Set());
+
+  // Hydrate discovery shelves immediately from SQLite servicesCache.db on startup
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [appleCache, scCache] = await Promise.all([
+        readProviderCachedShelves('apple_music'),
+        readProviderCachedShelves('soundcloud'),
+      ]);
+      if (cancelled) return;
+
+      const acp = appleCache.byShelfId['bundle:cloud_playlists'];
+      if (acp && Array.isArray(acp.data)) {
+        setCloudPlaylists((prev) => (prev.length === 0 ? acp.data : prev));
+        applePlaylistsFetchedAtRef.current = acp.stale ? 0 : acp.fetchedAt;
+      }
+
+      const afy = appleCache.byShelfId['bundle:for_you_radio'];
+      if (afy && afy.data && typeof afy.data === 'object') {
+        const res = afy.data;
+        setRadioStations((prev) => (prev.length === 0 ? res.stations || [] : prev));
+        setPersonalRadioStations((prev) => (prev.length === 0 ? res.personal_stations || [] : prev));
+        setLiveRadioStations((prev) => (prev.length === 0 ? res.live_stations || [] : prev));
+        setArtistRadioShows((prev) => (prev.length === 0 ? res.artist_shows || [] : prev));
+        setClubMixes((prev) => (prev.length === 0 ? res.club_mixes || [] : prev));
+        setGenreRadioStations((prev) => (prev.length === 0 ? res.genre_stations || [] : prev));
+        setForYouPlaylists((prev) => (prev.length === 0 ? res.playlists || [] : prev));
+        setForYouAlbums((prev) => (prev.length === 0 ? res.albums || [] : prev));
+        setForYouNewReleases((prev) => (prev.length === 0 ? res.new_releases || [] : prev));
+        setForYouShelves((prev) => (prev.length === 0 ? res.shelves || [] : prev));
+        setAppleRecentlyPlayedTracks((prev) =>
+          prev.length === 0 ? res.recently_played || [] : prev
+        );
+        appleForYouFetchedAtRef.current = afy.stale ? 0 : afy.fetchedAt;
+      }
+
+      const anew = appleCache.byShelfId['bundle:new_feed'];
+      if (anew && anew.data && typeof anew.data === 'object') {
+        const res = anew.data;
+        setNewFeedRecentReleases((prev) => (prev.length === 0 ? res.recent_releases || [] : prev));
+        setNewFeedAlbums((prev) => (prev.length === 0 ? res.albums || [] : prev));
+        setNewFeedPlaylists((prev) => (prev.length === 0 ? res.playlists || [] : prev));
+        setNewFeedSongs((prev) => (prev.length === 0 ? res.songs || [] : prev));
+        appleNewFetchedAtRef.current = anew.stale ? 0 : anew.fetchedAt;
+      }
+
+      const scLikes = scCache.byShelfId['bundle:likes_sets'];
+      if (scLikes && scLikes.data && typeof scLikes.data === 'object') {
+        setScLikedTracks((prev) => (prev.length === 0 ? scLikes.data.likedTracks || [] : prev));
+        setScPlaylists((prev) => (prev.length === 0 ? scLikes.data.playlists || [] : prev));
+        scLikesFetchedAtRef.current = scLikes.stale ? 0 : scLikes.fetchedAt;
+      }
+
+      const scStream = scCache.byShelfId['bundle:stream_radio'];
+      if (scStream && scStream.data && typeof scStream.data === 'object') {
+        setScStreamTracks((prev) =>
+          prev.length === 0 ? scStream.data.streamTracks || [] : prev
+        );
+        setScStreamPlaylists((prev) =>
+          prev.length === 0 ? scStream.data.streamPlaylists || [] : prev
+        );
+        scStreamFetchedAtRef.current = scStream.stale ? 0 : scStream.fetchedAt;
+      }
+
+      const scTr = scCache.byShelfId['bundle:trending:all'];
+      if (scTr && scTr.data && typeof scTr.data === 'object') {
+        const res = scTr.data;
+        setScTrendingTracks((prev) => (prev.length === 0 ? res.tracks || [] : prev));
+        setScTrendingMixes((prev) => (prev.length === 0 ? res.mixes || [] : prev));
+        setScTrendingPlaylists((prev) => (prev.length === 0 ? res.playlists || [] : prev));
+        setScMoreOfWhatYouLike((prev) =>
+          prev.length === 0 ? res.more_of_what_you_like || [] : prev
+        );
+        setScFreshUploads((prev) => (prev.length === 0 ? res.fresh_uploads || [] : prev));
+        setScRecommendedArtists((prev) =>
+          prev.length === 0 ? res.recommended_artists || [] : prev
+        );
+        setScDiscoverNextHref((prev) => prev || res.next_tracks_href || null);
+        scTrendingFetchedAtRef.current['all'] = scTr.stale ? 0 : scTr.fetchedAt;
+      }
+    })();
+
+    const onPurged = (ev: Event) => {
+      const src = ((ev as CustomEvent<{ source?: string }>).detail?.source || '').toLowerCase();
+      refreshFypFromDb();
+      if (src.includes('apple')) {
+        applePlaylistsFetchedAtRef.current = 0;
+        appleForYouFetchedAtRef.current = 0;
+        appleNewFetchedAtRef.current = 0;
+        setCloudPlaylists([]);
+        setRadioStations([]);
+        setForYouPlaylists([]);
+        setForYouAlbums([]);
+        setForYouShelves([]);
+        setNewFeedAlbums([]);
+        setNewFeedPlaylists([]);
+        setNewFeedSongs([]);
+      } else if (src.includes('soundcloud') || src === 'sc') {
+        scLikesFetchedAtRef.current = 0;
+        scStreamFetchedAtRef.current = 0;
+        scTrendingFetchedAtRef.current = {};
+        setScLikedTracks([]);
+        setScPlaylists([]);
+        setScStreamTracks([]);
+        setScStreamPlaylists([]);
+        setScTrendingTracks([]);
+        setScTrendingMixes([]);
+        setScTrendingPlaylists([]);
+        setScMoreOfWhatYouLike([]);
+        setScFreshUploads([]);
+        setScRecommendedArtists([]);
+      }
+    };
+    window.addEventListener('simp-source-purged', onPurged);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('simp-source-purged', onPurged);
+    };
+  }, []);
+
+  // 3b. Apple Music Cloud Hub data loader (Stale-While-Revalidate via servicesCache.db)
   useEffect(() => {
     if (view !== 'browser' || browserSourceFilter === 'local' || !snap?.apple_authenticated) {
       return;
     }
+    const nowUnix = Math.floor(Date.now() / 1000);
     if (
       (appleSubTab === 'cloud_playlists' || Boolean(browserSearch.trim())) &&
-      cloudPlaylists.length === 0
+      (cloudPlaylists.length === 0 ||
+        nowUnix - applePlaylistsFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
+      !swrInFlightRef.current.has('apple:cloud_playlists')
     ) {
-      setCloudLoading(true);
+      swrInFlightRef.current.add('apple:cloud_playlists');
+      if (cloudPlaylists.length === 0) setCloudLoading(true);
       fetchAppleCloudPlaylists()
-        .then(setCloudPlaylists)
-        .catch((err: any) => showToast(err?.message || 'Failed to load Cloud Playlists'))
-        .finally(() => setCloudLoading(false));
+        .then((list) => {
+          setCloudPlaylists(list);
+          applePlaylistsFetchedAtRef.current = Math.floor(Date.now() / 1000);
+          writeCachedShelves([
+            {
+              cacheKey: 'apple:bundle:cloud_playlists',
+              provider: 'apple_music',
+              shelfId: 'bundle:cloud_playlists',
+              title: 'Apple Cloud Playlists',
+              data: list,
+              ttlSec: TTL_CATALOG_FEED_SEC,
+            },
+          ]);
+        })
+        .catch((err: any) => {
+          if (cloudPlaylists.length === 0) {
+            showToast(err?.message || 'Failed to load Cloud Playlists');
+          }
+        })
+        .finally(() => {
+          swrInFlightRef.current.delete('apple:cloud_playlists');
+          setCloudLoading(false);
+        });
     } else if (
       (appleSubTab === 'for_you' || appleSubTab === 'radio') &&
-      radioStations.length === 0 &&
-      forYouPlaylists.length === 0 &&
-      forYouAlbums.length === 0
+      ((radioStations.length === 0 && forYouPlaylists.length === 0 && forYouAlbums.length === 0) ||
+        nowUnix - appleForYouFetchedAtRef.current > TTL_FAST_FEED_SEC) &&
+      !swrInFlightRef.current.has('apple:for_you_radio')
     ) {
-      setCloudLoading(true);
+      swrInFlightRef.current.add('apple:for_you_radio');
+      const isEmpty =
+        radioStations.length === 0 && forYouPlaylists.length === 0 && forYouAlbums.length === 0;
+      if (isEmpty) setCloudLoading(true);
       fetchAppleRadioAndForYou()
         .then((res) => {
           setRadioStations(res.stations);
@@ -928,25 +1182,60 @@ const ConsoleMainApp: React.FC = () => {
           setForYouNewReleases(res.new_releases || []);
           setForYouShelves(res.shelves || []);
           setAppleRecentlyPlayedTracks(res.recently_played || []);
+          appleForYouFetchedAtRef.current = Math.floor(Date.now() / 1000);
+          writeCachedShelves([
+            {
+              cacheKey: 'apple:bundle:for_you_radio',
+              provider: 'apple_music',
+              shelfId: 'bundle:for_you_radio',
+              title: 'Apple For You & Radio',
+              data: res,
+              ttlSec: TTL_FAST_FEED_SEC,
+            },
+          ]);
         })
-        .catch((err: any) => showToast(err?.message || 'Failed to load For You & Radio'))
-        .finally(() => setCloudLoading(false));
+        .catch((err: any) => {
+          if (isEmpty) showToast(err?.message || 'Failed to load For You & Radio');
+        })
+        .finally(() => {
+          swrInFlightRef.current.delete('apple:for_you_radio');
+          setCloudLoading(false);
+        });
     } else if (
       appleSubTab === 'new' &&
-      newFeedAlbums.length === 0 &&
-      newFeedPlaylists.length === 0 &&
-      newFeedSongs.length === 0
+      ((newFeedAlbums.length === 0 && newFeedPlaylists.length === 0 && newFeedSongs.length === 0) ||
+        nowUnix - appleNewFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
+      !swrInFlightRef.current.has('apple:new_feed')
     ) {
-      setCloudLoading(true);
+      swrInFlightRef.current.add('apple:new_feed');
+      const isEmpty =
+        newFeedAlbums.length === 0 && newFeedPlaylists.length === 0 && newFeedSongs.length === 0;
+      if (isEmpty) setCloudLoading(true);
       fetchAppleNewFeed()
         .then((res) => {
           setNewFeedRecentReleases(res.recent_releases || []);
           setNewFeedAlbums(res.albums);
           setNewFeedPlaylists(res.playlists);
           setNewFeedSongs(res.songs);
+          appleNewFetchedAtRef.current = Math.floor(Date.now() / 1000);
+          writeCachedShelves([
+            {
+              cacheKey: 'apple:bundle:new_feed',
+              provider: 'apple_music',
+              shelfId: 'bundle:new_feed',
+              title: 'Apple New & Charts',
+              data: res,
+              ttlSec: TTL_CATALOG_FEED_SEC,
+            },
+          ]);
         })
-        .catch((err: any) => showToast(err?.message || 'Failed to load Apple Music New feed'))
-        .finally(() => setCloudLoading(false));
+        .catch((err: any) => {
+          if (isEmpty) showToast(err?.message || 'Failed to load Apple Music New feed');
+        })
+        .finally(() => {
+          swrInFlightRef.current.delete('apple:new_feed');
+          setCloudLoading(false);
+        });
     }
   }, [
     view,
@@ -964,58 +1253,114 @@ const ConsoleMainApp: React.FC = () => {
     showToast,
   ]);
 
-  // 3c. SoundCloud Cloud Hub data loader
+  // 3c. SoundCloud Cloud Hub data loader (Stale-While-Revalidate via servicesCache.db)
   useEffect(() => {
     if (view !== 'browser' || browserSourceFilter !== 'soundcloud') {
       return;
     }
+    const nowUnix = Math.floor(Date.now() / 1000);
     if (
       soundCloudSubTab === 'likes_sets' &&
-      scLikedTracks.length === 0 &&
-      scPlaylists.length === 0
+      ((scLikedTracks.length === 0 && scPlaylists.length === 0) ||
+        nowUnix - scLikesFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
+      !swrInFlightRef.current.has('sc:likes_sets')
     ) {
-      setCloudLoading(true);
+      swrInFlightRef.current.add('sc:likes_sets');
+      const isEmpty = scLikedTracks.length === 0 && scPlaylists.length === 0;
+      if (isEmpty) setCloudLoading(true);
       fetchSoundCloudLikesAndPlaylists()
         .then((res) => {
           setScLikedTracks(res.likedTracks);
           setScPlaylists(res.playlists);
+          scLikesFetchedAtRef.current = Math.floor(Date.now() / 1000);
+          writeCachedShelves([
+            {
+              cacheKey: 'soundcloud:bundle:likes_sets',
+              provider: 'soundcloud',
+              shelfId: 'bundle:likes_sets',
+              title: 'SoundCloud Likes & Sets',
+              data: res,
+              ttlSec: TTL_CATALOG_FEED_SEC,
+            },
+          ]);
         })
         .catch(() => {})
-        .finally(() => setCloudLoading(false));
+        .finally(() => {
+          swrInFlightRef.current.delete('sc:likes_sets');
+          setCloudLoading(false);
+        });
     } else if (
       soundCloudSubTab === 'stream_radio' &&
-      scStreamTracks.length === 0 &&
-      scStreamPlaylists.length === 0
+      ((scStreamTracks.length === 0 && scStreamPlaylists.length === 0) ||
+        nowUnix - scStreamFetchedAtRef.current > TTL_FAST_FEED_SEC) &&
+      !swrInFlightRef.current.has('sc:stream_radio')
     ) {
-      setCloudLoading(true);
+      swrInFlightRef.current.add('sc:stream_radio');
+      const isEmpty = scStreamTracks.length === 0 && scStreamPlaylists.length === 0;
+      if (isEmpty) setCloudLoading(true);
       fetchSoundCloudStreamAndRadio()
         .then((res) => {
           setScStreamTracks(res.streamTracks);
           setScStreamPlaylists(res.streamPlaylists);
+          scStreamFetchedAtRef.current = Math.floor(Date.now() / 1000);
+          writeCachedShelves([
+            {
+              cacheKey: 'soundcloud:bundle:stream_radio',
+              provider: 'soundcloud',
+              shelfId: 'bundle:stream_radio',
+              title: 'SoundCloud Stream & Radio',
+              data: res,
+              ttlSec: TTL_FAST_FEED_SEC,
+            },
+          ]);
         })
         .catch(() => {})
-        .finally(() => setCloudLoading(false));
-    } else if (
-      soundCloudSubTab === 'trending' &&
-      scTrendingTracks.length === 0 &&
-      scTrendingMixes.length === 0 &&
-      scTrendingPlaylists.length === 0
-    ) {
-      setCloudLoading(true);
-      fetchSoundCloudDiscover(scSelectedGenre || undefined)
-        .then((res) => {
-          setScTrendingTracks(res.tracks);
-          setScTrendingMixes(res.mixes);
-          setScTrendingPlaylists(res.playlists);
-          setScMoreOfWhatYouLike(res.more_of_what_you_like || []);
-          setScFreshUploads(res.fresh_uploads || []);
-          setScRecommendedArtists(res.recommended_artists || []);
-          setScDiscoverNextHref(res.next_tracks_href || null);
-        })
-        .catch((err: any) =>
-          showToast(err?.message || 'Failed to load SoundCloud Trending & Mixes')
-        )
-        .finally(() => setCloudLoading(false));
+        .finally(() => {
+          swrInFlightRef.current.delete('sc:stream_radio');
+          setCloudLoading(false);
+        });
+    } else if (soundCloudSubTab === 'trending') {
+      const genreKey = scSelectedGenre || 'all';
+      const lastFetched = scTrendingFetchedAtRef.current[genreKey] || 0;
+      const isEmpty =
+        scTrendingTracks.length === 0 &&
+        scTrendingMixes.length === 0 &&
+        scTrendingPlaylists.length === 0;
+      if (
+        (isEmpty || nowUnix - lastFetched > TTL_FAST_FEED_SEC) &&
+        !swrInFlightRef.current.has(`sc:trending:${genreKey}`)
+      ) {
+        swrInFlightRef.current.add(`sc:trending:${genreKey}`);
+        if (isEmpty) setCloudLoading(true);
+        fetchSoundCloudDiscover(scSelectedGenre || undefined)
+          .then((res) => {
+            setScTrendingTracks(res.tracks);
+            setScTrendingMixes(res.mixes);
+            setScTrendingPlaylists(res.playlists);
+            setScMoreOfWhatYouLike(res.more_of_what_you_like || []);
+            setScFreshUploads(res.fresh_uploads || []);
+            setScRecommendedArtists(res.recommended_artists || []);
+            setScDiscoverNextHref(res.next_tracks_href || null);
+            scTrendingFetchedAtRef.current[genreKey] = Math.floor(Date.now() / 1000);
+            writeCachedShelves([
+              {
+                cacheKey: `soundcloud:bundle:trending:${genreKey}`,
+                provider: 'soundcloud',
+                shelfId: `bundle:trending:${genreKey}`,
+                title: `SoundCloud Trending (${genreKey})`,
+                data: res,
+                ttlSec: TTL_FAST_FEED_SEC,
+              },
+            ]);
+          })
+          .catch((err: any) => {
+            if (isEmpty) showToast(err?.message || 'Failed to load SoundCloud Trending & Mixes');
+          })
+          .finally(() => {
+            swrInFlightRef.current.delete(`sc:trending:${genreKey}`);
+            setCloudLoading(false);
+          });
+      }
     }
   }, [
     view,
@@ -1337,6 +1682,100 @@ const ConsoleMainApp: React.FC = () => {
     };
   }, [view, isOverlayOrPopoverOpen, isDimmed]);
 
+  useEffect(() => {
+    document.documentElement.dataset.impDesktopMode = desktopMode ? 'true' : 'false';
+  }, [desktopMode]);
+
+  useEffect(() => {
+    document.documentElement.dataset.impDesktopScreensaver = desktopScreensaverActive
+      ? 'true'
+      : 'false';
+  }, [desktopScreensaverActive]);
+
+  const prevDesktopVideoUriRef = useRef<string | null>(null);
+  useEffect(() => {
+    const curUri = snap?.current_track?.uri || null;
+    if (curUri === prevDesktopVideoUriRef.current) return;
+    prevDesktopVideoUriRef.current = curUri;
+    if (desktopMode && isUiVideoTrack(snap?.current_track)) {
+      setDesktopScreensaverActive(false);
+      setViewState('lock');
+    }
+  }, [desktopMode, snap?.current_track]);
+
+  useEffect(() => {
+    if (!desktopMode || view !== 'browser' || desktopVizIdleSec <= 0) {
+      setDesktopScreensaverActive(false);
+      return;
+    }
+
+    let timerId: number | undefined;
+    const armTimer = () => {
+      if (timerId) window.clearTimeout(timerId);
+      timerId = window.setTimeout(() => {
+        const activeTag = document.activeElement?.tagName;
+        const isTyping =
+          activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
+        const modalOpen =
+          isOverlayOrPopoverOpen ||
+          isTyping ||
+          Boolean(document.querySelector('[data-modal-root="true"], [data-osk-root="true"]'));
+        if (modalOpen) {
+          armTimer();
+          return;
+        }
+        screensaverEnteredAtRef.current = performance.now();
+        setDesktopScreensaverActive(true);
+      }, desktopVizIdleSec * 1000);
+    };
+
+    const onUserActivity = (ev?: Event) => {
+      if (
+        ev?.type === 'pointermove' &&
+        performance.now() - screensaverEnteredAtRef.current < 350
+      ) {
+        return;
+      }
+      setDesktopScreensaverActive(false);
+      armTimer();
+    };
+
+    armTimer();
+    window.addEventListener('pointerdown', onUserActivity, { passive: true });
+    window.addEventListener('pointermove', onUserActivity, { passive: true });
+    window.addEventListener('wheel', onUserActivity, { passive: true });
+    window.addEventListener('keydown', onUserActivity);
+    window.addEventListener('touchstart', onUserActivity, { passive: true });
+    window.addEventListener('simp-wake-idle', onUserActivity);
+
+    let lastGpSig = '';
+    const gpPoll = window.setInterval(() => {
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const p of pads) {
+        if (!p) continue;
+        const pressed = p.buttons.map((b) => (b.pressed ? '1' : '0')).join('');
+        const axes = p.axes.map((a) => (Math.abs(a) > 0.3 ? a.toFixed(1) : '0')).join(',');
+        const sig = `${pressed}|${axes}`;
+        if (lastGpSig && sig !== lastGpSig) {
+          onUserActivity();
+        }
+        lastGpSig = sig;
+        break;
+      }
+    }, 200);
+
+    return () => {
+      if (timerId) window.clearTimeout(timerId);
+      window.clearInterval(gpPoll);
+      window.removeEventListener('pointerdown', onUserActivity);
+      window.removeEventListener('pointermove', onUserActivity);
+      window.removeEventListener('wheel', onUserActivity);
+      window.removeEventListener('keydown', onUserActivity);
+      window.removeEventListener('touchstart', onUserActivity);
+      window.removeEventListener('simp-wake-idle', onUserActivity);
+    };
+  }, [desktopMode, view, desktopVizIdleSec, isOverlayOrPopoverOpen]);
+
   // 6 & 7. Gamepad / Spatial Focus Navigation Hook
   const { applyFocusMarker } = useGamepadNavigation({
     view,
@@ -1373,6 +1812,38 @@ const ConsoleMainApp: React.FC = () => {
     reason?: string;
   } | null>(null);
   const [pendingDroppedFolder, setPendingDroppedFolder] = useState<string | null>(null);
+  const mountsRef = useRef<Array<{ mount_root: string }>>([]);
+  mountsRef.current = snap?.mounts || [];
+
+  const findCoveringParentMount = useCallback(
+    (candidatePath: string, mountsList: Array<{ mount_root: string }>): string | null => {
+      const normalizeForPrefix = (raw: string) => {
+        let p = raw.trim().replace(/^["']+|["']+$/g, '').replace(/\\/g, '/').replace(/\/+$/, '');
+        const winDrive = p.match(/^([a-zA-Z]):\/(.*)$/);
+        if (winDrive) {
+          p = `/mnt/${winDrive[1].toLowerCase()}/${winDrive[2]}`;
+        }
+        if (p.startsWith('/mnt/') || /^[a-zA-Z]:/.test(raw.trim())) {
+          return { norm: p.toLowerCase(), raw: p };
+        }
+        return { norm: p, raw: p };
+      };
+      const cand = normalizeForPrefix(candidatePath);
+      if (!cand.norm) return null;
+      for (const m of mountsList) {
+        const root = normalizeForPrefix(m.mount_root);
+        if (!root.norm) continue;
+        if (
+          cand.norm === root.norm ||
+          (root.norm === '/' ? cand.norm.startsWith('/') : cand.norm.startsWith(`${root.norm}/`))
+        ) {
+          return m.mount_root;
+        }
+      }
+      return null;
+    },
+    []
+  );
 
   useEffect(() => {
     const onOpenTrackProps = (ev: Event) => {
@@ -1535,7 +2006,13 @@ const ConsoleMainApp: React.FC = () => {
           .then((r) => r.json())
           .then((res) => {
             if (res && res.ok && res.resolved_folder) {
-              setPendingDroppedFolder(stripVerbatimPrefix(String(res.resolved_folder)));
+              const resolved = stripVerbatimPrefix(String(res.resolved_folder));
+              const covering = findCoveringParentMount(resolved, mountsRef.current);
+              if (covering) {
+                showToast(`Already included under parent Local Folder: ${covering}`);
+              } else {
+                setPendingDroppedFolder(resolved);
+              }
             } else {
               setSourceModalOpen(true);
               showToast('Select the folder in Local Folders -> [Browse...] to index it into IMP');
@@ -1548,7 +2025,12 @@ const ConsoleMainApp: React.FC = () => {
       };
 
       if (extractedPath) {
-        setPendingDroppedFolder(extractedPath);
+        const covering = findCoveringParentMount(extractedPath, mountsRef.current);
+        if (covering) {
+          showToast(`Already included under parent Local Folder: ${covering}`);
+        } else {
+          setPendingDroppedFolder(extractedPath);
+        }
       } else if (hasDirectory || supportedFileFound) {
         if (droppedDirEntry && typeof droppedDirEntry.createReader === 'function') {
           let settled = false;
@@ -1986,12 +2468,23 @@ const ConsoleMainApp: React.FC = () => {
     }
   };
 
-  const handleAddFolder = (folderPath: string) => {
+  const handleAddFolder = (folderPath: string, opts?: { navigateAfterAdd?: boolean }) => {
     const cleaned = folderPath.trim();
     if (!cleaned) return;
+    const covering = findCoveringParentMount(cleaned, mountsRef.current);
+    if (covering) {
+      showToast(`Already included under parent Local Folder: ${covering}`);
+      return;
+    }
     defaultSimpClient.addLibraryPath(cleaned);
     setCustomFolderPath('');
     showToast(`Scanning folder: ${cleaned}`);
+    if (opts?.navigateAfterAdd) {
+      setView('browser');
+      window.dispatchEvent(
+        new CustomEvent('simp-open-local-mount', { detail: { path: cleaned } })
+      );
+    }
     window.setTimeout(() => refreshLibraryData(), 700);
   };
 
@@ -2152,7 +2645,7 @@ const ConsoleMainApp: React.FC = () => {
 
       {/* Top Action Bar: Source Pop-Up Trigger | View Switcher (L1/R1) | Interactive Volume & Brightness */}
       <AppTopHeaderBar
-        isNavBarHidden={isNavBarHidden}
+        isNavBarHidden={isNavBarHidden || desktopScreensaverActive}
         setVolumePopoverOpen={setVolumePopoverOpen}
         setBrightnessPopoverOpen={setBrightnessPopoverOpen}
         setPowerModalOpen={setPowerModalOpen}
@@ -2170,12 +2663,19 @@ const ConsoleMainApp: React.FC = () => {
         setBrightnessPct={setBrightnessPct}
         sourceModalOpen={sourceModalOpen}
         powerModalOpen={powerModalOpen}
+        desktopMode={desktopMode}
       />
 
       {/* Main Viewport: Lock Screen (PlayerView stays mounted across L1/R1 so video audio continues in background) + Persistent Split Browser */}
       <PlayerView
-        hidden={view !== 'lock'}
-        isPlayerIdle={isNavBarHidden}
+        hidden={view !== 'lock' && !desktopScreensaverActive}
+        isPlayerIdle={isNavBarHidden || desktopScreensaverActive}
+        isDesktopScreensaver={desktopScreensaverActive}
+        isDeckyEmbedded={isDeckyEmbedded}
+        desktopMode={desktopMode}
+        onToggleDesktopMode={handleToggleDesktopMode}
+        desktopVizIdleSec={desktopVizIdleSec}
+        onChangeDesktopVizIdleSec={handleChangeDesktopVizIdleSec}
         snap={snap}
         track={track}
         isPlaying={isPlaying}
@@ -2196,7 +2696,9 @@ const ConsoleMainApp: React.FC = () => {
         showToast={showToast}
       />
       <LibraryBrowserView
-        hidden={view !== 'browser'}
+        hidden={view !== 'browser' || desktopScreensaverActive}
+        desktopMode={desktopMode}
+        onTriggerScreensaver={triggerDesktopScreensaver}
         snap={snap}
           track={track}
           albums={albums}

@@ -15,9 +15,16 @@ import {
 } from "../../../drivers/AppleMusicDriver";
 import {
   AlphaBucket,
-  CLOUD_PAGE_SIZE,
   tileGridStyle,
 } from "../libraryHelpers";
+import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
+import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import {
+  inferAppleShelfItemKind,
+  mapAppleShelfToFypItems,
+  TTL_CATALOG_FEED_SEC,
+  TTL_FAST_FEED_SEC,
+} from "../../../api/servicesCacheApi";
 
 export interface AppleMusicDiscoverPaneProps {
   appleRadioFilter: "all" | "genre" | "live" | "shows" | "mixes";
@@ -37,7 +44,9 @@ export interface AppleMusicDiscoverPaneProps {
   forYouPlaylists: AppleCloudPlaylistSummary[];
   forYouShelves: AppleRecommendationShelf[];
   genreRadioStations: AppleRadioStationSummary[];
+  hasMoreCloudPlaylists: boolean;
   liveRadioStations: AppleRadioStationSummary[];
+  loadMoreCloudPlaylists: () => void;
   newFeedAlbums: AppleCloudAlbumSummary[];
   newFeedPlaylists: AppleCloudPlaylistSummary[];
   newFeedRecentReleases: AppleCloudAlbumSummary[];
@@ -51,14 +60,13 @@ export interface AppleMusicDiscoverPaneProps {
   renderCloudPlaylistCard: any;
   renderSingleSongRow: any;
   renderStationCard: any;
-  safeCloudPage: number;
+  resetCloudPlaylistsLimit: () => void;
   setAppleRadioFilter: any;
   setAppleRadioGenre: any;
   setAppleRecentlyPlayedTracks: any;
   setArtistRadioShows: any;
   setCloudAlpha: any;
   setCloudLoading: any;
-  setCloudPage: React.Dispatch<React.SetStateAction<number>>;
   setCloudPlaylists: React.Dispatch<React.SetStateAction<AppleCloudPlaylistSummary[]>>;
   setClubMixes: any;
   setForYouAlbums: any;
@@ -77,7 +85,6 @@ export interface AppleMusicDiscoverPaneProps {
   setRadioStations: any;
   setRecentlyAddedCloudAlbums: any;
   snap: SimpStateSnapshot | null;
-  totalCloudPages: number;
 }
 
 export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
@@ -98,7 +105,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   forYouPlaylists,
   forYouShelves,
   genreRadioStations,
+  hasMoreCloudPlaylists,
   liveRadioStations,
+  loadMoreCloudPlaylists,
   newFeedAlbums,
   newFeedPlaylists,
   newFeedRecentReleases,
@@ -112,14 +121,13 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   renderCloudPlaylistCard,
   renderSingleSongRow,
   renderStationCard,
-  safeCloudPage,
+  resetCloudPlaylistsLimit,
   setAppleRadioFilter,
   setAppleRadioGenre,
   setAppleRecentlyPlayedTracks,
   setArtistRadioShows,
   setCloudAlpha,
   setCloudLoading,
-  setCloudPage,
   setCloudPlaylists,
   setClubMixes,
   setForYouAlbums,
@@ -138,7 +146,6 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   setRadioStations,
   setRecentlyAddedCloudAlbums,
   snap,
-  totalCloudPages,
 }) => {
   return (
     <>
@@ -169,9 +176,13 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                             fontWeight: 800,
                             color: '#fecdd3',
                             marginRight: 6,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
                           }}
                         >
-                          ☁️ Apple Playlists
+                          <AppleMusicLogo size={14} />
+                          <span>Apple Playlists</span>
                         </span>
                         {(
                           [
@@ -190,7 +201,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                               data-right-filter-pill="true"
                               onClick={() => {
                                 setCloudAlpha(b.id);
-                                setCloudPage(0);
+                                resetCloudPlaylistsLimit();
                               }}
                               style={{
                                 padding: '4px 9px',
@@ -209,63 +220,18 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                         })}
                       </div>
 
-                      {/* Pagination Controls (50 per page) + Reload */}
+                      {/* Visible Count + Reload */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {totalCloudPages > 1 && (
-                          <>
-                            <button
-                              data-right-filter-pill="true"
-                              onClick={() => setCloudPage((p) => Math.max(0, p - 1))}
-                              disabled={safeCloudPage === 0}
-                              style={{
-                                padding: '4px 9px',
-                                borderRadius: 6,
-                                background: '#14141e',
-                                border: '1px solid #2a2a38',
-                                color: safeCloudPage === 0 ? '#52525b' : '#d4d4dc',
-                                fontSize: 11,
-                                fontWeight: 700,
-                                cursor: safeCloudPage === 0 ? 'default' : 'pointer',
-                              }}
-                            >
-                              ◀ Prev
-                            </button>
-                            <span
-                              style={{
-                                fontSize: 11,
-                                fontFamily: 'monospace',
-                                color: '#fda4af',
-                              }}
-                            >
-                              {safeCloudPage * CLOUD_PAGE_SIZE + 1}–
-                              {Math.min(
-                                (safeCloudPage + 1) * CLOUD_PAGE_SIZE,
-                                filteredCloudPlaylists.length
-                              )}{' '}
-                              of {filteredCloudPlaylists.length}
-                            </span>
-                            <button
-                              data-right-filter-pill="true"
-                              onClick={() =>
-                                setCloudPage((p) => Math.min(totalCloudPages - 1, p + 1))
-                              }
-                              disabled={safeCloudPage >= totalCloudPages - 1}
-                              style={{
-                                padding: '4px 9px',
-                                borderRadius: 6,
-                                background: '#14141e',
-                                border: '1px solid #2a2a38',
-                                color:
-                                  safeCloudPage >= totalCloudPages - 1 ? '#52525b' : '#d4d4dc',
-                                fontSize: 11,
-                                fontWeight: 700,
-                                cursor:
-                                  safeCloudPage >= totalCloudPages - 1 ? 'default' : 'pointer',
-                              }}
-                            >
-                              Next ▶
-                            </button>
-                          </>
+                        {filteredCloudPlaylists.length > 0 && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                              color: '#fda4af',
+                            }}
+                          >
+                            {pagedCloudPlaylists.length} / {filteredCloudPlaylists.length}
+                          </span>
                         )}
                         <button
                           data-right-filter-pill="true"
@@ -274,7 +240,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                             fetchAppleCloudPlaylists()
                               .then((pls) => {
                                 setCloudPlaylists(pls);
-                                setCloudPage(0);
+                                resetCloudPlaylistsLimit();
                               })
                               .catch(() => {})
                               .finally(() => setCloudLoading(false));
@@ -298,6 +264,28 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                     <div style={tileGridStyle}>
                       {pagedCloudPlaylists.map(renderCloudPlaylistCard)}
                     </div>
+                    {hasMoreCloudPlaylists && (
+                      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+                        <button
+                          data-focusable="true"
+                          data-load-more="true"
+                          onClick={loadMoreCloudPlaylists}
+                          style={{
+                            minHeight: 38,
+                            padding: '0 20px',
+                            borderRadius: 10,
+                            background: '#241119',
+                            border: '1px solid #fa243c',
+                            color: '#fecdd3',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ⬇ Load More Apple Playlists ({filteredCloudPlaylists.length - pagedCloudPlaylists.length} remaining)
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -486,38 +474,64 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
 
                           {(forYouFilter === 'all' || forYouFilter === 'stations') &&
                             personalRadioStations.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_personal_stations"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`📻 PERSONAL RADIO STATIONS (${personalRadioStations.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:for_you:personal_stations',
+                                    cacheKey: 'apple:for_you:personal_stations',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Personal Radio Stations',
+                                    itemKind: 'stations',
+                                    fetchSpec: { kind: 'apple_for_you', section: 'personal_stations' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'for_you',
+                                      sectionAnchor: 'apple_personal_stations',
+                                    },
+                                    ttlSec: TTL_FAST_FEED_SEC,
                                   }}
-                                >
-                                  📻 PERSONAL RADIO STATIONS ({personalRadioStations.length})
-                                </div>
+                                  liveItems={personalRadioStations}
+                                />
                                 <div style={tileGridStyle}>
                                   {personalRadioStations.map(renderStationCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(forYouFilter === 'all' || forYouFilter === 'new_releases') &&
                             effectiveNewReleases.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_for_you_new_releases"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🆕 NEW & RECENT RELEASES FOR YOU (${effectiveNewReleases.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:for_you:new_releases',
+                                    cacheKey: 'apple:for_you:new_releases',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • New & Recent Releases For You',
+                                    itemKind: 'albums',
+                                    fetchSpec: { kind: 'apple_for_you', section: 'new_releases' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'for_you',
+                                      sectionAnchor: 'apple_for_you_new_releases',
+                                    },
+                                    ttlSec: TTL_FAST_FEED_SEC,
                                   }}
-                                >
-                                  🆕 NEW & RECENT RELEASES FOR YOU ({effectiveNewReleases.length})
-                                </div>
+                                  liveItems={effectiveNewReleases}
+                                />
                                 <div style={tileGridStyle}>
                                   {effectiveNewReleases.map(renderCloudAlbumCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(forYouFilter === 'all' || forYouFilter === 'recently_played') &&
@@ -529,38 +543,69 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                     shelf.albums.length +
                                     shelf.stations.length;
                                   if (totalItems === 0) return null;
+                                  const anchor = `apple_shelf_${shelf.id}`;
                                   return (
-                                    <React.Fragment key={shelf.id}>
-                                      <div
-                                        style={{
-                                          fontSize: 11,
-                                          fontFamily: 'monospace',
-                                          color: '#fda4af',
+                                    <section
+                                      key={shelf.id}
+                                      data-section-anchor={anchor}
+                                      style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                                    >
+                                      <PinnableSectionHeader
+                                        title={`🕒 ${shelf.title.toUpperCase()} (${totalItems})`}
+                                        accentColor="#fda4af"
+                                        descriptor={{
+                                          shelfUid: `apple:for_you:shelf:${shelf.id}`,
+                                          cacheKey: `apple:for_you:shelf:${shelf.id}`,
+                                          provider: 'apple_music',
+                                          title: `Apple Music • ${shelf.title}`,
+                                          itemKind: inferAppleShelfItemKind(shelf),
+                                          fetchSpec: {
+                                            kind: 'apple_for_you',
+                                            section: 'shelf',
+                                            shelfId: shelf.id,
+                                          },
+                                          originRoute: {
+                                            sourceFilter: 'apple_music',
+                                            appleSubTab: 'for_you',
+                                            sectionAnchor: anchor,
+                                          },
+                                          ttlSec: TTL_FAST_FEED_SEC,
                                         }}
-                                      >
-                                        🕒 {shelf.title.toUpperCase()} ({totalItems})
-                                      </div>
+                                        liveItems={mapAppleShelfToFypItems(shelf)}
+                                      />
                                       <div style={tileGridStyle}>
                                         {shelf.stations.map(renderStationCard)}
                                         {shelf.playlists.map(renderCloudPlaylistCard)}
                                         {shelf.albums.map(renderCloudAlbumCard)}
                                       </div>
-                                    </React.Fragment>
+                                    </section>
                                   );
                                 })}
 
                                 {appleRecentlyPlayedTracks.length > 0 && (
-                                  <>
-                                    <div
-                                      style={{
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: '#fda4af',
+                                  <section
+                                    data-section-anchor="apple_recently_played_tracks"
+                                    style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                                  >
+                                    <PinnableSectionHeader
+                                      title={`🎵 RECENTLY PLAYED TRACKS (${appleRecentlyPlayedTracks.length})`}
+                                      accentColor="#fda4af"
+                                      descriptor={{
+                                        shelfUid: 'apple:for_you:recently_played',
+                                        cacheKey: 'apple:for_you:recently_played',
+                                        provider: 'apple_music',
+                                        title: 'Apple Music • Recently Played Tracks',
+                                        itemKind: 'tracks',
+                                        fetchSpec: { kind: 'apple_for_you', section: 'recently_played' },
+                                        originRoute: {
+                                          sourceFilter: 'apple_music',
+                                          appleSubTab: 'for_you',
+                                          sectionAnchor: 'apple_recently_played_tracks',
+                                        },
+                                        ttlSec: TTL_FAST_FEED_SEC,
                                       }}
-                                    >
-                                      🎵 RECENTLY PLAYED TRACKS (
-                                      {appleRecentlyPlayedTracks.length})
-                                    </div>
+                                      liveItems={appleRecentlyPlayedTracks}
+                                    />
                                     <div
                                       style={{
                                         display: 'flex',
@@ -581,28 +626,40 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                           )
                                         )}
                                     </div>
-                                  </>
+                                  </section>
                                 )}
                               </>
                             )}
 
                           {(forYouFilter === 'all' || forYouFilter === 'recent_library') &&
                             recentlyAddedCloudAlbums.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_recent_library"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`☁️ RECENTLY ADDED TO YOUR APPLE CLOUD LIBRARY (${recentlyAddedCloudAlbums.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:for_you:recent_library',
+                                    cacheKey: 'apple:for_you:recent_library',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Recently Added Library',
+                                    itemKind: 'albums',
+                                    fetchSpec: { kind: 'apple_for_you', section: 'recent_library' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'for_you',
+                                      sectionAnchor: 'apple_recent_library',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  ☁️ RECENTLY ADDED TO YOUR APPLE CLOUD LIBRARY (
-                                  {recentlyAddedCloudAlbums.length})
-                                </div>
+                                  liveItems={recentlyAddedCloudAlbums}
+                                />
                                 <div style={tileGridStyle}>
                                   {recentlyAddedCloudAlbums.map(renderCloudAlbumCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(forYouFilter === 'all' ||
@@ -618,83 +675,127 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                       shelf.albums.length +
                                       shelf.stations.length;
                                     if (totalItems === 0) return null;
+                                    const anchor = `apple_shelf_${shelf.id}`;
                                     return (
-                                      <React.Fragment key={shelf.id}>
-                                        <div
-                                          style={{
-                                            fontSize: 11,
-                                            fontFamily: 'monospace',
-                                            color: '#fda4af',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: 8,
-                                            flexWrap: 'wrap',
+                                      <section
+                                        key={shelf.id}
+                                        data-section-anchor={anchor}
+                                        style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                                      >
+                                        <PinnableSectionHeader
+                                          title={
+                                            <>
+                                              <span>
+                                                {shelf.is_social ? '👥' : '✨'}{' '}
+                                                {shelf.title.toUpperCase()} ({totalItems})
+                                              </span>
+                                              {shelf.is_social && (
+                                                <span
+                                                  style={{
+                                                    padding: '2px 7px',
+                                                    borderRadius: 999,
+                                                    background: '#2a131c',
+                                                    border: '1px solid #fa243c',
+                                                    color: '#fecdd3',
+                                                    fontSize: 9.5,
+                                                    fontWeight: 800,
+                                                  }}
+                                                >
+                                                  👥 Friends Listening
+                                                </span>
+                                              )}
+                                            </>
+                                          }
+                                          accentColor="#fda4af"
+                                          descriptor={{
+                                            shelfUid: `apple:for_you:shelf:${shelf.id}`,
+                                            cacheKey: `apple:for_you:shelf:${shelf.id}`,
+                                            provider: 'apple_music',
+                                            title: `Apple Music • ${shelf.title}`,
+                                            itemKind: inferAppleShelfItemKind(shelf),
+                                            fetchSpec: {
+                                              kind: 'apple_for_you',
+                                              section: 'shelf',
+                                              shelfId: shelf.id,
+                                            },
+                                            originRoute: {
+                                              sourceFilter: 'apple_music',
+                                              appleSubTab: 'for_you',
+                                              sectionAnchor: anchor,
+                                            },
+                                            ttlSec: TTL_FAST_FEED_SEC,
                                           }}
-                                        >
-                                          <span>
-                                            {shelf.is_social ? '👥' : '✨'}{' '}
-                                            {shelf.title.toUpperCase()} ({totalItems})
-                                          </span>
-                                          {shelf.is_social && (
-                                            <span
-                                              style={{
-                                                padding: '2px 7px',
-                                                borderRadius: 999,
-                                                background: '#2a131c',
-                                                border: '1px solid #fa243c',
-                                                color: '#fecdd3',
-                                                fontSize: 9.5,
-                                                fontWeight: 800,
-                                              }}
-                                            >
-                                              👥 Friends Listening
-                                            </span>
-                                          )}
-                                        </div>
+                                          liveItems={mapAppleShelfToFypItems(shelf)}
+                                        />
                                         <div style={tileGridStyle}>
                                           {shelf.stations.map(renderStationCard)}
                                           {shelf.playlists.map(renderCloudPlaylistCard)}
                                           {shelf.albums.map(renderCloudAlbumCard)}
                                         </div>
-                                      </React.Fragment>
+                                      </section>
                                     );
                                   })}
                               </>
                             ) : (
                               <>
                                 {forYouPlaylists.length > 0 && (
-                                  <>
-                                    <div
-                                      style={{
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: '#fda4af',
+                                  <section
+                                    data-section-anchor="apple_for_you_mixes"
+                                    style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                                  >
+                                    <PinnableSectionHeader
+                                      title={`✨ MADE FOR YOU & HEAVY ROTATION (${forYouPlaylists.length})`}
+                                      accentColor="#fda4af"
+                                      descriptor={{
+                                        shelfUid: 'apple:for_you:mixes',
+                                        cacheKey: 'apple:for_you:mixes',
+                                        provider: 'apple_music',
+                                        title: 'Apple Music • Made For You & Heavy Rotation',
+                                        itemKind: 'playlists',
+                                        fetchSpec: { kind: 'apple_for_you', section: 'for_you_playlists' },
+                                        originRoute: {
+                                          sourceFilter: 'apple_music',
+                                          appleSubTab: 'for_you',
+                                          sectionAnchor: 'apple_for_you_mixes',
+                                        },
+                                        ttlSec: TTL_FAST_FEED_SEC,
                                       }}
-                                    >
-                                      ✨ MADE FOR YOU & HEAVY ROTATION (
-                                      {forYouPlaylists.length})
-                                    </div>
+                                      liveItems={forYouPlaylists}
+                                    />
                                     <div style={tileGridStyle}>
                                       {forYouPlaylists.map(renderCloudPlaylistCard)}
                                     </div>
-                                  </>
+                                  </section>
                                 )}
 
                                 {forYouAlbums.length > 0 && (
-                                  <>
-                                    <div
-                                      style={{
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: '#fda4af',
+                                  <section
+                                    data-section-anchor="apple_for_you_albums"
+                                    style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                                  >
+                                    <PinnableSectionHeader
+                                      title={`💿 RECOMMENDED FULL ALBUMS (${forYouAlbums.length})`}
+                                      accentColor="#fda4af"
+                                      descriptor={{
+                                        shelfUid: 'apple:for_you:albums',
+                                        cacheKey: 'apple:for_you:albums',
+                                        provider: 'apple_music',
+                                        title: 'Apple Music • Recommended Full Albums',
+                                        itemKind: 'albums',
+                                        fetchSpec: { kind: 'apple_for_you', section: 'for_you_albums' },
+                                        originRoute: {
+                                          sourceFilter: 'apple_music',
+                                          appleSubTab: 'for_you',
+                                          sectionAnchor: 'apple_for_you_albums',
+                                        },
+                                        ttlSec: TTL_FAST_FEED_SEC,
                                       }}
-                                    >
-                                      💿 RECOMMENDED FULL ALBUMS ({forYouAlbums.length})
-                                    </div>
+                                      liveItems={forYouAlbums}
+                                    />
                                     <div style={tileGridStyle}>
                                       {forYouAlbums.map(renderCloudAlbumCard)}
                                     </div>
-                                  </>
+                                  </section>
                                 )}
                               </>
                             ))}
@@ -830,70 +931,122 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
 
                           {(newFilter === 'all' || newFilter === 'recent_releases') &&
                             recentReleasesForYou.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_new_recent_releases"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🆕 RECENT RELEASES FOR YOU (${recentReleasesForYou.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:new:recent_releases',
+                                    cacheKey: 'apple:new:recent_releases',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Recent Releases For You',
+                                    itemKind: 'albums',
+                                    fetchSpec: { kind: 'apple_new', section: 'recent_releases' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'new',
+                                      sectionAnchor: 'apple_new_recent_releases',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🆕 RECENT RELEASES FOR YOU ({recentReleasesForYou.length})
-                                </div>
+                                  liveItems={recentReleasesForYou}
+                                />
                                 <div style={tileGridStyle}>
                                   {recentReleasesForYou.map(renderCloudAlbumCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(newFilter === 'all' || newFilter === 'albums') &&
                             newFeedAlbums.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_new_albums"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`💿 NEW & TOP ALBUMS (${newFeedAlbums.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:new:albums',
+                                    cacheKey: 'apple:new:albums',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • New & Top Albums',
+                                    itemKind: 'albums',
+                                    fetchSpec: { kind: 'apple_new', section: 'albums' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'new',
+                                      sectionAnchor: 'apple_new_albums',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  💿 NEW & TOP ALBUMS ({newFeedAlbums.length})
-                                </div>
+                                  liveItems={newFeedAlbums}
+                                />
                                 <div style={tileGridStyle}>
                                   {newFeedAlbums.map(renderCloudAlbumCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(newFilter === 'all' || newFilter === 'playlists') &&
                             newFeedPlaylists.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_new_playlists"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🎶 NEW & FEATURED PLAYLISTS (${newFeedPlaylists.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:new:playlists',
+                                    cacheKey: 'apple:new:playlists',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • New & Featured Playlists',
+                                    itemKind: 'playlists',
+                                    fetchSpec: { kind: 'apple_new', section: 'playlists' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'new',
+                                      sectionAnchor: 'apple_new_playlists',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🎶 NEW & FEATURED PLAYLISTS ({newFeedPlaylists.length})
-                                </div>
+                                  liveItems={newFeedPlaylists}
+                                />
                                 <div style={tileGridStyle}>
                                   {newFeedPlaylists.map(renderCloudPlaylistCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(newFilter === 'all' || newFilter === 'songs') &&
                             newFeedSongs.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_new_songs"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🎵 TOP NEW SONGS / SINGLES (${newFeedSongs.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:new:songs',
+                                    cacheKey: 'apple:new:songs',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Top New Songs & Singles',
+                                    itemKind: 'tracks',
+                                    fetchSpec: { kind: 'apple_new', section: 'songs' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'new',
+                                      sectionAnchor: 'apple_new_songs',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🎵 TOP NEW SONGS / SINGLES ({newFeedSongs.length})
-                                </div>
+                                  liveItems={newFeedSongs}
+                                />
                                 <div
                                   style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
                                 >
@@ -901,7 +1054,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                     renderSingleSongRow(s, newFeedSongs, 'new')
                                   )}
                                 </div>
-                              </>
+                              </section>
                             )}
                         </>
                       );
@@ -1116,96 +1269,159 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'live') &&
                             personalRadioStations.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_personal_stations"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`📻 PERSONAL & DISCOVERY STATIONS (${personalRadioStations.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:for_you:personal_stations',
+                                    cacheKey: 'apple:for_you:personal_stations',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Personal Radio Stations',
+                                    itemKind: 'stations',
+                                    fetchSpec: { kind: 'apple_for_you', section: 'personal_stations' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'radio',
+                                      sectionAnchor: 'apple_personal_stations',
+                                    },
+                                    ttlSec: TTL_FAST_FEED_SEC,
                                   }}
-                                >
-                                  📻 PERSONAL & DISCOVERY STATIONS ({personalRadioStations.length})
-                                </div>
+                                  liveItems={personalRadioStations}
+                                />
                                 <div style={tileGridStyle}>
                                   {personalRadioStations.map(renderStationCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'live') &&
                             stationsToDisplay.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_radio_live"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`📡 LIVE GLOBAL BROADCAST STATIONS — APPLE MUSIC 1, HITS, COUNTRY & CLUB (${stationsToDisplay.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:radio:live',
+                                    cacheKey: 'apple:radio:live',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Live Broadcast Stations',
+                                    itemKind: 'stations',
+                                    fetchSpec: { kind: 'apple_radio', section: 'live' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'radio',
+                                      sectionAnchor: 'apple_radio_live',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  📡 LIVE GLOBAL BROADCAST STATIONS — APPLE MUSIC 1, HITS, COUNTRY & CLUB (
-                                  {stationsToDisplay.length})
-                                </div>
+                                  liveItems={stationsToDisplay}
+                                />
                                 <div style={tileGridStyle}>
                                   {stationsToDisplay.map(renderStationCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'shows') &&
                             artistRadioShows.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_radio_shows"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🎙️ ARTIST-HOSTED SHOWS, RADIO HOSTS & INTERVIEWS (${artistRadioShows.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:radio:shows',
+                                    cacheKey: 'apple:radio:shows',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Artist-Hosted Radio Shows',
+                                    itemKind: 'playlists',
+                                    fetchSpec: { kind: 'apple_radio', section: 'shows' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'radio',
+                                      sectionAnchor: 'apple_radio_shows',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🎙️ ARTIST-HOSTED SHOWS, RADIO HOSTS & INTERVIEWS (
-                                  {artistRadioShows.length})
-                                </div>
+                                  liveItems={artistRadioShows}
+                                />
                                 <div style={tileGridStyle}>
                                   {artistRadioShows.map(renderCloudPlaylistCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'mixes') &&
                             clubMixes.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_radio_mixes"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🎧 CLUB MIXES & DJ SETS (${clubMixes.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:radio:mixes',
+                                    cacheKey: 'apple:radio:mixes',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Club Mixes & DJ Sets',
+                                    itemKind: 'playlists',
+                                    fetchSpec: { kind: 'apple_radio', section: 'mixes' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'radio',
+                                      sectionAnchor: 'apple_radio_mixes',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🎧 CLUB MIXES & DJ SETS ({clubMixes.length})
-                                </div>
+                                  liveItems={clubMixes}
+                                />
                                 <div style={tileGridStyle}>
                                   {clubMixes.map(renderCloudPlaylistCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'genre') &&
                             filteredGenreStations.length > 0 && (
-                              <>
-                                <div
-                                  style={{
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                    color: '#fda4af',
+                              <section
+                                data-section-anchor="apple_radio_genre"
+                                style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                              >
+                                <PinnableSectionHeader
+                                  title={`🎶 STATIONS BY GENRE & TOP STATIONS${
+                                    appleRadioGenre ? ` — ${appleRadioGenre.toUpperCase()}` : ''
+                                  } (${filteredGenreStations.length})`}
+                                  accentColor="#fda4af"
+                                  descriptor={{
+                                    shelfUid: 'apple:radio:genre',
+                                    cacheKey: 'apple:radio:genre',
+                                    provider: 'apple_music',
+                                    title: 'Apple Music • Genre & Top Stations',
+                                    itemKind: 'stations',
+                                    fetchSpec: { kind: 'apple_radio', section: 'genre' },
+                                    originRoute: {
+                                      sourceFilter: 'apple_music',
+                                      appleSubTab: 'radio',
+                                      sectionAnchor: 'apple_radio_genre',
+                                    },
+                                    ttlSec: TTL_CATALOG_FEED_SEC,
                                   }}
-                                >
-                                  🎶 STATIONS BY GENRE & TOP STATIONS
-                                  {appleRadioGenre ? ` — ${appleRadioGenre.toUpperCase()}` : ''} (
-                                  {filteredGenreStations.length})
-                                </div>
+                                  liveItems={filteredGenreStations}
+                                />
                                 <div style={tileGridStyle}>
                                   {filteredGenreStations.map(renderStationCard)}
                                 </div>
-                              </>
+                              </section>
                             )}
 
                           {stationsToDisplay.length === 0 &&

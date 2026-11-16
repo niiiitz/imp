@@ -27,6 +27,9 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     let settings = Arc::new(Mutex::new(load_or_create_settings()));
     let db_path = library_db_path();
     let db = LibraryDatabase::open(&db_path)?;
+    let services_cache = simp_core::library::ServicesCacheDatabase::open(
+        &crate::config::services_cache_db_path(),
+    )?;
 
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<AudioCommand>();
     let (internal_event_tx, internal_event_rx) = mpsc::unbounded_channel::<PlaybackEvent>();
@@ -107,6 +110,7 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     // 3. Run the local loopback WebSocket + Artwork HTTP server on 127.0.0.1:18888
     let ipc_state = DaemonIpcState {
         db,
+        services_cache,
         settings,
         orchestrator_state,
         cmd_tx,

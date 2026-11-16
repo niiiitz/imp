@@ -521,26 +521,6 @@ export async function fetchTrackLyrics(params: {
   return j.data as TrackLyricsResponse;
 }
 
-export function openAppleMusicPermalink(opts: {
-  kind?: 'song' | 'album' | 'playlist' | 'artist' | 'station';
-  id?: string | null;
-}): void {
-  if (typeof window === 'undefined') return;
-  // Do not pop external browser windows when running inside the SteamOS Game Mode Decky iframe
-  if (window.parent && window.parent !== window) return;
-  const cleanId = (opts.id || '').trim();
-  if (cleanId) {
-    const kind = opts.kind || 'song';
-    window.open(
-      `http://127.0.0.1:18888/api/apple/open?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(cleanId)}`,
-      '_blank',
-      'noopener,noreferrer'
-    );
-    return;
-  }
-  window.open('https://music.apple.com', '_blank', 'noopener,noreferrer');
-}
-
 /**
  * Fetches the user's "Recently Added" personal Cloud Library albums (`/api/apple/library-recent`).
  */

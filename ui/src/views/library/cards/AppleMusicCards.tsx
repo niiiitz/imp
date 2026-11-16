@@ -11,6 +11,8 @@ import { BrowserTarget } from '../../PlayerView';
 import { LibraryContextTarget } from '../../LibraryBrowserView';
 import { ContentRatingBadge } from '../ContentRatingBadge';
 import { ResilientTileArtwork } from '../ResilientTileArtwork';
+import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
+import { ImpIcon } from '../../../components/icons/ImpIcon';
 
 export interface CloudPlaylistCardProps {
   pl: AppleCloudPlaylistSummary;
@@ -36,7 +38,6 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
   selectCloudPlaylist,
   setCloudPlaylists,
   openLibraryContextMenu,
-  handleAddAppleToCloudLibrary,
   handleAddCloudPlaylistToHybrid,
   handleDeletePlaylist,
   handlePinCloudPlaylist,
@@ -90,7 +91,7 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
       >
         <ResilientTileArtwork
           src={pl.art_url}
-          fallbackIcon="☁️"
+          fallbackIcon={<AppleMusicLogo size={20} />}
           bg="#181118"
           border="1px solid #321a24"
           playlistCoverId={pl.id}
@@ -113,79 +114,24 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
         >
           <span
             style={{
-              padding: '2px 6px',
+              padding: '2px 5px',
               borderRadius: 6,
               background: '#251018',
               border: '1px solid #4c1d2e',
-              color: '#fda4af',
-              fontSize: 10,
-              fontFamily: 'monospace',
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 1,
             }}
           >
-            🍎
+            <AppleMusicLogo size={13} />
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {pl.kind !== 'library' && handleAddAppleToCloudLibrary && (
-              <span
-                role="button"
-                data-tile-aux="true"
-                title="Add Playlist to your Apple Music Cloud Library"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAddAppleToCloudLibrary(pl.id, 'playlists', pl.name);
-                }}
-                style={{
-                  padding: '2px 5px',
-                  borderRadius: 6,
-                  background: '#251018',
-                  border: '1px solid #fa243c',
-                  color: '#fecdd3',
-                  fontSize: 9,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                ☁️+
-              </span>
-            )}
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-context-select="true"
-              title="Playlist Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'cloud_playlist',
-                  id: pl.id,
-                  title: pl.name,
-                  subtitle: pl.description || 'Apple Music Playlist',
-                  art_url: pl.art_url,
-                  source: 'apple_music',
-                  rawItem: pl,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
             <span
               role="button"
               data-tile-aux="true"
               data-tile-select="true"
-              title="Add playlist tracks to active ★ SIMP Hybrid Playlist"
+              title="Add playlist tracks to active ★ Imp Hybrid Playlist"
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddCloudPlaylistToHybrid(pl);
@@ -207,7 +153,7 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
               role="button"
               data-tile-aux="true"
               data-tile-y="true"
-              title={isPinned ? 'Unpin Playlist from SIMP (Y)' : 'Pin Playlist to SIMP (Y)'}
+              title={isPinned ? 'Unpin Playlist from Imp (Y)' : 'Pin Playlist to Imp (Y)'}
               onClick={(e) => {
                 e.stopPropagation();
                 if (isPinned) {
@@ -217,18 +163,18 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
                 }
               }}
               style={{
-                padding: '2px 6px',
+                padding: '3px 6px',
                 borderRadius: 6,
                 background: isPinned ? '#0f222a' : '#251018',
                 border: isPinned ? '1px solid #2aa3c4' : '1px solid #4c1d2e',
                 color: isPinned ? '#67e8f9' : '#fda4af',
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              {isPinned ? '✓ 📌' : '📌'}
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fda4af'} />
             </span>
           </div>
         </div>
@@ -294,7 +240,6 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
   browserTarget,
   selectCloudAlbum,
   openLibraryContextMenu,
-  handleAddAppleToCloudLibrary,
   handleAddCloudAlbumToHybrid,
   handleDeleteAlbum,
   setCloudLoading,
@@ -371,80 +316,24 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
         >
           <span
             style={{
-              padding: '2px 6px',
+              padding: '2px 5px',
               borderRadius: 6,
               background: '#251018',
               border: '1px solid #4c1d2e',
-              color: '#fda4af',
-              fontSize: 10,
-              fontFamily: 'monospace',
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 1,
             }}
           >
-            🍎
+            <AppleMusicLogo size={13} />
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            {alb.kind !== 'library' && handleAddAppleToCloudLibrary && (
-              <span
-                role="button"
-                data-tile-aux="true"
-                title="Add Album to your Apple Music Cloud Library"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleAddAppleToCloudLibrary(alb.id, 'albums', alb.title);
-                }}
-                style={{
-                  padding: '2px 5px',
-                  borderRadius: 6,
-                  background: '#251018',
-                  border: '1px solid #fa243c',
-                  color: '#fecdd3',
-                  fontSize: 9,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                ☁️+
-              </span>
-            )}
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-context-select="true"
-              title="Album Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'cloud_album',
-                  id: alb.id,
-                  title: alb.title,
-                  subtitle: `${alb.artist}${alb.release_year ? ` • ${alb.release_year}` : ''}`,
-                  art_url: alb.art_url,
-                  artistName: alb.artist,
-                  source: 'apple_music',
-                  rawItem: alb,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
             <span
               role="button"
               data-tile-aux="true"
               data-tile-select="true"
-              title="Add album tracks to active ★ SIMP Hybrid Playlist"
+              title="Add album tracks to active ★ Imp Hybrid Playlist"
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddCloudAlbumToHybrid(alb);
@@ -466,7 +355,7 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
               role="button"
               data-tile-aux="true"
               data-tile-y="true"
-              title={isPinned ? 'Unpin Album from SIMP (Y)' : 'Pin Album to SIMP (Y)'}
+              title={isPinned ? 'Unpin Album from Imp (Y)' : 'Pin Album to Imp (Y)'}
               onClick={(e) => {
                 e.stopPropagation();
                 if (isPinned) {
@@ -480,18 +369,18 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
                 }
               }}
               style={{
-                padding: '2px 6px',
+                padding: '3px 6px',
                 borderRadius: 6,
                 background: isPinned ? '#0f222a' : '#251018',
                 border: isPinned ? '1px solid #2aa3c4' : '1px solid #4c1d2e',
                 color: isPinned ? '#67e8f9' : '#fda4af',
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              {isPinned ? '✓ 📌' : '📌'}
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fda4af'} />
             </span>
           </div>
         </div>
@@ -727,9 +616,13 @@ export const AppleArtistCard: React.FC<AppleArtistCardProps> = ({
             fontFamily: 'monospace',
             fontWeight: 800,
             whiteSpace: 'nowrap',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
           }}
         >
-          🍎 Artist
+          <AppleMusicLogo size={11} />
+          <span>Artist</span>
         </span>
       </div>
       <div style={{ minWidth: 0, width: '100%' }}>

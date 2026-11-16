@@ -12,7 +12,7 @@ import {
   SoundCloudPlaylistSummary,
 } from "../../../drivers/SoundCloudDriver";
 import { SoundCloudAttributionLink } from "../../../components/SoundCloudLogo";
-import { AppleMusicAttributionLink } from "../../../components/AppleMusicLogo";
+import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import {
   extractAudioFormat,
   getTrackLyricsBadge,
@@ -331,12 +331,29 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                   )}
                   {(browserTarget.kind === 'cloud_album' ||
                     browserTarget.kind === 'cloud_playlist') && (
-                    <AppleMusicAttributionLink
-                      kind={browserTarget.kind === 'cloud_album' ? 'album' : 'playlist'}
-                      id={browserTarget.id}
-                      label="Apple Music"
-                      style={{ minHeight: 40, padding: '0 12px', borderRadius: 10 }}
-                    />
+                    <span
+                      title="Apple Music"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        minHeight: 40,
+                        padding: '0 12px',
+                        borderRadius: 10,
+                        background: '#1a0c12',
+                        color: '#fda4af',
+                        border: '1px solid #4c1d2e',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        lineHeight: 1,
+                        flexShrink: 0,
+                        cursor: 'default',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <AppleMusicLogo size={14} />
+                      <span>Apple Music</span>
+                    </span>
                   )}
                   <button
                     data-right-play-all="true"
@@ -1056,11 +1073,27 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                         style={{ padding: '2px 6px' }}
                       />
                     ) : t.source === 'apple_music' ? (
-                      <AppleMusicAttributionLink
-                        kind="song"
-                        id={t.uri}
-                        style={{ padding: '2px 6px' }}
-                      />
+                      <span
+                        title="Apple Music"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 5,
+                          padding: '2px 6px',
+                          borderRadius: 6,
+                          background: '#1a0c12',
+                          color: '#fda4af',
+                          border: '1px solid #4c1d2e',
+                          fontSize: 10,
+                          fontWeight: 800,
+                          lineHeight: 1,
+                          flexShrink: 0,
+                          cursor: 'default',
+                        }}
+                      >
+                        <AppleMusicLogo size={12} />
+                        <span>Apple Music</span>
+                      </span>
                     ) : (
                       <span
                         style={{
@@ -1278,32 +1311,6 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                         −
                       </button>
                     )}
-                    <button
-                      data-row-aux="true"
-                      data-context-select="true"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openLibraryContextMenu({
-                          type: 'track',
-                          track: t,
-                          peerList: browserTracks,
-                          isViewingLocalPlaylist,
-                        });
-                      }}
-                      title="Track Actions (SELECT)"
-                      style={{
-                        padding: '5px 8px',
-                        borderRadius: 8,
-                        background: '#14141e',
-                        border: '1px solid #2a2a38',
-                        color: '#cbd5e1',
-                        fontSize: 11,
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      •••
-                    </button>
                   </div>
                 </div>
               );

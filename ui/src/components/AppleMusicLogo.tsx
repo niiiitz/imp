@@ -1,5 +1,4 @@
 import React from 'react';
-import { openAppleMusicPermalink } from '../drivers/AppleMusicDriver';
 
 export interface AppleMusicLogoProps {
   size?: number;
@@ -40,54 +39,5 @@ export const AppleMusicLogo: React.FC<AppleMusicLogoProps> = ({
         fill="#FFFFFF"
       />
     </svg>
-  );
-};
-
-export interface AppleMusicAttributionLinkProps {
-  kind?: 'song' | 'album' | 'playlist' | 'artist' | 'station';
-  id?: string | null;
-  label?: string;
-  size?: number;
-  style?: React.CSSProperties;
-}
-
-export const AppleMusicAttributionLink: React.FC<AppleMusicAttributionLinkProps> = ({
-  kind = 'song',
-  id,
-  label = 'Apple Music',
-  size = 14,
-  style,
-}) => {
-  const isEmbeddedConsole = typeof window !== 'undefined' && window.parent !== window;
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!isEmbeddedConsole) {
-          openAppleMusicPermalink({ kind, id });
-        }
-      }}
-      title={isEmbeddedConsole ? 'Apple Music' : 'Listen on Apple Music'}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '3px 8px',
-        borderRadius: 6,
-        background: '#1a0c12',
-        color: '#fda4af',
-        border: '1px solid #4c1d2e',
-        fontSize: 11,
-        fontWeight: 800,
-        cursor: isEmbeddedConsole ? 'default' : 'pointer',
-        lineHeight: 1,
-        flexShrink: 0,
-        ...style,
-      }}
-    >
-      <AppleMusicLogo size={size} />
-      <span>{label}</span>
-    </button>
   );
 };

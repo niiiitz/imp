@@ -9,7 +9,7 @@ import {
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { type VisualizerMode } from '../../components/PlayerBackgroundVisualizer';
 import { SoundCloudAttributionLink } from '../../components/SoundCloudLogo';
-import { AppleMusicAttributionLink } from '../../components/AppleMusicLogo';
+import { AppleMusicLogo } from '../../components/AppleMusicLogo';
 import { ContentRatingBadge } from '../library/ContentRatingBadge';
 import { TransportIconButton } from './PlayerTransportBar';
 
@@ -205,11 +205,28 @@ export const PlayerVideoStage: React.FC<PlayerVideoStageProps> = ({
             />
           )}
           {track?.source === 'apple_music' && (
-            <AppleMusicAttributionLink
-              id={track.uri}
-              kind="song"
-              style={{ marginLeft: 8, verticalAlign: 'middle' }}
-            />
+            <span
+              title="Apple Music"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '2px 7px',
+                borderRadius: 6,
+                background: '#1a0c12',
+                color: '#fda4af',
+                border: '1px solid #4c1d2e',
+                fontSize: 10.5,
+                fontWeight: 800,
+                lineHeight: 1,
+                marginLeft: 8,
+                verticalAlign: 'middle',
+                cursor: 'default',
+              }}
+            >
+              <AppleMusicLogo size={13} />
+              <span>Apple Music</span>
+            </span>
           )}
           {track?.source === 'soundcloud' && track?.album?.includes('• Preview') && (
             <span

@@ -14,6 +14,8 @@ import {
   SoundCloudCatalogSearchResults,
 } from "../../../drivers/SoundCloudDriver";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
+import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
+import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { isUiVideoTrack } from "../../PlayerView";
 import {
   tileGridStyle,
@@ -110,8 +112,9 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                 {/* 1A. Matching SIMP Hybrid & Pinned Playlists */}
                 {searchMatchedPlaylists.length > 0 && (
                   <>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                      📌 MATCHING SIMP & PINNED PLAYLISTS ({searchMatchedPlaylists.length})
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <ImpIcon name="imp" size={11} color="#2aa3c4" />
+                      <span>MATCHING IMP & PINNED PLAYLISTS ({searchMatchedPlaylists.length})</span>
                     </div>
                     <div style={tileGridStyle}>
                       {searchMatchedPlaylists.map(renderSimpPlaylistCard)}
@@ -250,8 +253,9 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                             mediaTypeFilter !== 'video' &&
                             filteredCloudPlaylists.length > 0 && (
                               <>
-                                <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af' }}>
-                                  ☁️ MATCHING APPLE LIBRARY PLAYLISTS ({filteredCloudPlaylists.length})
+                                <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                  <AppleMusicLogo size={11} />
+                                  <span>MATCHING APPLE LIBRARY PLAYLISTS ({filteredCloudPlaylists.length})</span>
                                 </div>
                                 <div style={tileGridStyle}>
                                   {filteredCloudPlaylists.slice(0, 50).map(renderCloudPlaylistCard)}
@@ -278,13 +282,16 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
 
                                 {catalogSearchResults.albums.some((a) => a.kind === 'library') && (
                                   <>
-                                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af' }}>
-                                      ☁️ IN YOUR APPLE CLOUD LIBRARY — ALBUMS (
-                                      {
-                                        catalogSearchResults.albums.filter((a) => a.kind === 'library')
-                                          .length
-                                      }
-                                      )
+                                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                                      <AppleMusicLogo size={11} />
+                                      <span>
+                                        IN YOUR APPLE CLOUD LIBRARY — ALBUMS (
+                                        {
+                                          catalogSearchResults.albums.filter((a) => a.kind === 'library')
+                                            .length
+                                        }
+                                        )
+                                      </span>
                                     </div>
                                     <div style={tileGridStyle}>
                                       {catalogSearchResults.albums
@@ -373,9 +380,13 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                                     borderBottom: '1px solid #3c1c0f',
                                     paddingBottom: 6,
                                     marginTop: 8,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 8,
                                   }}
                                 >
-                                  ☁️ SoundCloud Creators, Sets & Tracks
+                                  <SoundCloudLogo width={30} color="#ffffff" />
+                                  <span>SoundCloud Creators, Sets & Tracks</span>
                                 </div>
 
                                 {scCatalogSearchResults.users &&
@@ -405,9 +416,12 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
 
                                 {scCatalogSearchResults.songs.length > 0 && (
                                   <>
-                                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                                      ☁️ SOUNDCLOUD TRACKS & MIXES (
-                                      {scCatalogSearchResults.songs.length})
+                                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                      <SoundCloudLogo width={30} color="#fdba74" />
+                                      <span>
+                                        SOUNDCLOUD TRACKS & MIXES (
+                                        {scCatalogSearchResults.songs.length})
+                                      </span>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                                       {scCatalogSearchResults.songs.map((s) =>

@@ -9,6 +9,8 @@ import { LibraryContextTarget } from '../../LibraryBrowserView';
 import { iaItemCountCache, iaItemRatingCache } from '../libraryHelpers';
 import { ContentRatingBadge } from '../ContentRatingBadge';
 import { ResilientTileArtwork } from '../ResilientTileArtwork';
+import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
+import { ImpIcon } from '../../../components/icons/ImpIcon';
 
 export interface SoundCloudPlaylistCardProps {
   pl: SoundCloudPlaylistSummary;
@@ -80,7 +82,7 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
       >
         <ResilientTileArtwork
           src={pl.art_url}
-          fallbackIcon="☁️"
+          fallbackIcon={<SoundCloudLogo width={30} color="#fdba74" />}
           bg="#23120b"
           border="1px solid #7c2d12"
         />
@@ -96,56 +98,25 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
         >
           <span
             style={{
-              padding: '2px 6px',
+              padding: '3px 6px',
               borderRadius: 6,
               background: '#2c140a',
               border: '1px solid #7c2d12',
               color: '#fdba74',
-              fontSize: 10,
-              fontFamily: 'monospace',
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              lineHeight: 1,
             }}
           >
-            ☁️
+            <SoundCloudLogo width={30} color="#ffffff" />
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
               role="button"
               data-tile-aux="true"
-              data-context-select="true"
-              title="Set Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'sc_playlist',
-                  id: pl.id,
-                  title: pl.name,
-                  subtitle: `${pl.track_count ? `${pl.track_count} tracks • ` : ''}${pl.description || 'SoundCloud Set'}`,
-                  art_url: pl.art_url,
-                  source: 'soundcloud',
-                  rawItem: pl,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
               data-tile-select="true"
-              title="Add set tracks to active ★ SIMP Hybrid Playlist"
+              title="Add set tracks to active ★ Imp Hybrid Playlist"
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddSoundCloudPlaylistToHybrid(pl);
@@ -167,7 +138,7 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
               role="button"
               data-tile-aux="true"
               data-tile-y="true"
-              title={isPinned ? 'Unpin Set from SIMP (Y)' : 'Pin Set to SIMP (Y)'}
+              title={isPinned ? 'Unpin Set from Imp (Y)' : 'Pin Set to Imp (Y)'}
               onClick={(e) => {
                 e.stopPropagation();
                 if (isPinned) {
@@ -177,18 +148,18 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
                 }
               }}
               style={{
-                padding: '2px 6px',
+                padding: '3px 6px',
                 borderRadius: 6,
                 background: isPinned ? '#0f222a' : '#2c140a',
                 border: isPinned ? '1px solid #2aa3c4' : '1px solid #7c2d12',
                 color: isPinned ? '#67e8f9' : '#fdba74',
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              {isPinned ? '✓ 📌' : '📌'}
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fdba74'} />
             </span>
           </div>
         </div>
@@ -461,40 +432,8 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
             <span
               role="button"
               data-tile-aux="true"
-              data-context-select="true"
-              title="Item Options (SELECT)"
-              onClick={(e) => {
-                e.stopPropagation();
-                openLibraryContextMenu({
-                  type: 'collection',
-                  kind: 'ia_item',
-                  id: item.identifier,
-                  title: item.title,
-                  subtitle: `${item.creator}${item.year ? ` • ${item.year}` : ''}`,
-                  art_url: item.art_url,
-                  artistName: item.creator,
-                  source: 'internet_archive',
-                  rawItem: item,
-                });
-              }}
-              style={{
-                padding: '2px 5px',
-                borderRadius: 6,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c8c8d4',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              •••
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
               data-tile-select="true"
-              title="Add to active ★ SIMP Hybrid Playlist"
+              title="Add to active ★ Imp Hybrid Playlist"
               onClick={(e) => {
                 e.stopPropagation();
                 handleAddArchiveItemToHybrid(item);
@@ -516,7 +455,7 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
               role="button"
               data-tile-aux="true"
               data-tile-y="true"
-              title={isPinned ? 'Unpin from SIMP (Y)' : 'Pin to SIMP (Y)'}
+              title={isPinned ? 'Unpin from Imp (Y)' : 'Pin to Imp (Y)'}
               onClick={(e) => {
                 e.stopPropagation();
                 if (isPinned) {
@@ -526,18 +465,18 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
                 }
               }}
               style={{
-                padding: '2px 6px',
+                padding: '3px 6px',
                 borderRadius: 6,
                 background: isPinned ? '#0f222a' : '#261a0b',
                 border: isPinned ? '1px solid #2aa3c4' : '1px solid #78350f',
                 color: isPinned ? '#67e8f9' : '#fde68a',
-                fontSize: 10,
-                fontFamily: 'monospace',
-                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              {isPinned ? '✓ 📌' : '📌'}
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fde68a'} />
             </span>
           </div>
         </div>

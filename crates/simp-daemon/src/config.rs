@@ -14,6 +14,10 @@ pub fn library_db_path() -> PathBuf {
     simp_core::simp_data_dir().join("library.db")
 }
 
+pub fn services_cache_db_path() -> PathBuf {
+    simp_core::simp_data_dir().join("servicesCache.db")
+}
+
 pub fn load_or_create_settings() -> SimpSettings {
     let path = settings_vdf_path();
     if let Ok(text) = fs::read_to_string(&path) {

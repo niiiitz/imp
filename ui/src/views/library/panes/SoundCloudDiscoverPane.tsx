@@ -15,6 +15,8 @@ import {
 import {
   tileGridStyle,
 } from "../libraryHelpers";
+import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import { TTL_CATALOG_FEED_SEC, TTL_FAST_FEED_SEC } from "../../../api/servicesCacheApi";
 
 export interface SoundCloudDiscoverPaneProps {
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
@@ -227,40 +229,97 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
 
                     {(scLikesFilter === 'all' || scLikesFilter === 'sets') &&
                       scPlaylists.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🎶 YOUR SOUNDCLOUD SETS & PLAYLISTS ({scPlaylists.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_sets"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🎶 YOUR SOUNDCLOUD SETS & PLAYLISTS (${scPlaylists.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:likes:sets',
+                              cacheKey: 'soundcloud:likes:sets',
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Your Sets & Playlists',
+                              itemKind: 'playlists',
+                              fetchSpec: { kind: 'sc_likes', section: 'sets' },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'likes_sets',
+                                sectionAnchor: 'sc_sets',
+                              },
+                              ttlSec: TTL_CATALOG_FEED_SEC,
+                            }}
+                            liveItems={scPlaylists}
+                          />
                           <div style={tileGridStyle}>
                             {scPlaylists.map(renderSoundCloudPlaylistCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scLikesFilter === 'all' || scLikesFilter === 'following') &&
                       scFollowings.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            👥 FOLLOWED CREATORS & DJS ({scFollowings.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_followings"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`👥 FOLLOWED CREATORS & DJS (${scFollowings.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:likes:followings',
+                              cacheKey: 'soundcloud:likes:followings',
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Followed Creators & DJs',
+                              itemKind: 'artists',
+                              fetchSpec: { kind: 'sc_likes', section: 'followings' },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'likes_sets',
+                                sectionAnchor: 'sc_followings',
+                              },
+                              ttlSec: TTL_CATALOG_FEED_SEC,
+                            }}
+                            liveItems={scFollowings}
+                          />
                           <div style={tileGridStyle}>
                             {scFollowings.map(renderSoundCloudUserCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scLikesFilter === 'all' || scLikesFilter === 'likes') &&
                       scLikedTracks.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            ❤️ LIKED TRACKS ({scLikedTracks.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_liked_tracks"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`❤️ LIKED TRACKS (${scLikedTracks.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:likes:tracks',
+                              cacheKey: 'soundcloud:likes:tracks',
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Liked Tracks',
+                              itemKind: 'tracks',
+                              fetchSpec: { kind: 'sc_likes', section: 'liked_tracks' },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'likes_sets',
+                                sectionAnchor: 'sc_liked_tracks',
+                              },
+                              ttlSec: TTL_CATALOG_FEED_SEC,
+                            }}
+                            liveItems={scLikedTracks}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scLikedTracks.map((s) =>
                               renderSingleSongRow(s, scLikedTracks, 'sc_likes')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {scPlaylists.length === 0 &&
@@ -411,29 +470,66 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
 
                     {(scStreamFilter === 'all' || scStreamFilter === 'sets') &&
                       scStreamPlaylists.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🎶 SETS FROM ARTISTS YOU FOLLOW ({scStreamPlaylists.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_stream_sets"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🎶 SETS FROM ARTISTS YOU FOLLOW (${scStreamPlaylists.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:stream:sets',
+                              cacheKey: 'soundcloud:stream:sets',
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Reposted Sets from Following',
+                              itemKind: 'playlists',
+                              fetchSpec: { kind: 'sc_stream', section: 'stream_sets' },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'stream_radio',
+                                sectionAnchor: 'sc_stream_sets',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scStreamPlaylists}
+                          />
                           <div style={tileGridStyle}>
                             {scStreamPlaylists.map(renderSoundCloudPlaylistCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scStreamFilter === 'all' || scStreamFilter === 'stream') &&
                       scStreamTracks.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            ⚡ FOLLOWING STREAM — UPLOADS & REPOSTS FROM ARTISTS YOU FOLLOW (
-                            {scStreamTracks.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_stream_tracks"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`⚡ FOLLOWING STREAM — UPLOADS & REPOSTS FROM ARTISTS YOU FOLLOW (${scStreamTracks.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:stream:tracks',
+                              cacheKey: 'soundcloud:stream:tracks',
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Following Stream',
+                              itemKind: 'tracks',
+                              fetchSpec: { kind: 'sc_stream', section: 'stream_tracks' },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'stream_radio',
+                                sectionAnchor: 'sc_stream_tracks',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scStreamTracks}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scStreamTracks.map((s) =>
                               renderSingleSongRow(s, scStreamTracks, 'sc_stream')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {scStreamPlaylists.length === 0 && scStreamTracks.length === 0 && !cloudLoading && (
@@ -617,77 +713,232 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'for_you') &&
                       scMoreOfWhatYouLike.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            💡 MORE OF WHAT YOU LIKE — BASED ON YOUR HISTORY & LIKES (
-                            {scMoreOfWhatYouLike.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_more_of_what_you_like"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`💡 MORE OF WHAT YOU LIKE — BASED ON YOUR HISTORY & LIKES (${scMoreOfWhatYouLike.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:discover:for_you',
+                              cacheKey: `soundcloud:discover:for_you:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • More of What You Like',
+                              itemKind: 'tracks',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'more_of_what_you_like',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_more_of_what_you_like',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scMoreOfWhatYouLike}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scMoreOfWhatYouLike.map((s) =>
                               renderSingleSongRow(s, scMoreOfWhatYouLike, 'sc_for_you')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'artists') &&
                       scRecommendedArtists.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            👥 ARTISTS & CREATORS TO CHECK OUT ({scRecommendedArtists.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_recommended_artists"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`👥 ARTISTS & CREATORS TO CHECK OUT (${scRecommendedArtists.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:discover:artists',
+                              cacheKey: `soundcloud:discover:artists:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Recommended Creators',
+                              itemKind: 'artists',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'recommended_artists',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_recommended_artists',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scRecommendedArtists}
+                          />
                           <div style={tileGridStyle}>
                             {scRecommendedArtists.map(renderSoundCloudUserCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'fresh') &&
                       scFreshUploads.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🆕 FRESH UPLOADS FROM CREATORS ({scFreshUploads.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_fresh_uploads"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🆕 FRESH UPLOADS FROM CREATORS (${scFreshUploads.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: 'soundcloud:discover:fresh',
+                              cacheKey: `soundcloud:discover:fresh:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: 'SoundCloud • Fresh Uploads',
+                              itemKind: 'tracks',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'fresh_uploads',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_fresh_uploads',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scFreshUploads}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scFreshUploads.map((s) =>
                               renderSingleSongRow(s, scFreshUploads, 'sc_fresh')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'sets') &&
                       scTrendingPlaylists.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🎶 FEATURED SOUNDCLOUD SETS ({scTrendingPlaylists.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_featured_sets"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🎶 FEATURED SOUNDCLOUD SETS (${scTrendingPlaylists.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: scSelectedGenre
+                                ? `soundcloud:discover:sets:${scSelectedGenre}`
+                                : 'soundcloud:discover:sets',
+                              cacheKey: `soundcloud:discover:sets:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: scSelectedGenre
+                                ? `SoundCloud • Featured Sets (${scSelectedGenre})`
+                                : 'SoundCloud • Featured Sets',
+                              itemKind: 'playlists',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'featured_sets',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_featured_sets',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scTrendingPlaylists}
+                          />
                           <div style={tileGridStyle}>
                             {scTrendingPlaylists.map(renderSoundCloudPlaylistCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'mixes') &&
                       scTrendingMixes.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🎧 LONG-FORM DJ MIXES & SETS (20m+) ({scTrendingMixes.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_dj_mixes"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🎧 LONG-FORM DJ MIXES & SETS (20m+) (${scTrendingMixes.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: scSelectedGenre
+                                ? `soundcloud:discover:mixes:${scSelectedGenre}`
+                                : 'soundcloud:discover:mixes',
+                              cacheKey: `soundcloud:discover:mixes:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: scSelectedGenre
+                                ? `SoundCloud • DJ Mixes (${scSelectedGenre})`
+                                : 'SoundCloud • Long-Form DJ Mixes',
+                              itemKind: 'tracks',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'dj_mixes',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_dj_mixes',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scTrendingMixes}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scTrendingMixes.map((s) =>
                               renderSingleSongRow(s, scTrendingMixes, 'sc_mixes')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {(scTrendingFilter === 'all' || scTrendingFilter === 'tracks') &&
                       scTrendingTracks.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🔥 TRENDING TRACKS ({scTrendingTracks.length})
-                          </div>
+                        <section
+                          data-section-anchor="sc_trending_tracks"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <PinnableSectionHeader
+                            title={`🔥 TRENDING TRACKS (${scTrendingTracks.length})`}
+                            accentColor="#fdba74"
+                            descriptor={{
+                              shelfUid: scSelectedGenre
+                                ? `soundcloud:discover:trending_tracks:${scSelectedGenre}`
+                                : 'soundcloud:discover:trending_tracks',
+                              cacheKey: `soundcloud:discover:trending_tracks:${scSelectedGenre || 'all'}`,
+                              provider: 'soundcloud',
+                              title: scSelectedGenre
+                                ? `SoundCloud • Trending (${scSelectedGenre})`
+                                : 'SoundCloud • Trending & Hot Tracks',
+                              itemKind: 'tracks',
+                              fetchSpec: {
+                                kind: 'sc_discover',
+                                section: 'trending_tracks',
+                                genre: scSelectedGenre || undefined,
+                              },
+                              originRoute: {
+                                sourceFilter: 'soundcloud',
+                                soundCloudSubTab: 'trending',
+                                scSelectedGenre: scSelectedGenre || '',
+                                sectionAnchor: 'sc_trending_tracks',
+                              },
+                              ttlSec: TTL_FAST_FEED_SEC,
+                            }}
+                            liveItems={scTrendingTracks}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {scTrendingTracks.map((s) =>
                               renderSingleSongRow(s, scTrendingTracks, 'sc_trending')
@@ -719,7 +970,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                               </button>
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
                   </>
                 )}

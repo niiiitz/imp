@@ -1,6 +1,7 @@
 import React from 'react';
 
 export type ImpIconName =
+  | 'imp'
   | 'lyrics'
   | 'artwork'
   | 'artwork-missing'
@@ -570,6 +571,16 @@ export const ImpIcon: React.FC<ImpIconProps> = ({
             <line x1="20" y1="14" x2="23" y2="14" />
             <line x1="1" y1="9" x2="4" y2="9" />
             <line x1="1" y1="14" x2="4" y2="14" />
+          </>
+        );
+      case 'imp':
+        return (
+          <>
+            {/* Horned IMP mascot silhouette with mini lightning crest */}
+            <path d="M6.5 8.5L4.5 3.5L9.2 6.2A7 7 0 0 1 14.8 6.2L19.5 3.5L17.5 8.5A6.8 6.8 0 0 1 19 13C19 17 15.9 20 12 20C8.1 20 5 17 5 13A6.8 6.8 0 0 1 6.5 8.5Z" />
+            <circle cx="9.5" cy="12" r="1" fill={color} stroke="none" />
+            <circle cx="14.5" cy="12" r="1" fill={color} stroke="none" />
+            <path d="M9.6 15.5Q12 17 14.4 15.5" />
           </>
         );
       case 'gamepad-select':

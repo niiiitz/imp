@@ -21,6 +21,7 @@ export interface AppTopHeaderBarProps {
   setBrightnessPct: React.Dispatch<React.SetStateAction<number>>;
   sourceModalOpen: boolean;
   powerModalOpen: boolean;
+  desktopMode?: boolean;
 }
 
 export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
@@ -42,6 +43,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
   setBrightnessPct,
   sourceModalOpen,
   powerModalOpen,
+  desktopMode = false,
 }) => {
   return (
     <>
@@ -74,7 +76,15 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             setBrightnessPopoverOpen(false);
             setPowerModalOpen(false);
             setSourceModalOpen(false);
-            if (view !== 'lock') {
+            if (desktopMode) {
+              if (!track) {
+                window.dispatchEvent(
+                  new CustomEvent('simp-select-category-focus', {
+                    detail: { category: 'interface' },
+                  })
+                );
+              }
+            } else if (view !== 'lock') {
               setView('lock');
             }
             window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
@@ -143,62 +153,82 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
           </span>
         </button>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            background: '#0a0a0e',
-            padding: 4,
-            borderRadius: 12,
-            border: '1px solid #1c1c24',
-          }}
-        >
-          <span
-            className="simp-gp-badge"
-            style={{ padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', color: '#71717a' }}
-          >
-            L1
-          </span>
-          <button
-            onClick={() => setView('lock')}
+        {!desktopMode ? (
+          <div
             style={{
-              minHeight: 36,
-              padding: '0 16px',
-              borderRadius: 8,
-              border: view === 'lock' ? '1px solid #2aa3c4' : '1px solid transparent',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-              background: view === 'lock' ? '#0f222a' : 'transparent',
-              color: view === 'lock' ? '#bfeaf5' : '#8e8e99',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: '#0a0a0e',
+              padding: 4,
+              borderRadius: 12,
+              border: '1px solid #1c1c24',
             }}
           >
-            🎵 Player
-          </button>
+            <span
+              className="simp-gp-badge"
+              style={{ padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', color: '#71717a' }}
+            >
+              L1
+            </span>
+            <button
+              onClick={() => setView('lock')}
+              style={{
+                minHeight: 36,
+                padding: '0 16px',
+                borderRadius: 8,
+                border: view === 'lock' ? '1px solid #2aa3c4' : '1px solid transparent',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: view === 'lock' ? '#0f222a' : 'transparent',
+                color: view === 'lock' ? '#bfeaf5' : '#8e8e99',
+              }}
+            >
+              🎵 Player
+            </button>
+            <button
+              onClick={() => setView('browser')}
+              style={{
+                minHeight: 36,
+                padding: '0 16px',
+                borderRadius: 8,
+                border: view === 'browser' ? '1px solid #2aa3c4' : '1px solid transparent',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                background: view === 'browser' ? '#0f222a' : 'transparent',
+                color: view === 'browser' ? '#bfeaf5' : '#8e8e99',
+              }}
+            >
+              📚 Library
+            </button>
+            <span
+              className="simp-gp-badge"
+              style={{ padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', color: '#71717a' }}
+            >
+              R1
+            </span>
+          </div>
+        ) : view === 'lock' ? (
           <button
+            type="button"
             onClick={() => setView('browser')}
             style={{
               minHeight: 36,
               padding: '0 16px',
-              borderRadius: 8,
-              border: view === 'browser' ? '1px solid #2aa3c4' : '1px solid transparent',
+              borderRadius: 10,
+              border: '1px solid #2aa3c4',
               fontSize: 12,
-              fontWeight: 700,
+              fontWeight: 800,
               cursor: 'pointer',
-              background: view === 'browser' ? '#0f222a' : 'transparent',
-              color: view === 'browser' ? '#bfeaf5' : '#8e8e99',
+              background: '#0f222a',
+              color: '#bfeaf5',
             }}
           >
-            📚 Library
+            ← Back to Library
           </button>
-          <span
-            className="simp-gp-badge"
-            style={{ padding: '4px 8px', fontSize: 11, fontFamily: 'monospace', color: '#71717a' }}
-          >
-            R1
-          </span>
-        </div>
+        ) : null}
 
         {/* Compact Volume & Brightness Dropdown Controls + Settings Button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 40 }}>

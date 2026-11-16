@@ -268,7 +268,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                     cursor: 'pointer',
                   }}
                 >
-                  ★ Add to SIMP Hybrid Playlist (
+                  ★ Add to Imp Hybrid Playlist (
                   {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
                   )
                 </button>
@@ -666,7 +666,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                 cursor: 'pointer',
               }}
             >
-              ★ Add All Tracks to SIMP Hybrid Playlist (
+              ★ Add All Tracks to Imp Hybrid Playlist (
               {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
               )
             </button>
@@ -704,7 +704,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   cursor: 'pointer',
                 }}
               >
-                📌 Pin Collection to SIMP Library
+                Pin Collection to Imp Library
               </button>
             )}
 
@@ -819,7 +819,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   cursor: 'pointer',
                 }}
               >
-                🗑️ Remove from SIMP Library
+                Remove from Imp Library
               </button>
             )}
           </div>

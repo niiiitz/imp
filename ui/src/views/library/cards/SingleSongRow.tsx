@@ -1,6 +1,8 @@
 import React from 'react';
 import { defaultSimpClient, SimpStateSnapshot, TrackMetadata } from '@simp/client';
-import { AppleMusicAttributionLink } from '../../../components/AppleMusicLogo';
+import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
+import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
+import { ImpIcon } from '../../../components/icons/ImpIcon';
 import { LibraryContextTarget } from '../../LibraryBrowserView';
 import { extractAudioFormat, getTrackLyricsBadge } from '../libraryHelpers';
 import { ContentRatingBadge } from '../ContentRatingBadge';
@@ -9,6 +11,7 @@ export interface SingleSongRowProps {
   song: TrackMetadata;
   peerList: TrackMetadata[];
   ctxPrefix: string;
+  compact?: boolean;
   track: TrackMetadata | null | undefined;
   snap: SimpStateSnapshot | null;
   favoritedUris: string[];
@@ -50,6 +53,7 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
   song: s,
   peerList,
   ctxPrefix,
+  compact = false,
   track,
   snap,
   favoritedUris,
@@ -63,7 +67,6 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
   handleFavoriteTrack,
   handleAddTracksToPlaylist,
   handleStartSoundCloudTrackRadio,
-  handleAddAppleToCloudLibrary,
   selectCloudAlbum,
 }) => {
   const isLongMix = s.source === 'soundcloud' && s.duration_ms >= 20 * 60 * 1000;
@@ -90,15 +93,17 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
         });
       }}
       style={{
-        minHeight: 54,
-        padding: '6px 10px',
-        borderRadius: 12,
+        minHeight: compact ? 46 : 54,
+        padding: compact ? '5px 8px' : '6px 10px',
+        borderRadius: compact ? 10 : 12,
         background: track?.uri === s.uri ? '#0d1b22' : '#0a0a0e',
         border: track?.uri === s.uri ? '1px solid #2aa3c4' : '1px solid #181822',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        gap: 8,
+        gap: compact ? 6 : 8,
+        minWidth: 0,
+        boxSizing: 'border-box',
       }}
     >
       <button
@@ -154,9 +159,9 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
             alt=""
             loading="lazy"
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 8,
+              width: compact ? 34 : 40,
+              height: compact ? 34 : 40,
+              borderRadius: compact ? 6 : 8,
               objectFit: 'cover',
               border: '1px solid #262632',
               flexShrink: 0,
@@ -165,24 +170,30 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
         ) : (
           <div
             style={{
-              width: 40,
-              height: 40,
-              borderRadius: 8,
+              width: compact ? 34 : 40,
+              height: compact ? 34 : 40,
+              borderRadius: compact ? 6 : 8,
               background: '#161622',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 15,
+              fontSize: compact ? 13 : 15,
               flexShrink: 0,
             }}
           >
-            {s.source === 'soundcloud' ? '☁️' : '🎵'}
+            {s.source === 'soundcloud' ? (
+              <SoundCloudLogo width={compact ? 24 : 30} color="#fdba74" />
+            ) : s.source === 'apple_music' ? (
+              <AppleMusicLogo size={compact ? 14 : 16} />
+            ) : (
+              <ImpIcon name="music" size={compact ? 14 : 16} color="#94a3b8" />
+            )}
           </div>
         )}
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             style={{
-              fontSize: 13,
+              fontSize: compact ? 12 : 13,
               fontWeight: 700,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -245,15 +256,76 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
           </div>
           <div
             style={{
-              fontSize: 11,
+              fontSize: compact ? 10.5 : 11,
               color: '#8e8e99',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
           >
-            {s.artists.join(', ')}
-            {s.album ? ` • ${s.album}` : ''}
+            {(!compact || !s.album) &&
+              (primaryArtist &&
+              s.source !== 'local_video' &&
+              s.source !== 'ia_video' &&
+              s.source !== 'dvd' ? (
+                <span
+                  role="link"
+                  tabIndex={-1}
+                  title={`Open Artist Profile for ${primaryArtist}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openArtistProfile({
+                      source:
+                        s.source === 'apple_music'
+                          ? 'apple_music'
+                          : s.source === 'soundcloud'
+                          ? 'soundcloud'
+                          : 'local',
+                      idOrName: `name:${primaryArtist}`,
+                      displayName: primaryArtist,
+                    });
+                  }}
+                  style={{
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    textDecorationColor: 'rgba(148, 163, 184, 0.35)',
+                  }}
+                >
+                  {s.artists.join(', ')}
+                </span>
+              ) : (
+                <span>{s.artists.join(', ')}</span>
+              ))}
+            {s.album ? (
+              s.source === 'apple_music' ? (
+                <>
+                  {!compact && ' • '}
+                  <span
+                    role="link"
+                    tabIndex={-1}
+                    title={`Open Album "${s.album}"`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectCloudAlbum({
+                        songUri: s.uri,
+                        fallbackTitle: s.album || s.title,
+                      });
+                    }}
+                    style={{
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textDecorationColor: 'rgba(148, 163, 184, 0.35)',
+                    }}
+                  >
+                    {s.album}
+                  </span>
+                </>
+              ) : (
+                `${!compact ? ' • ' : ''}${s.album}`
+              )
+            ) : (
+              ''
+            )}
             {(() => {
               const fmt = extractAudioFormat(s.uri);
               return fmt ? ` • ${fmt}` : '';
@@ -261,7 +333,7 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
           </div>
         </div>
       </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: compact ? 4 : 5, flexShrink: 0 }}>
         {s.duration_ms > 0 && (
           <span
             style={{
@@ -274,42 +346,11 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
               color: isLongMix ? '#fdba74' : '#8e8e99',
             }}
           >
-            {isLongMix ? `🎧 ${durMin}m` : `${durMin}:${String(durSec).padStart(2, '0')}`}
+            {isLongMix ? `${durMin}m` : `${durMin}:${String(durSec).padStart(2, '0')}`}
           </span>
         )}
-        {primaryArtist &&
-          s.source !== 'local_video' &&
-          s.source !== 'ia_video' &&
-          s.source !== 'dvd' && (
-            <button
-              data-row-aux="true"
-              onClick={() =>
-                openArtistProfile({
-                  source:
-                    s.source === 'apple_music'
-                      ? 'apple_music'
-                      : s.source === 'soundcloud'
-                      ? 'soundcloud'
-                      : 'local',
-                  idOrName: `name:${primaryArtist}`,
-                  displayName: primaryArtist,
-                })
-              }
-              title={`Open Artist Profile for ${primaryArtist}`}
-              style={{
-                padding: '5px 7px',
-                borderRadius: 8,
-                background: '#14141e',
-                border: '1px solid #282838',
-                color: '#c4b5fd',
-                fontSize: 11,
-                cursor: 'pointer',
-              }}
-            >
-              🎤
-            </button>
-          )}
-        {handleFavoriteTrack &&
+        {!compact &&
+          handleFavoriteTrack &&
           s.source !== 'local_video' &&
           s.source !== 'ia_video' &&
           s.source !== 'dvd' && (
@@ -327,53 +368,28 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
                 cursor: 'pointer',
               }}
             >
-              {isFavorited ? '❤️' : '♡'}
+              {isFavorited ? '♥' : '♡'}
             </button>
           )}
         <button
           data-row-aux="true"
-          data-context-select="true"
-          onClick={() =>
-            openLibraryContextMenu({
-              type: 'track',
-              track: s,
-              peerList,
-              isViewingLocalPlaylist: false,
-            })
-          }
-          title="Track Options (SELECT)"
-          style={{
-            padding: '5px 7px',
-            borderRadius: 8,
-            background: '#14141e',
-            border: '1px solid #282838',
-            color: '#c8c8d4',
-            fontSize: 11,
-            fontWeight: 800,
-            cursor: 'pointer',
-          }}
-        >
-          •••
-        </button>
-        <button
-          data-row-aux="true"
           data-track-select="true"
           onClick={() => handleAddTracksToPlaylist([s.uri], `"${s.title}"`, [s])}
-          title="Add single to active SIMP Hybrid Playlist"
+          title="Add track to active Imp Hybrid Playlist"
           style={{
-            padding: '5px 9px',
+            padding: compact ? '4px 8px' : '5px 9px',
             borderRadius: 8,
             background: '#0f222a',
             border: '1px solid #2aa3c4',
             color: '#67e8f9',
-            fontSize: 12,
+            fontSize: compact ? 11 : 12,
             fontWeight: 800,
             cursor: 'pointer',
           }}
         >
           +
         </button>
-        {s.source === 'soundcloud' ? (
+        {!compact && s.source === 'soundcloud' && (
           <button
             data-row-aux="true"
             onClick={() => handleStartSoundCloudTrackRadio(s)}
@@ -384,63 +400,15 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
               background: '#2c140a',
               border: '1px solid #ea580c',
               color: '#fdba74',
-              fontSize: 11,
-              fontWeight: 700,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               cursor: 'pointer',
             }}
           >
-            📻
+            <ImpIcon name="radio" size={12} color="#fdba74" />
           </button>
-        ) : s.source === 'apple_music' ? (
-          <>
-            <AppleMusicAttributionLink
-              kind="song"
-              id={s.uri}
-              size={13}
-              style={{ padding: '4px 6px' }}
-            />
-            {handleAddAppleToCloudLibrary && (
-              <button
-                data-row-aux="true"
-                onClick={() => handleAddAppleToCloudLibrary(s.uri, 'songs', s.title)}
-                title="Add song to your Apple Music Cloud Library"
-                style={{
-                  padding: '5px 7px',
-                  borderRadius: 8,
-                  background: '#251018',
-                  border: '1px solid #4c1d2e',
-                  color: '#fecdd3',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                ☁️+
-              </button>
-            )}
-            <button
-              data-row-aux="true"
-              onClick={() =>
-                selectCloudAlbum({
-                  songUri: s.uri,
-                  fallbackTitle: s.album || s.title,
-                })
-              }
-              title="Open Full Parent Album"
-              style={{
-                padding: '5px 8px',
-                borderRadius: 8,
-                background: '#181824',
-                border: '1px solid #2e2e3e',
-                color: '#fda4af',
-                fontSize: 11,
-                cursor: 'pointer',
-              }}
-            >
-              💿
-            </button>
-          </>
-        ) : null}
+        )}
       </div>
     </div>
   );

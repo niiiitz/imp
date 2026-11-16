@@ -288,6 +288,38 @@ pub fn normalize_platform_path(raw_path: &str) -> PathBuf {
     PathBuf::from(unescaped_trimmed)
 }
 
+fn path_for_prefix_compare(raw: &str) -> (PathBuf, String) {
+    let norm = normalize_platform_path(raw);
+    let raw_str = norm.to_string_lossy().to_string();
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    let cmp_path = PathBuf::from(raw_str.to_lowercase());
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let cmp_path = if raw_str.starts_with("/mnt/") {
+        PathBuf::from(raw_str.to_lowercase())
+    } else {
+        norm
+    };
+    (cmp_path, raw_str)
+}
+
+/// Returns `Some(parent_path)` if `candidate` is equal to or inside an existing parent path.
+pub fn find_covering_parent_path(candidate: &str, existing_paths: &[String]) -> Option<String> {
+    let (cand_cmp, cand_str) = path_for_prefix_compare(candidate);
+    if cand_str.is_empty() {
+        return None;
+    }
+    for existing in existing_paths {
+        let (parent_cmp, parent_str) = path_for_prefix_compare(existing);
+        if parent_str.is_empty() {
+            continue;
+        }
+        if cand_cmp == parent_cmp || cand_cmp.starts_with(&parent_cmp) {
+            return Some(parent_str);
+        }
+    }
+    None
+}
+
 /// Path to `~/.config/simp/settings.vdf` (or `<exe_dir>/data/settings.vdf` in Portable Mode).
 pub fn settings_vdf_path() -> PathBuf {
     crate::simp_config_dir().join("settings.vdf")
@@ -431,5 +463,29 @@ mod tests {
         assert_eq!(ordered.len(), 12);
         assert_eq!(ordered[2], "file:///music/track_02.mp3");
         assert_eq!(ordered[10], "file:///music/track_10.mp3");
+    }
+
+    #[test]
+    fn test_find_covering_parent_path_subsumption() {
+        let existing = vec![
+            "/path/to/Media".to_string(),
+            "/mnt/c/Users/ExampleUser/Music".to_string(),
+        ];
+        assert_eq!(
+            find_covering_parent_path("/path/to/Media", &existing),
+            Some("/path/to/Media".to_string())
+        );
+        assert_eq!(
+            find_covering_parent_path("/path/to/Media/Sample Album/", &existing),
+            Some("/path/to/Media".to_string())
+        );
+        assert_eq!(
+            find_covering_parent_path("/path/to/Media2/Sample Album", &existing),
+            None
+        );
+        assert_eq!(
+            find_covering_parent_path(r"C:\Users\ExampleUser\Music\Artist\Album", &existing),
+            Some("/mnt/c/Users/ExampleUser/Music".to_string())
+        );
     }
 }

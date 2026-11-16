@@ -63,6 +63,12 @@ export interface BrowserTarget {
 export interface PlayerViewProps {
   hidden?: boolean;
   isPlayerIdle?: boolean;
+  isDesktopScreensaver?: boolean;
+  isDeckyEmbedded?: boolean;
+  desktopMode?: boolean;
+  onToggleDesktopMode?: (next: boolean) => void;
+  desktopVizIdleSec?: number;
+  onChangeDesktopVizIdleSec?: (sec: number) => void;
   snap: SimpStateSnapshot | null;
   track: TrackMetadata | null | undefined;
   isPlaying: boolean;
@@ -131,6 +137,12 @@ function computePlayerViewportScale(isVideo = false): number {
 export const PlayerView: React.FC<PlayerViewProps> = ({
   hidden = false,
   isPlayerIdle = false,
+  isDesktopScreensaver = false,
+  isDeckyEmbedded = false,
+  desktopMode = false,
+  onToggleDesktopMode,
+  desktopVizIdleSec = 30,
+  onChangeDesktopVizIdleSec,
   snap,
   track,
   isPlaying,
@@ -266,9 +278,6 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   // Unified Video Modality State (`ia_video`, `local_video`, `dvd`)
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoTheatreExpanded, setVideoTheatreExpanded] = useState<boolean>(false);
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(() =>
-    typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false
-  );
   const [hudVisible, setHudVisible] = useState<boolean>(true);
   const hudTimerRef = useRef<number | null>(null);
   const lastTimeReportMsRef = useRef<number>(0);
@@ -397,13 +406,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const onToggleActions = () => {
       setPlayerActionsOpen((prev) => !prev);
     };
+    const onToggleEqualizer = () => {
+      setEqualizerOpen((prev) => !prev);
+    };
     const onToggleFullscreen = () => {
       togglePlayerFullscreen();
     };
     const onFullscreenChange = () => {
-      const fs = Boolean(document.fullscreenElement);
-      setIsFullscreen(fs);
-      if (!fs) {
+      if (!document.fullscreenElement) {
         setVideoTheatreExpanded(false);
       }
     };
@@ -414,11 +424,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       }
     };
     window.addEventListener('simp-player-actions-toggle', onToggleActions);
+    window.addEventListener('simp-equalizer-toggle', onToggleEqualizer);
     window.addEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
     window.addEventListener('simp-select-category-focus', onSelectCategoryFocus);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       window.removeEventListener('simp-player-actions-toggle', onToggleActions);
+      window.removeEventListener('simp-equalizer-toggle', onToggleEqualizer);
       window.removeEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
       window.removeEventListener('simp-select-category-focus', onSelectCategoryFocus);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -1513,8 +1525,12 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     return found >= 0 ? found : 0;
   }, [activeRightColItems]);
 
+  const effectiveVizMode: VisualizerMode =
+    isDesktopScreensaver && vizMode === 'off' ? 'cycle' : vizMode;
+
   const isForegroundFaded = Boolean(
-    isPlayerIdle && idleFadeEnabled && !playerActionsOpen && !videoTheatreExpanded
+    isDesktopScreensaver ||
+      (isPlayerIdle && idleFadeEnabled && !playerActionsOpen && !videoTheatreExpanded)
   );
 
   const effectiveScale = !videoTheatreExpanded && playerScale > 1.02 ? playerScale : 1;
@@ -1544,7 +1560,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       {!isVideoTrack && !hidden && (
         <>
           <PlayerBackgroundVisualizer
-            mode={vizMode}
+            mode={effectiveVizMode}
             enabledScenes={enabledVizScenes}
             preferredScene={
               (trackPropsState.preferred_viz_mode as VisualizerEngine | null | undefined) || null
@@ -1607,7 +1623,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             }
             hidden={hidden}
           />
-          {vizMode !== 'off' && (
+          {effectiveVizMode !== 'off' && (
             <VisualizerOverlayHud
               activeEngine={activeVizEngine}
               track={track || null}
@@ -1638,13 +1654,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
               suppressComments={Boolean(trackPropsState.suppress_comments)}
               suppressFactoids={!factoidsEnabled || Boolean(trackPropsState.suppress_factoids)}
               isForegroundFaded={isForegroundFaded}
-              idleOpacityPct={idleOpacityPct}
+              idleOpacityPct={isDesktopScreensaver ? 0 : idleOpacityPct}
               oskOrModalOpen={Boolean(playerActionsOpen || vizDrawerOpen)}
             />
           )}
         </>
       )}
 
+      <div style={{ display: isDesktopScreensaver && !isVideoTrack ? 'none' : 'contents' }}>
       {/* Top-Right Up Next Readout Strip — Right-aligned & anchored just beneath the top Nav Bar */}
       <PlayerUpNextStrip
         hasUpNext={hasUpNext}
@@ -1724,6 +1741,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         scrubBottomPx={scrubBottomPx}
         playerTheme={playerTheme}
       />
+      </div>
       </main>
 
       {/* Unified Two-Column Controller-First `SELECT` Track & Queue Actions Overlay Menu */}
@@ -1755,8 +1773,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         currentQueueIdx={currentQueueIdx}
         queueModalItems={queueModalItems}
         setRightColMode={setRightColMode}
-        togglePlayerFullscreen={togglePlayerFullscreen}
-        isFullscreen={isFullscreen}
+        isDeckyEmbedded={isDeckyEmbedded}
+        desktopMode={desktopMode}
+        onToggleDesktopMode={onToggleDesktopMode}
+        desktopVizIdleSec={desktopVizIdleSec}
+        onChangeDesktopVizIdleSec={onChangeDesktopVizIdleSec}
         setVizDrawerOpen={setVizDrawerOpen}
         vizMode={vizMode}
         enabledVizScenes={enabledVizScenes}
