@@ -289,219 +289,481 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         zIndex: 40,
       }}
     >
-      {/* Row 1 — SELECT + Transport Controls + START */}
+      {/* Row 1 — SELECT (left column, aligned over VIZ) + Transport Controls (aligned with art/scrub bar) + Volume + Brightness + START (right-aligned) */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
+          gap: 10,
           height: 24,
           minWidth: 0,
+          position: 'relative',
+          zIndex: volumePopoverOpen || brightnessPopoverOpen ? 65 : 46,
         }}
       >
-        <button
-          type="button"
-          data-row-aux="true"
-          onClick={openSelectOptions}
-          title="Track Options, Visualizer & Interface Settings (SELECT)"
+        <div
           style={{
-            height: 24,
-            padding: '0 8px',
-            borderRadius: 6,
-            background: '#10121a',
-            border: '1px solid #222634',
-            color: '#d4d4dc',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 5,
-            cursor: 'pointer',
+            width: 96,
             flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-start',
           }}
         >
-          <ImpIcon name="gamepad-select" size={12} color="#9ca3af" />
-          <span
-            className="simp-gp-badge"
-            style={{
-              color: '#9ca3af',
-              fontSize: 9,
-              fontFamily: 'monospace',
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              lineHeight: 1,
-            }}
-          >
-            SELECT
-          </span>
-        </button>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
           <button
+            type="button"
             data-row-aux="true"
-            onClick={() => defaultSimpClient.previous()}
-            title="Previous Track"
+            onClick={openSelectOptions}
+            title="Track Options, Visualizer & Interface Settings (SELECT)"
             style={{
               height: 24,
-              padding: '0 9px',
+              padding: '0 8px',
               borderRadius: 6,
               background: '#10121a',
               border: '1px solid #222634',
               color: '#d4d4dc',
-              fontSize: 11,
-              cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-            }}
-          >
-            ⏮
-          </button>
-          <button
-            data-row-aux="true"
-            onClick={() => defaultSimpClient.togglePlayPause()}
-            title={snap?.is_playing ? 'Pause' : 'Play'}
-            style={{
-              height: 24,
-              padding: '0 12px',
-              borderRadius: 6,
-              background: snap?.is_playing ? theme.accentMuted : '#141622',
-              border: snap?.is_playing ? `1px solid ${theme.accent}` : '1px solid #2a2e3e',
-              color: snap?.is_playing ? theme.accent : '#f1f5f9',
-              fontSize: 11,
-              fontWeight: 800,
+              gap: 5,
               cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
-            {snap?.is_playing ? '⏸' : '▶'}
-          </button>
-          <button
-            data-row-aux="true"
-            onClick={() => defaultSimpClient.next()}
-            title="Next Track"
-            style={{
-              height: 24,
-              padding: '0 9px',
-              borderRadius: 6,
-              background: '#10121a',
-              border: '1px solid #222634',
-              color: '#d4d4dc',
-              fontSize: 11,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            ⏭
-          </button>
-          <button
-            data-row-aux="true"
-            onClick={() => {
-              const cur = snap?.repeat_mode || 'off';
-              const next = cur === 'off' ? 'queue' : cur === 'queue' ? 'track' : 'off';
-              defaultSimpClient.setRepeat(next);
-            }}
-            title={
-              snap?.repeat_mode === 'track'
-                ? 'Repeat: 1 Track'
-                : snap?.repeat_mode === 'queue'
-                ? 'Repeat: Queue (∞)'
-                : 'Repeat: Off'
-            }
-            style={{
-              position: 'relative',
-              height: 24,
-              padding: '0 9px',
-              borderRadius: 6,
-              background:
-                snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#161822' : '#10121a',
-              border:
-                snap?.repeat_mode && snap.repeat_mode !== 'off'
-                  ? '1px solid #383c52'
-                  : '1px solid #222634',
-              color:
-                snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#e2e8f0' : '#8e8e99',
-              fontSize: 11,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            🔁
-            {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
-              <span
-                style={{
-                  position: 'absolute',
-                  right: 2,
-                  bottom: 1,
-                  minWidth: 10,
-                  height: 10,
-                  padding: '0 2px',
-                  borderRadius: 999,
-                  background: '#0e1018',
-                  border: '1px solid #383c52',
-                  color: '#e2e8f0',
-                  fontSize: 7.5,
-                  fontFamily: 'monospace',
-                  fontWeight: 900,
-                  lineHeight: '8px',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {snap.repeat_mode === 'track' ? '1' : '∞'}
-              </span>
-            )}
+            <ImpIcon name="gamepad-select" size={12} color="#9ca3af" />
+            <span
+              className="simp-gp-badge"
+              style={{
+                color: '#9ca3af',
+                fontSize: 9,
+                fontFamily: 'monospace',
+                fontWeight: 700,
+                letterSpacing: 0.3,
+                lineHeight: 1,
+              }}
+            >
+              SELECT
+            </span>
           </button>
         </div>
 
-        <button
-          type="button"
-          data-row-aux="true"
-          onClick={toggleStartSettings}
-          title="Settings Menu (START)"
+        <div
           style={{
-            height: 24,
-            padding: '0 8px',
-            borderRadius: 6,
-            background: sourceModalOpen || powerModalOpen ? '#161822' : '#10121a',
-            border:
-              sourceModalOpen || powerModalOpen
-                ? '1px solid #383c52'
-                : '1px solid #222634',
-            color: sourceModalOpen || powerModalOpen ? '#e2e8f0' : '#d4d4dc',
-            fontSize: 12,
-            cursor: 'pointer',
-            display: 'inline-flex',
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
             alignItems: 'center',
-            gap: 5,
-            flexShrink: 0,
+            justifyContent: 'space-between',
+            gap: 8,
           }}
         >
-          <span
-            className="simp-gp-badge"
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              data-row-aux="true"
+              onClick={() => defaultSimpClient.previous()}
+              title="Previous Track"
+              style={{
+                height: 24,
+                padding: '0 9px',
+                borderRadius: 6,
+                background: '#10121a',
+                border: '1px solid #222634',
+                color: '#d4d4dc',
+                fontSize: 11,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ⏮
+            </button>
+            <button
+              data-row-aux="true"
+              onClick={() => defaultSimpClient.togglePlayPause()}
+              title={snap?.is_playing ? 'Pause' : 'Play'}
+              style={{
+                height: 24,
+                padding: '0 12px',
+                borderRadius: 6,
+                background: snap?.is_playing ? theme.accentMuted : '#141622',
+                border: snap?.is_playing ? `1px solid ${theme.accent}` : '1px solid #2a2e3e',
+                color: snap?.is_playing ? theme.accent : '#f1f5f9',
+                fontSize: 11,
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {snap?.is_playing ? '⏸' : '▶'}
+            </button>
+            <button
+              data-row-aux="true"
+              onClick={() => defaultSimpClient.next()}
+              title="Next Track"
+              style={{
+                height: 24,
+                padding: '0 9px',
+                borderRadius: 6,
+                background: '#10121a',
+                border: '1px solid #222634',
+                color: '#d4d4dc',
+                fontSize: 11,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ⏭
+            </button>
+            <button
+              data-row-aux="true"
+              onClick={() => {
+                const cur = snap?.repeat_mode || 'off';
+                const next = cur === 'off' ? 'queue' : cur === 'queue' ? 'track' : 'off';
+                defaultSimpClient.setRepeat(next);
+              }}
+              title={
+                snap?.repeat_mode === 'track'
+                  ? 'Repeat: 1 Track'
+                  : snap?.repeat_mode === 'queue'
+                  ? 'Repeat: Queue (∞)'
+                  : 'Repeat: Off'
+              }
+              style={{
+                position: 'relative',
+                height: 24,
+                padding: '0 9px',
+                borderRadius: 6,
+                background:
+                  snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#161822' : '#10121a',
+                border:
+                  snap?.repeat_mode && snap.repeat_mode !== 'off'
+                    ? '1px solid #383c52'
+                    : '1px solid #222634',
+                color:
+                  snap?.repeat_mode && snap.repeat_mode !== 'off' ? '#e2e8f0' : '#8e8e99',
+                fontSize: 11,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              🔁
+              {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    right: 2,
+                    bottom: 1,
+                    minWidth: 10,
+                    height: 10,
+                    padding: '0 2px',
+                    borderRadius: 999,
+                    background: '#0e1018',
+                    border: '1px solid #383c52',
+                    color: '#e2e8f0',
+                    fontSize: 7.5,
+                    fontFamily: 'monospace',
+                    fontWeight: 900,
+                    lineHeight: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {snap.repeat_mode === 'track' ? '1' : '∞'}
+                </span>
+              )}
+            </button>
+          </div>
+
+          <div
             style={{
-              color: '#9ca3af',
-              fontSize: 9,
-              fontFamily: 'monospace',
-              fontWeight: 700,
-              letterSpacing: 0.3,
-              lineHeight: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              marginLeft: 'auto',
+              flexShrink: 0,
             }}
           >
-            START
-          </span>
-          <span style={{ lineHeight: 1 }}>☰</span>
-        </button>
+            <div
+              onWheel={(e) => {
+                e.preventDefault();
+                const delta = e.deltaY < 0 ? 0.05 : -0.05;
+                applyVolume(currentVolume + delta);
+              }}
+              style={{
+                height: 24,
+                borderRadius: 6,
+                background: '#0a0a0e',
+                border: volumePopoverOpen
+                  ? '1px solid #383c52'
+                  : isPlaying
+                  ? '1px solid #2e3242'
+                  : '1px solid #22222c',
+                display: 'flex',
+                alignItems: 'stretch',
+                position: 'relative',
+                fontFamily: 'monospace',
+                overflow: 'visible',
+              }}
+            >
+              <button
+                type="button"
+                data-row-aux="true"
+                onClick={() => defaultSimpClient.togglePlayPause()}
+                title={
+                  isPlaying
+                    ? 'Audio Active — Click to Pause (Silence)'
+                    : 'Paused (Silenced) — Click to Resume'
+                }
+                style={{
+                  padding: '0 7px',
+                  border: 'none',
+                  borderRight: '1px solid #1e1e28',
+                  borderTopLeftRadius: 5,
+                  borderBottomLeftRadius: 5,
+                  background: isPlaying ? '#141622' : '#10121a',
+                  color: isPlaying ? '#e2e8f0' : '#9ca3af',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+              >
+                <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
+              </button>
+
+              <button
+                type="button"
+                data-row-aux="true"
+                onClick={() => {
+                  setBrightnessPopoverOpen(false);
+                  setVolumePopoverOpen((v) => !v);
+                }}
+                title="Open vertical volume slider"
+                style={{
+                  padding: '0 7px',
+                  border: 'none',
+                  borderTopRightRadius: 5,
+                  borderBottomRightRadius: 5,
+                  background: volumePopoverOpen ? '#161822' : 'transparent',
+                  color: isPlaying ? '#c8c8d2' : '#8e8e99',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 3,
+                }}
+              >
+                <span>{volPct}%</span>
+                <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
+              </button>
+
+              {volumePopoverOpen && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: 28,
+                    right: 0,
+                    width: 74,
+                    padding: '14px 10px',
+                    borderRadius: 16,
+                    background: '#0c0c12',
+                    border: '2px solid #383c52',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 10,
+                    zIndex: 65,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 800,
+                      color: isPlaying ? '#e2e8f0' : '#9ca3af',
+                    }}
+                  >
+                    {volPct}%
+                  </span>
+                  <div
+                    style={{
+                      height: 128,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <input
+                      type="range"
+                      min={5}
+                      max={100}
+                      step={1}
+                      value={volPct}
+                      onChange={(e) => applyVolume(Number(e.target.value) / 100)}
+                      style={{
+                        width: 120,
+                        accentColor: '#94a3b8',
+                        transform: 'rotate(-90deg)',
+                        cursor: 'pointer',
+                      }}
+                    />
+                  </div>
+                  <button
+                    onClick={() => defaultSimpClient.togglePlayPause()}
+                    style={{
+                      width: '100%',
+                      padding: '4px 0',
+                      borderRadius: 8,
+                      background: '#161822',
+                      border: isPlaying ? '1px solid #383c52' : '1px solid #2a2a38',
+                      color: isPlaying ? '#e2e8f0' : '#d4d4dc',
+                      fontSize: 10,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {isPlaying ? '⏸ Pause' : '▶ Play'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                type="button"
+                data-row-aux="true"
+                onClick={() => {
+                  setVolumePopoverOpen(false);
+                  setBrightnessPopoverOpen((v) => !v);
+                }}
+                title="Adjust OLED screen brightness"
+                style={{
+                  height: 24,
+                  padding: '0 8px',
+                  borderRadius: 6,
+                  background: brightnessPopoverOpen ? '#161822' : '#0a0a0e',
+                  border: brightnessPopoverOpen ? '1px solid #383c52' : '1px solid #22222c',
+                  color: brightnessPopoverOpen ? '#e2e8f0' : '#c8c8d2',
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
+                <span>{brightnessPct}%</span>
+                <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
+              </button>
+
+              {brightnessPopoverOpen && (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: 28,
+                    right: 0,
+                    width: 68,
+                    padding: '14px 10px',
+                    borderRadius: 16,
+                    background: '#0c0c12',
+                    border: '2px solid #383c52',
+                    boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 10,
+                    zIndex: 65,
+                  }}
+                >
+                  <span style={{ fontSize: 11, fontWeight: 800, color: '#e2e8f0' }}>
+                    {brightnessPct}%
+                  </span>
+                  <div
+                    style={{
+                      height: 128,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <input
+                      type="range"
+                      min={25}
+                      max={100}
+                      step={1}
+                      value={brightnessPct}
+                      onChange={(e) => setBrightnessPct(Number(e.target.value))}
+                      style={{
+                        width: 120,
+                        accentColor: '#94a3b8',
+                        transform: 'rotate(-90deg)',
+                        cursor: 'pointer',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              data-row-aux="true"
+              onClick={toggleStartSettings}
+              title="Settings Menu (START)"
+              style={{
+                height: 24,
+                padding: '0 8px',
+                borderRadius: 6,
+                background: sourceModalOpen || powerModalOpen ? '#161822' : '#10121a',
+                border:
+                  sourceModalOpen || powerModalOpen
+                    ? '1px solid #383c52'
+                    : '1px solid #222634',
+                color: sourceModalOpen || powerModalOpen ? '#e2e8f0' : '#d4d4dc',
+                fontSize: 12,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                flexShrink: 0,
+              }}
+            >
+              <span
+                className="simp-gp-badge"
+                style={{
+                  color: '#9ca3af',
+                  fontSize: 9,
+                  fontFamily: 'monospace',
+                  fontWeight: 700,
+                  letterSpacing: 0.3,
+                  lineHeight: 1,
+                }}
+              >
+                START
+              </span>
+              <span style={{ lineHeight: 1 }}>☰</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Rows 2 & 3 — 16:9 Mini-Visualizer (left spanning rows 2–3) + [Art/Title/Brightness] & [Scrub Bar/EQ/Volume] */}
+      {/* Rows 2 & 3 — 16:9 Mini-Visualizer (left spanning rows 2–3) + [Art/Title] & [Scrub Bar/EQ] */}
       <div
         style={{
           display: 'flex',
@@ -590,159 +852,66 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             minWidth: 0,
           }}
         >
-          {/* Row 2 — Art + Title/Metadata + Brightness */}
+          {/* Row 2 — Art + Title/Metadata */}
           <div
             style={{
               height: 24,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
+              gap: 7,
               minWidth: 0,
-              position: 'relative',
-              zIndex: brightnessPopoverOpen ? 60 : 46,
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 7,
-                flex: 1,
-                minWidth: 0,
-              }}
-            >
-              {dockArtworkThumb}
-              {track ? (
-                <>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 800,
-                      color: '#f1f5f9',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: '0 1 auto',
-                      minWidth: 0,
-                    }}
-                  >
-                    {track.title}
-                  </span>
-                  {(track.artists?.length || track.album) && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: '#94a3b8',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        flex: '1 1 0',
-                        minWidth: 0,
-                      }}
-                    >
-                      — {track.artists.join(', ')}
-                      {track.album ? ` • ${track.album}` : ''}
-                    </span>
-                  )}
-                </>
-              ) : (
+            {dockArtworkThumb}
+            {track ? (
+              <>
                 <span
                   style={{
-                    color: '#64748b',
-                    fontSize: 11.5,
+                    fontSize: 12,
+                    fontWeight: 800,
+                    color: '#f1f5f9',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
+                    flex: '0 1 auto',
+                    minWidth: 0,
                   }}
                 >
-                  No track playing — select any album, playlist, or song below
+                  {track.title}
                 </span>
-              )}
-            </div>
-
-            <div style={{ position: 'relative', flexShrink: 0 }}>
-              <button
-                type="button"
-                data-row-aux="true"
-                onClick={() => {
-                  setVolumePopoverOpen(false);
-                  setBrightnessPopoverOpen((v) => !v);
-                }}
-                title="Adjust OLED screen brightness"
-                style={{
-                  height: 24,
-                  padding: '0 8px',
-                  borderRadius: 6,
-                  background: brightnessPopoverOpen ? '#161822' : '#0a0a0e',
-                  border: brightnessPopoverOpen ? '1px solid #383c52' : '1px solid #22222c',
-                  color: brightnessPopoverOpen ? '#e2e8f0' : '#c8c8d2',
-                  fontSize: 11,
-                  fontFamily: 'monospace',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}
-              >
-                <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
-                <span>{brightnessPct}%</span>
-                <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
-              </button>
-
-              {brightnessPopoverOpen && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  style={{
-                    position: 'absolute',
-                    top: 28,
-                    right: 0,
-                    width: 68,
-                    padding: '14px 10px',
-                    borderRadius: 16,
-                    background: '#0c0c12',
-                    border: '2px solid #383c52',
-                    boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 10,
-                    zIndex: 65,
-                  }}
-                >
-                  <span style={{ fontSize: 11, fontWeight: 800, color: '#e2e8f0' }}>
-                    {brightnessPct}%
-                  </span>
-                  <div
+                {(track.artists?.length || track.album) && (
+                  <span
                     style={{
-                      height: 128,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
+                      fontSize: 11,
+                      color: '#94a3b8',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      flex: '1 1 0',
+                      minWidth: 0,
                     }}
                   >
-                    <input
-                      type="range"
-                      min={25}
-                      max={100}
-                      step={1}
-                      value={brightnessPct}
-                      onChange={(e) => setBrightnessPct(Number(e.target.value))}
-                      style={{
-                        width: 120,
-                        accentColor: '#94a3b8',
-                        transform: 'rotate(-90deg)',
-                        cursor: 'pointer',
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
+                    — {track.artists.join(', ')}
+                    {track.album ? ` • ${track.album}` : ''}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span
+                style={{
+                  color: '#64748b',
+                  fontSize: 11.5,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                No track playing — select any album, playlist, or song below
+              </span>
+            )}
           </div>
 
-          {/* Row 3 — Full-width Scrub Bar + EQ + Volume */}
+          {/* Row 3 — Full-width Scrub Bar + EQ */}
           <div
             style={{
               height: 24,
@@ -750,8 +919,6 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               alignItems: 'center',
               gap: 8,
               minWidth: 0,
-              position: 'relative',
-              zIndex: volumePopoverOpen ? 60 : 45,
             }}
           >
             <div style={{ flex: '1 1 0%', minWidth: 120, display: 'flex', alignItems: 'center' }}>
@@ -783,181 +950,30 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               )}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
-              <button
-                type="button"
-                data-row-aux="true"
-                onClick={() => window.dispatchEvent(new CustomEvent('simp-equalizer-toggle'))}
-                title="10-Band Audio Equalizer & Vocal Stage"
-                style={{
-                  height: 24,
-                  padding: '0 8px',
-                  borderRadius: 6,
-                  background: '#0a0a0e',
-                  border: '1px solid #22222c',
-                  color: '#c8c8d2',
-                  fontSize: 10.5,
-                  fontWeight: 700,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  cursor: 'pointer',
-                }}
-              >
-                <ImpIcon name="sliders" size={11} color="#9ca3af" />
-                <span>EQ</span>
-              </button>
-
-              <div
-                onWheel={(e) => {
-                  e.preventDefault();
-                  const delta = e.deltaY < 0 ? 0.05 : -0.05;
-                  applyVolume(currentVolume + delta);
-                }}
-                style={{
-                  height: 24,
-                  borderRadius: 6,
-                  background: '#0a0a0e',
-                  border: volumePopoverOpen
-                    ? '1px solid #383c52'
-                    : isPlaying
-                    ? '1px solid #2e3242'
-                    : '1px solid #22222c',
-                  display: 'flex',
-                  alignItems: 'stretch',
-                  position: 'relative',
-                  fontFamily: 'monospace',
-                  overflow: 'visible',
-                }}
-              >
-                <button
-                  type="button"
-                  data-row-aux="true"
-                  onClick={() => defaultSimpClient.togglePlayPause()}
-                  title={
-                    isPlaying
-                      ? 'Audio Active — Click to Pause (Silence)'
-                      : 'Paused (Silenced) — Click to Resume'
-                  }
-                  style={{
-                    padding: '0 7px',
-                    border: 'none',
-                    borderRight: '1px solid #1e1e28',
-                    borderTopLeftRadius: 5,
-                    borderBottomLeftRadius: 5,
-                    background: isPlaying ? '#141622' : '#10121a',
-                    color: isPlaying ? '#e2e8f0' : '#9ca3af',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                  }}
-                >
-                  <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  data-row-aux="true"
-                  onClick={() => {
-                    setBrightnessPopoverOpen(false);
-                    setVolumePopoverOpen((v) => !v);
-                  }}
-                  title="Open vertical volume slider"
-                  style={{
-                    padding: '0 7px',
-                    border: 'none',
-                    borderTopRightRadius: 5,
-                    borderBottomRightRadius: 5,
-                    background: volumePopoverOpen ? '#161822' : 'transparent',
-                    color: isPlaying ? '#c8c8d2' : '#8e8e99',
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                  }}
-                >
-                  <span>{volPct}%</span>
-                  <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
-                </button>
-
-                {volumePopoverOpen && (
-                  <div
-                    onClick={(e) => e.stopPropagation()}
-                    style={{
-                      position: 'absolute',
-                      top: 28,
-                      right: 0,
-                      width: 74,
-                      padding: '14px 10px',
-                      borderRadius: 16,
-                      background: '#0c0c12',
-                      border: '2px solid #383c52',
-                      boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: 10,
-                      zIndex: 65,
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 800,
-                        color: isPlaying ? '#e2e8f0' : '#9ca3af',
-                      }}
-                    >
-                      {volPct}%
-                    </span>
-                    <div
-                      style={{
-                        height: 128,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <input
-                        type="range"
-                        min={5}
-                        max={100}
-                        step={1}
-                        value={volPct}
-                        onChange={(e) => applyVolume(Number(e.target.value) / 100)}
-                        style={{
-                          width: 120,
-                          accentColor: '#94a3b8',
-                          transform: 'rotate(-90deg)',
-                          cursor: 'pointer',
-                        }}
-                      />
-                    </div>
-                    <button
-                      onClick={() => defaultSimpClient.togglePlayPause()}
-                      style={{
-                        width: '100%',
-                        padding: '4px 0',
-                        borderRadius: 8,
-                        background: '#161822',
-                        border: isPlaying ? '1px solid #383c52' : '1px solid #2a2a38',
-                        color: isPlaying ? '#e2e8f0' : '#d4d4dc',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {isPlaying ? '⏸ Pause' : '▶ Play'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            <button
+              type="button"
+              data-row-aux="true"
+              onClick={() => window.dispatchEvent(new CustomEvent('simp-equalizer-toggle'))}
+              title="10-Band Audio Equalizer & Vocal Stage"
+              style={{
+                height: 24,
+                padding: '0 8px',
+                borderRadius: 6,
+                background: '#0a0a0e',
+                border: '1px solid #22222c',
+                color: '#c8c8d2',
+                fontSize: 10.5,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <ImpIcon name="sliders" size={11} color="#9ca3af" />
+              <span>EQ</span>
+            </button>
           </div>
         </div>
       </div>
