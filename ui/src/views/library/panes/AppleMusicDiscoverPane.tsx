@@ -18,7 +18,7 @@ import {
   tileGridStyle,
 } from "../libraryHelpers";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
-import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import {
   cacheAppleRecentLibraryShelf,
   inferAppleShelfItemKind,
@@ -33,6 +33,7 @@ export interface AppleMusicDiscoverPaneProps {
   appleRecentlyPlayedTracks: TrackMetadata[];
   appleSubTab: "pinned" | "for_you" | "cloud_playlists" | "new" | "radio";
   artistRadioShows: AppleCloudPlaylistSummary[];
+  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   cloudAlpha: AlphaBucket;
   cloudLoading: boolean;
@@ -53,6 +54,7 @@ export interface AppleMusicDiscoverPaneProps {
   newFeedRecentReleases: AppleCloudAlbumSummary[];
   newFeedSongs: TrackMetadata[];
   newFilter: "all" | "recent_releases" | "playlists" | "albums" | "songs";
+  onOpenFilters?: () => void;
   pagedCloudPlaylists: AppleCloudPlaylistSummary[];
   personalRadioStations: AppleRadioStationSummary[];
   radioStations: AppleRadioStationSummary[];
@@ -62,16 +64,12 @@ export interface AppleMusicDiscoverPaneProps {
   renderSingleSongRow: any;
   renderStationCard: any;
   resetCloudPlaylistsLimit: () => void;
-  setAppleRadioFilter: any;
-  setAppleRadioGenre: any;
   setAppleRecentlyPlayedTracks: any;
   setArtistRadioShows: any;
-  setCloudAlpha: any;
   setCloudLoading: any;
   setCloudPlaylists: React.Dispatch<React.SetStateAction<AppleCloudPlaylistSummary[]>>;
   setClubMixes: any;
   setForYouAlbums: any;
-  setForYouFilter: any;
   setForYouNewReleases: any;
   setForYouPlaylists: any;
   setForYouShelves: any;
@@ -81,7 +79,6 @@ export interface AppleMusicDiscoverPaneProps {
   setNewFeedPlaylists: any;
   setNewFeedRecentReleases: any;
   setNewFeedSongs: any;
-  setNewFilter: any;
   setPersonalRadioStations: any;
   setRadioStations: any;
   setRecentlyAddedCloudAlbums: any;
@@ -94,7 +91,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   appleRecentlyPlayedTracks,
   appleSubTab,
   artistRadioShows,
-  browserSourceFilter,
+  browseHubTarget,
   cloudAlpha,
   cloudLoading,
   cloudPlaylists,
@@ -114,6 +111,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   newFeedRecentReleases,
   newFeedSongs,
   newFilter,
+  onOpenFilters,
   pagedCloudPlaylists,
   personalRadioStations,
   radioStations,
@@ -123,16 +121,12 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   renderSingleSongRow,
   renderStationCard,
   resetCloudPlaylistsLimit,
-  setAppleRadioFilter,
-  setAppleRadioGenre,
   setAppleRecentlyPlayedTracks,
   setArtistRadioShows,
-  setCloudAlpha,
   setCloudLoading,
   setCloudPlaylists,
   setClubMixes,
   setForYouAlbums,
-  setForYouFilter,
   setForYouNewReleases,
   setForYouPlaylists,
   setForYouShelves,
@@ -142,7 +136,6 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   setNewFeedPlaylists,
   setNewFeedRecentReleases,
   setNewFeedSongs,
-  setNewFilter,
   setPersonalRadioStations,
   setRadioStations,
   setRecentlyAddedCloudAlbums,
@@ -153,8 +146,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     3. ☁️ APPLE LIBRARY PLAYLISTS HUB (Paginated 50/page + A-Z Jump Pills)
                    --------------------------------------------------------- */}
-                {browserSourceFilter !== 'soundcloud' &&
-                  browserSourceFilter !== 'internet_archive' &&
+                {browseHubTarget === 'apple_discover' &&
                   appleSubTab === 'cloud_playlists' &&
                   snap?.apple_authenticated && (
                   <>
@@ -169,8 +161,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                         gap: 8,
                       }}
                     >
-                      {/* A-Z Alphabetical Quick Filter Pills */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span
                           style={{
                             fontSize: 14,
@@ -183,46 +174,20 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                           }}
                         >
                           <AppleMusicLogo size={14} />
-                          <span>Apple Playlists</span>
+                          <span>Apple Playlists ({cloudPlaylists.length})</span>
                         </span>
-                        {(
-                          [
-                            { id: 'all', label: `All (${cloudPlaylists.length})` },
-                            { id: 'a_f', label: 'A–F' },
-                            { id: 'g_l', label: 'G–L' },
-                            { id: 'm_r', label: 'M–R' },
-                            { id: 's_z', label: 'S–Z' },
-                            { id: 'num', label: '#' },
-                          ] as const
-                        ).map((b) => {
-                          const active = cloudAlpha === b.id;
-                          return (
-                            <button
-                              key={b.id}
-                              data-right-filter-pill="true"
-                              onClick={() => {
-                                setCloudAlpha(b.id);
-                                resetCloudPlaylistsLimit();
-                              }}
-                              style={{
-                                padding: '4px 9px',
-                                borderRadius: 6,
-                                background: active ? '#28111b' : '#101018',
-                                border: active ? '1px solid #fa243c' : '1px solid #222230',
-                                color: active ? '#fecdd3' : '#9ca3af',
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {b.label}
-                            </button>
-                          );
-                        })}
                       </div>
 
-                      {/* Visible Count + Reload */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {/* Filters + Visible Count + Reload */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <FilterTriggerButton
+                          summary={cloudAlpha === 'all' ? 'A–Z: All' : cloudAlpha.replace('_', '–').toUpperCase()}
+                          active={cloudAlpha !== 'all'}
+                          accentColor="#fa243c"
+                          activeBg="#28111b"
+                          activeText="#fecdd3"
+                          onClick={onOpenFilters}
+                        />
                         {filteredCloudPlaylists.length > 0 && (
                           <span
                             style={{
@@ -293,8 +258,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     4. ✨ FOR YOU HUB (Personal Radio, New Releases, Recently Played, Mixes & Shelves)
                    --------------------------------------------------------- */}
-                {browserSourceFilter !== 'soundcloud' &&
-                  browserSourceFilter !== 'internet_archive' &&
+                {browseHubTarget === 'apple_discover' &&
                   appleSubTab === 'for_you' &&
                   snap?.apple_authenticated && (
                   <>
@@ -353,127 +317,61 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                               >
                                 ✨ For You
                               </span>
-                              {(
-                                [
-                                  { id: 'all' as const, label: 'All' },
-                                  ...(personalRadioStations.length > 0
-                                    ? [
-                                        {
-                                          id: 'stations' as const,
-                                          label: `📻 Personal Radio (${personalRadioStations.length})`,
-                                        },
-                                      ]
-                                    : []),
-                                  ...(effectiveNewReleases.length > 0
-                                    ? [
-                                        {
-                                          id: 'new_releases' as const,
-                                          label: `🆕 New Releases (${effectiveNewReleases.length})`,
-                                        },
-                                      ]
-                                    : []),
-                                  ...(totalRecentCount > 0
-                                    ? [
-                                        {
-                                          id: 'recently_played' as const,
-                                          label: `🕒 Recently Played (${totalRecentCount})`,
-                                        },
-                                      ]
-                                    : []),
-                                  {
-                                    id: 'mixes' as const,
-                                    label: `✨ Mixes & Recommendations (${
-                                      forYouPlaylists.length + forYouAlbums.length
-                                    })`,
-                                  },
-                                  ...(otherShelves.some((s) => s.is_social)
-                                    ? [
-                                        {
-                                          id: 'social' as const,
-                                          label: `👥 Friends Listening (${
-                                            otherShelves.filter((s) => s.is_social).length
-                                          })`,
-                                        },
-                                      ]
-                                    : []),
-                                  ...(recentlyAddedCloudAlbums.length > 0
-                                    ? [
-                                        {
-                                          id: 'recent_library' as const,
-                                          label: `☁️ Recently Added (${recentlyAddedCloudAlbums.length})`,
-                                        },
-                                      ]
-                                    : []),
-                                ] as const
-                              ).map((f) => {
-                                const active = forYouFilter === f.id;
-                                return (
-                                  <button
-                                    key={f.id}
-                                    data-right-filter-pill="true"
-                                    onClick={() => setForYouFilter(f.id)}
-                                    style={{
-                                      padding: '4px 10px',
-                                      borderRadius: 6,
-                                      background: active ? '#28111b' : '#101018',
-                                      border: active
-                                        ? '1px solid #fa243c'
-                                        : '1px solid #222230',
-                                      color: active ? '#fecdd3' : '#9ca3af',
-                                      fontSize: 11,
-                                      fontWeight: 800,
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {f.label}
-                                  </button>
-                                );
-                              })}
                             </div>
-                            <button
-                              data-right-filter-pill="true"
-                              onClick={() => {
-                                setCloudLoading(true);
-                                Promise.all([
-                                  fetchAppleRadioAndForYou()
-                                    .then((res) => {
-                                      setRadioStations(res.stations);
-                                      setPersonalRadioStations?.(res.personal_stations ?? []);
-                                      setLiveRadioStations?.(res.live_stations ?? []);
-                                      setArtistRadioShows?.(res.artist_shows ?? []);
-                                      setClubMixes?.(res.club_mixes ?? []);
-                                      setGenreRadioStations?.(res.genre_stations ?? []);
-                                      setForYouNewReleases?.(res.new_releases ?? []);
-                                      setForYouPlaylists(res.playlists);
-                                      setForYouAlbums(res.albums);
-                                      setForYouShelves?.(res.shelves ?? []);
-                                      setAppleRecentlyPlayedTracks?.(res.recently_played ?? []);
-                                    })
-                                    .catch(() => {}),
-                                  fetchAppleLibraryRecentlyAdded()
-                                    .then((albs) => {
-                                      if (Array.isArray(albs)) {
-                                        setRecentlyAddedCloudAlbums(albs);
-                                        cacheAppleRecentLibraryShelf(albs);
-                                      }
-                                    })
-                                    .catch(() => {}),
-                                ]).finally(() => setCloudLoading(false));
-                              }}
-                              style={{
-                                padding: '4px 9px',
-                                borderRadius: 6,
-                                background: '#161620',
-                                border: '1px solid #2a2a38',
-                                color: '#fda4af',
-                                fontSize: 11,
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              ↻ Refresh
-                            </button>
-                          </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <FilterTriggerButton
+                                summary={forYouFilter === 'all' ? 'All Sections' : forYouFilter.replace('_', ' ')}
+                                active={forYouFilter !== 'all'}
+                                accentColor="#fa243c"
+                                activeBg="#28111b"
+                                activeText="#fecdd3"
+                                onClick={onOpenFilters}
+                              />
+                                <button
+                                  data-right-filter-pill="true"
+                                  onClick={() => {
+                                    setCloudLoading(true);
+                                    Promise.all([
+                                      fetchAppleRadioAndForYou()
+                                        .then((res) => {
+                                          setRadioStations(res.stations);
+                                          setPersonalRadioStations?.(res.personal_stations ?? []);
+                                          setLiveRadioStations?.(res.live_stations ?? []);
+                                          setArtistRadioShows?.(res.artist_shows ?? []);
+                                          setClubMixes?.(res.club_mixes ?? []);
+                                          setGenreRadioStations?.(res.genre_stations ?? []);
+                                          setForYouNewReleases?.(res.new_releases ?? []);
+                                          setForYouPlaylists(res.playlists);
+                                          setForYouAlbums(res.albums);
+                                          setForYouShelves?.(res.shelves ?? []);
+                                          setAppleRecentlyPlayedTracks?.(res.recently_played ?? []);
+                                        })
+                                        .catch(() => {}),
+                                      fetchAppleLibraryRecentlyAdded()
+                                        .then((albs) => {
+                                          if (Array.isArray(albs)) {
+                                            setRecentlyAddedCloudAlbums(albs);
+                                            cacheAppleRecentLibraryShelf(albs);
+                                          }
+                                        })
+                                        .catch(() => {}),
+                                    ]).finally(() => setCloudLoading(false));
+                                  }}
+                                  style={{
+                                    padding: '4px 9px',
+                                    borderRadius: 6,
+                                    background: '#161620',
+                                    border: '1px solid #2a2a38',
+                                    color: '#fda4af',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  ↻ Refresh
+                                </button>
+                              </div>
+                            </div>
 
                           {(forYouFilter === 'all' || forYouFilter === 'stations') &&
                             personalRadioStations.length > 0 && (
@@ -811,8 +709,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     5. 🔥 NEW RELEASES & TOP CHARTS HUB (Recent Releases For You + Charts)
                    --------------------------------------------------------- */}
-                {browserSourceFilter !== 'soundcloud' &&
-                  browserSourceFilter !== 'internet_archive' &&
+                {browseHubTarget === 'apple_discover' &&
                   appleSubTab === 'new' &&
                   snap?.apple_authenticated && (
                   <>
@@ -852,56 +749,16 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                               >
                                 🔥 New & Charts
                               </span>
-                              {(
-                                [
-                                  { id: 'all' as const, label: 'All' },
-                                  ...(recentReleasesForYou.length > 0
-                                    ? [
-                                        {
-                                          id: 'recent_releases' as const,
-                                          label: `🆕 Recent Releases (${recentReleasesForYou.length})`,
-                                        },
-                                      ]
-                                    : []),
-                                  {
-                                    id: 'albums' as const,
-                                    label: `💿 New Albums (${newFeedAlbums.length})`,
-                                  },
-                                  {
-                                    id: 'playlists' as const,
-                                    label: `🎶 Featured Playlists (${newFeedPlaylists.length})`,
-                                  },
-                                  {
-                                    id: 'songs' as const,
-                                    label: `🎵 Top Singles (${newFeedSongs.length})`,
-                                  },
-                                ] as const
-                              ).map((f) => {
-                                const active = newFilter === f.id;
-                                return (
-                                  <button
-                                    key={f.id}
-                                    data-right-filter-pill="true"
-                                    onClick={() => setNewFilter(f.id)}
-                                    style={{
-                                      padding: '4px 10px',
-                                      borderRadius: 6,
-                                      background: active ? '#28111b' : '#101018',
-                                      border: active
-                                        ? '1px solid #fa243c'
-                                        : '1px solid #222230',
-                                      color: active ? '#fecdd3' : '#9ca3af',
-                                      fontSize: 11,
-                                      fontWeight: 800,
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {f.label}
-                                  </button>
-                                );
-                              })}
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <FilterTriggerButton
+                                summary={newFilter === 'all' ? 'All' : newFilter.replace('_', ' ')}
+                                active={newFilter !== 'all'}
+                                accentColor="#fa243c"
+                                activeBg="#28111b"
+                                activeText="#fecdd3"
+                                onClick={onOpenFilters}
+                              />
                               <button
                                 data-right-filter-pill="true"
                                 onClick={() => {
@@ -1068,8 +925,7 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     5B. 📻 RADIO HUB (Live Broadcast, Artist-Hosted Shows, Club Mixes & Stations by Genre)
                    --------------------------------------------------------- */}
-                {browserSourceFilter !== 'soundcloud' &&
-                  browserSourceFilter !== 'internet_archive' &&
+                {browseHubTarget === 'apple_discover' &&
                   appleSubTab === 'radio' &&
                   snap?.apple_authenticated && (
                   <>
@@ -1078,11 +934,6 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                         liveRadioStations.length > 0 ? liveRadioStations : radioStations;
                       const allGenreStations =
                         genreRadioStations.length > 0 ? genreRadioStations : radioStations;
-                      const genreSet = new Set<string>();
-                      for (const st of allGenreStations) {
-                        if (st.genre) genreSet.add(st.genre);
-                      }
-                      const availableGenres = Array.from(genreSet).slice(0, 10);
                       const filteredGenreStations = appleRadioGenre
                         ? allGenreStations.filter(
                             (st) =>
@@ -1130,144 +981,52 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                 >
                                   📻 Apple Music Radio
                                 </span>
-                                {(
-                                  [
-                                    { id: 'all' as const, label: 'All Radio' },
-                                    {
-                                      id: 'live' as const,
-                                      label: `📻 Live & Personal (${
-                                        stationsToDisplay.length + personalRadioStations.length
-                                      })`,
-                                    },
-                                    ...(artistRadioShows.length > 0
-                                      ? [
-                                          {
-                                            id: 'shows' as const,
-                                            label: `🎙️ Shows & Interviews (${artistRadioShows.length})`,
-                                          },
-                                        ]
-                                      : []),
-                                    ...(clubMixes.length > 0
-                                      ? [
-                                          {
-                                            id: 'mixes' as const,
-                                            label: `🎧 Club Mixes & DJ Sets (${clubMixes.length})`,
-                                          },
-                                        ]
-                                      : []),
-                                    {
-                                      id: 'genre' as const,
-                                      label: `📡 By Genre (${allGenreStations.length})`,
-                                    },
-                                  ] as const
-                                ).map((tab) => {
-                                  const active = appleRadioFilter === tab.id;
-                                  return (
-                                    <button
-                                      key={tab.id}
-                                      data-right-filter-pill="true"
-                                      onClick={() => setAppleRadioFilter(tab.id)}
-                                      style={{
-                                        padding: '4px 10px',
-                                        borderRadius: 6,
-                                        background: active ? '#28111b' : '#101018',
-                                        border: active
-                                          ? '1px solid #fa243c'
-                                          : '1px solid #222230',
-                                        color: active ? '#fecdd3' : '#9ca3af',
-                                        fontSize: 11,
-                                        fontWeight: 800,
-                                        cursor: 'pointer',
-                                      }}
-                                    >
-                                      {tab.label}
-                                    </button>
-                                  );
-                                })}
                               </div>
-                              <button
-                                data-right-filter-pill="true"
-                                onClick={() => {
-                                  setCloudLoading(true);
-                                  fetchAppleRadioAndForYou()
-                                    .then((res) => {
-                                      setRadioStations(res.stations);
-                                      setPersonalRadioStations?.(res.personal_stations ?? []);
-                                      setLiveRadioStations?.(res.live_stations ?? []);
-                                      setArtistRadioShows?.(res.artist_shows ?? []);
-                                      setClubMixes?.(res.club_mixes ?? []);
-                                      setGenreRadioStations?.(res.genre_stations ?? []);
-                                      setForYouNewReleases?.(res.new_releases ?? []);
-                                      setForYouPlaylists(res.playlists);
-                                      setForYouAlbums(res.albums);
-                                      setForYouShelves?.(res.shelves ?? []);
-                                      setAppleRecentlyPlayedTracks?.(res.recently_played ?? []);
-                                    })
-                                    .catch(() => {})
-                                    .finally(() => setCloudLoading(false));
-                                }}
-                                style={{
-                                  padding: '4px 9px',
-                                  borderRadius: 6,
-                                  background: '#161620',
-                                  border: '1px solid #2a2a38',
-                                  color: '#fda4af',
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                ↻ Refresh
-                              </button>
-                            </div>
-
-                            {availableGenres.length > 0 && (
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 5,
-                                  flexWrap: 'wrap',
-                                }}
-                              >
-                                <span
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                <FilterTriggerButton
+                                  summary={`${appleRadioFilter === 'all' ? 'All Radio' : appleRadioFilter}${appleRadioGenre ? ` • ${appleRadioGenre}` : ''}`}
+                                  active={appleRadioFilter !== 'all' || Boolean(appleRadioGenre)}
+                                  accentColor="#fa243c"
+                                  activeBg="#28111b"
+                                  activeText="#fecdd3"
+                                  onClick={onOpenFilters}
+                                />
+                                <button
+                                  data-right-filter-pill="true"
+                                  onClick={() => {
+                                    setCloudLoading(true);
+                                    fetchAppleRadioAndForYou()
+                                      .then((res) => {
+                                        setRadioStations(res.stations);
+                                        setPersonalRadioStations?.(res.personal_stations ?? []);
+                                        setLiveRadioStations?.(res.live_stations ?? []);
+                                        setArtistRadioShows?.(res.artist_shows ?? []);
+                                        setClubMixes?.(res.club_mixes ?? []);
+                                        setGenreRadioStations?.(res.genre_stations ?? []);
+                                        setForYouNewReleases?.(res.new_releases ?? []);
+                                        setForYouPlaylists(res.playlists);
+                                        setForYouAlbums(res.albums);
+                                        setForYouShelves?.(res.shelves ?? []);
+                                        setAppleRecentlyPlayedTracks?.(res.recently_played ?? []);
+                                      })
+                                      .catch(() => {})
+                                      .finally(() => setCloudLoading(false));
+                                  }}
                                   style={{
-                                    fontSize: 10,
-                                    fontFamily: 'monospace',
-                                    color: '#9ca3af',
+                                    padding: '4px 9px',
+                                    borderRadius: 6,
+                                    background: '#161620',
+                                    border: '1px solid #2a2a38',
+                                    color: '#fda4af',
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
                                   }}
                                 >
-                                  GENRE:
-                                </span>
-                                {[
-                                  { id: '', label: '🌐 All Genres' },
-                                  ...availableGenres.map((g) => ({ id: g, label: g })),
-                                ].map((g) => {
-                                  const active = appleRadioGenre === g.id;
-                                  return (
-                                    <button
-                                      key={g.id || 'all-genres'}
-                                      data-right-filter-pill="true"
-                                      onClick={() => setAppleRadioGenre(g.id)}
-                                      style={{
-                                        padding: '3px 8px',
-                                        borderRadius: 999,
-                                        background: active ? '#28111b' : '#12121a',
-                                        border: active
-                                          ? '1px solid #fa243c'
-                                          : '1px solid #232332',
-                                        color: active ? '#fecdd3' : '#a1a1aa',
-                                        fontSize: 10,
-                                        fontWeight: 700,
-                                        cursor: 'pointer',
-                                      }}
-                                    >
-                                      {g.label}
-                                    </button>
-                                  );
-                                })}
+                                  ↻ Refresh
+                                </button>
                               </div>
-                            )}
+                            </div>
                           </div>
 
                           {(appleRadioFilter === 'all' || appleRadioFilter === 'live') &&

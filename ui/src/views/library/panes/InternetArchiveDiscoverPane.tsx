@@ -6,11 +6,12 @@ import {
 import {
   tileGridStyle,
 } from "../libraryHelpers";
-import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import { TTL_ARCHIVE_SEC } from "../../../api/servicesCacheApi";
 
 export interface InternetArchiveDiscoverPaneProps {
   activeHubLabel: string;
+  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
   browserSearch: string;
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   filteredIaItems: ArchiveItemSummary[];
@@ -23,15 +24,15 @@ export interface InternetArchiveDiscoverPaneProps {
   iaSubTab: "pinned" | "trending" | "films" | "tv" | "audio";
   loadIaDiscover: any;
   loadMoreIaDiscover: any;
+  onOpenFilters?: () => void;
   playlists: PlaylistRecord[];
   renderArchiveItemCard: any;
-  setIaSubFilter: any;
 }
 
 export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPaneProps> = ({
   activeHubLabel,
+  browseHubTarget,
   browserSearch,
-  browserSourceFilter,
   filteredIaItems,
   handleDeletePlaylist,
   handlePinArchiveCollection,
@@ -42,16 +43,16 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
   iaSubTab,
   loadIaDiscover,
   loadMoreIaDiscover,
+  onOpenFilters,
   playlists,
   renderArchiveItemCard,
-  setIaSubFilter,
 }) => {
   return (
     <>
                 {/* ---------------------------------------------------------
                     9. 🏛️ INTERNET ARCHIVE DISCOVERY HUB (Trending, Films, TV, Concerts & Audio)
                    --------------------------------------------------------- */}
-                {browserSourceFilter === 'internet_archive' && iaSubTab !== 'pinned' && (
+                {browseHubTarget === 'ia_discover' && iaSubTab !== 'pinned' && (
                   <>
                     <div
                       style={{
@@ -64,71 +65,27 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                         gap: 8,
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                         <span
                           style={{
                             fontSize: 14,
                             fontWeight: 800,
                             color: '#fde68a',
-                            marginRight: 6,
+                            marginRight: 4,
                           }}
                         >
                           🏛️ {activeHubLabel}
                         </span>
-                        {(iaSubTab === 'trending'
-                          ? [
-                              { id: 'all', label: 'This Week' },
-                              { id: 'movies', label: 'Video' },
-                              { id: 'audio', label: 'Audio' },
-                              { id: 'all_time', label: 'All-Time' },
-                              { id: 'favorites', label: 'Favorites' },
-                            ]
-                          : iaSubTab === 'films'
-                          ? [
-                              { id: 'all', label: 'Feature Films' },
-                              { id: 'noir', label: 'Film Noir' },
-                              { id: 'scifi_horror', label: 'Sci-Fi & Horror' },
-                              { id: 'comedy', label: 'Comedy' },
-                              { id: 'silent', label: 'Silent Films' },
-                            ]
-                          : iaSubTab === 'tv'
-                          ? [
-                              { id: 'all', label: 'All TV' },
-                              { id: 'cartoons', label: 'Animation' },
-                              { id: 'classic_tv', label: 'Classic TV' },
-                              { id: 'scifi_tv', label: 'Sci-Fi & Mystery' },
-                            ]
-                          : [
-                              { id: 'all', label: 'All Audio' },
-                              { id: 'etree', label: 'Live Concerts' },
-                              { id: 'netlabels', label: 'Netlabels' },
-                              { id: 'radio', label: 'Old Time Radio' },
-                              { id: 'librivox', label: 'Audiobooks' },
-                            ]
-                        ).map((f) => {
-                          const active = iaSubFilter === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              data-right-filter-pill="true"
-                              onClick={() => setIaSubFilter(f.id)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                background: active ? '#261a0b' : '#101018',
-                                border: active ? '1px solid #f59e0b' : '1px solid #222230',
-                                color: active ? '#fde68a' : '#9ca3af',
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          );
-                        })}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <FilterTriggerButton
+                          summary={iaSubFilter === 'all' ? 'All' : iaSubFilter.replace('_', ' ')}
+                          active={iaSubFilter !== 'all'}
+                          accentColor="#f59e0b"
+                          activeBg="#261a0b"
+                          activeText="#fde68a"
+                          onClick={onOpenFilters}
+                        />
                         {filteredIaItems.length > 0 &&
                           (() => {
                             const collKey = `${iaSubTab}:${iaSubFilter}`;

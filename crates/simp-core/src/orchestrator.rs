@@ -1140,6 +1140,7 @@ impl AudioOrchestrator {
                 let _ = crate::sinks::cdda::eject_optical_disc(device_path.as_deref());
             }
             AudioCommand::ShutdownDaemon => {
+                crate::close_windows_ui_windows();
                 self.pause_active_engine();
                 self.shutdown_all_sinks();
                 // Also stop the systemd user service if running under systemd so `Restart=always` doesn't respawn

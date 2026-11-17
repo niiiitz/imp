@@ -128,7 +128,6 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
             let mut shelf_seen_st = HashSet::new();
             for item in arr {
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let attrs = item.get("attributes").unwrap_or(item);
                 let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
                 match item_type {
                     "stations" => {
@@ -138,13 +137,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                         }
                     }
                     "playlists" | "library-playlists" => {
-                        recent_shelf.playlists.push(AppleCloudPlaylistSummary {
-                            id: id.to_string(),
-                            name: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("Playlist").to_string(),
-                            description: attrs.get("curatorName").and_then(|v| v.as_str()).unwrap_or("Recently Played").to_string(),
-                            art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
-                            kind: if id.starts_with("pl.") { "catalog" } else { "library" }.to_string(),
-                        });
+                        if let Some(parsed) = super::catalog::parse_apple_playlist_summary(item, "Recently Played") {
+                            recent_shelf.playlists.push(parsed);
+                        }
                     }
                     "albums" | "library-albums" => {
                         if let Some(alb) = parse_apple_album_summary(
@@ -179,7 +174,6 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
             let mut shelf_seen_stations = HashSet::new();
             for item in arr {
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                let attrs = item.get("attributes").unwrap_or(item);
                 let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
                 match item_type {
                     "stations" => {
@@ -194,17 +188,12 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                         }
                     }
                     "playlists" | "library-playlists" => {
-                        let pl = AppleCloudPlaylistSummary {
-                            id: id.to_string(),
-                            name: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("Mix").to_string(),
-                            description: attrs.get("curatorName").and_then(|v| v.as_str()).unwrap_or("Heavy Rotation").to_string(),
-                            art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
-                            kind: if id.starts_with("pl.") { "catalog" } else { "library" }.to_string(),
-                        };
-                        if seen_playlists.insert(id.to_string()) {
-                            playlists.push(pl.clone());
+                        if let Some(pl) = super::catalog::parse_apple_playlist_summary(item, "Heavy Rotation") {
+                            if seen_playlists.insert(pl.id.clone()) {
+                                playlists.push(pl.clone());
+                            }
+                            heavy_shelf.playlists.push(pl);
                         }
-                        heavy_shelf.playlists.push(pl);
                     }
                     "albums" | "library-albums" => {
                         if let Some(alb) = parse_apple_album_summary(
@@ -267,7 +256,6 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                 {
                     for item in contents {
                         let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        let attrs = item.get("attributes").unwrap_or(item);
                         let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
                         match item_type {
                             "stations" => {
@@ -282,17 +270,12 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                                 }
                             }
                             "playlists" | "library-playlists" => {
-                                let pl = AppleCloudPlaylistSummary {
-                                    id: id.to_string(),
-                                    name: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("Mix").to_string(),
-                                    description: attrs.get("curatorName").and_then(|v| v.as_str()).unwrap_or(title).to_string(),
-                                    art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
-                                    kind: if id.starts_with("pl.") { "catalog" } else { "library" }.to_string(),
-                                };
-                                if seen_playlists.insert(id.to_string()) {
-                                    playlists.push(pl.clone());
+                                if let Some(pl) = super::catalog::parse_apple_playlist_summary(item, title) {
+                                    if seen_playlists.insert(pl.id.clone()) {
+                                        playlists.push(pl.clone());
+                                    }
+                                    shelf.playlists.push(pl);
                                 }
-                                shelf.playlists.push(pl);
                             }
                             "albums" | "library-albums" => {
                                 if let Some(alb) = parse_apple_album_summary(
@@ -475,35 +458,11 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
             .and_then(|v| v.as_array())
         {
             for pl in arr {
-                let Some(id) = pl.get("id").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                if !seen_show_ids.insert(id.to_string()) {
-                    continue;
+                if let Some(parsed) = super::catalog::parse_apple_playlist_summary(pl, "Apple Music Radio Show") {
+                    if seen_show_ids.insert(parsed.id.clone()) {
+                        artist_shows.push(parsed);
+                    }
                 }
-                let attrs = pl.get("attributes").unwrap_or(pl);
-                let name = attrs
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Radio Show")
-                    .to_string();
-                let curator = attrs
-                    .get("curatorName")
-                    .or_else(|| attrs.pointer("/editorialNotes/short"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Apple Music Radio Show")
-                    .to_string();
-                let art_url = format_apple_art_url(
-                    attrs.pointer("/artwork/url").and_then(|v| v.as_str()),
-                    300,
-                );
-                artist_shows.push(AppleCloudPlaylistSummary {
-                    id: id.to_string(),
-                    name,
-                    description: curator,
-                    art_url,
-                    kind: "catalog".to_string(),
-                });
             }
         }
         if let Some(st_arr) = sj
@@ -523,35 +482,11 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
             .and_then(|v| v.as_array())
         {
             for pl in arr {
-                let Some(id) = pl.get("id").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                if !seen_mix_ids.insert(id.to_string()) {
-                    continue;
+                if let Some(parsed) = super::catalog::parse_apple_playlist_summary(pl, "Club & DJ Mix") {
+                    if seen_mix_ids.insert(parsed.id.clone()) {
+                        club_mixes.push(parsed);
+                    }
                 }
-                let attrs = pl.get("attributes").unwrap_or(pl);
-                let name = attrs
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("DJ Mix")
-                    .to_string();
-                let curator = attrs
-                    .get("curatorName")
-                    .or_else(|| attrs.pointer("/editorialNotes/short"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Club & DJ Mix")
-                    .to_string();
-                let art_url = format_apple_art_url(
-                    attrs.pointer("/artwork/url").and_then(|v| v.as_str()),
-                    300,
-                );
-                club_mixes.push(AppleCloudPlaylistSummary {
-                    id: id.to_string(),
-                    name,
-                    description: curator,
-                    art_url,
-                    kind: "catalog".to_string(),
-                });
             }
         }
     }

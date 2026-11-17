@@ -19,6 +19,7 @@ export interface SoundCloudPlaylistSummary {
   permalink_url?: string | null;
   tracks?: TrackMetadata[];
   gated_track_count?: number;
+  last_modified?: string | null;
 }
 
 export interface SoundCloudStationSummary {
@@ -146,6 +147,13 @@ async function fetchSoundCloudDaemonJson<T>(
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
     throw new Error(j.error || `SoundCloud daemon request failed (${endpoint})`);
+  }
+  if (typeof window !== 'undefined' && typeof j.synced_pinned === 'number' && j.synced_pinned > 0) {
+    window.dispatchEvent(
+      new CustomEvent('simp-library-refresh-needed', {
+        detail: { provider: 'soundcloud', count: j.synced_pinned },
+      })
+    );
   }
   return (j.data !== undefined ? j.data : j) as T;
 }
@@ -338,6 +346,24 @@ export async function fetchSoundCloudPlaylistTracks(
   return fetchSoundCloudDaemonJson<TrackMetadata[]>(
     `/api/soundcloud/playlist-tracks?id=${encodeURIComponent(clean)}`
   );
+}
+
+/**
+ * Appends SoundCloud track IDs / URIs into a user-owned SoundCloud Set (`PUT /playlists/{id}`).
+ */
+export async function addTracksToSoundCloudSet(
+  playlistId: string,
+  trackIds: string[]
+): Promise<TrackMetadata[]> {
+  const cleanPl = cleanSoundCloudTrackId(playlistId);
+  return fetchSoundCloudDaemonJson<TrackMetadata[]>('/api/soundcloud/playlist-add-tracks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playlist_id: cleanPl,
+      track_ids: trackIds,
+    }),
+  });
 }
 
 export async function fetchSoundCloudStreamAndStations(): Promise<SoundCloudStreamResponse> {

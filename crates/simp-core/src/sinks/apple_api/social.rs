@@ -192,6 +192,136 @@ pub fn add_to_apple_cloud_library(
     Ok(())
 }
 
+fn clean_apple_song_id(id_or_uri: &str) -> String {
+    id_or_uri
+        .trim()
+        .strip_prefix("applemusic:song:")
+        .or_else(|| id_or_uri.trim().strip_prefix("applemusic:track:"))
+        .or_else(|| id_or_uri.trim().strip_prefix("applemusic:"))
+        .unwrap_or(id_or_uri.trim())
+        .trim()
+        .to_string()
+}
+
+fn clean_apple_playlist_id(id_or_uri: &str) -> String {
+    id_or_uri
+        .trim()
+        .strip_prefix("applemusic:playlist:")
+        .or_else(|| id_or_uri.trim().strip_prefix("applemusic:"))
+        .unwrap_or(id_or_uri.trim())
+        .trim()
+        .to_string()
+}
+
+/// Appends tracks to a user-owned Apple Music Cloud Library Playlist (`POST /v1/me/library/playlists/{id}/tracks`).
+pub fn add_tracks_to_apple_cloud_playlist(
+    settings: &SimpSettings,
+    playlist_id_or_uri: &str,
+    song_ids_or_uris: &[String],
+) -> Result<()> {
+    let (dev_token, user_token) = resolve_tokens(settings)?;
+    let clean_pl = clean_apple_playlist_id(playlist_id_or_uri);
+    if clean_pl.is_empty() {
+        return Err(anyhow!("Missing Apple Music Cloud Playlist ID"));
+    }
+    if clean_pl.starts_with("pl.") {
+        return Err(anyhow!(
+            "Apple Editorial playlists (pl.*) cannot be edited directly; fork as a Local Imp Hybrid Playlist instead."
+        ));
+    }
+    let data: Vec<Value> = song_ids_or_uris
+        .iter()
+        .map(|s| clean_apple_song_id(s))
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            let ty = if id.starts_with("i.") {
+                "library-songs"
+            } else {
+                "songs"
+            };
+            serde_json::json!({ "id": id, "type": ty })
+        })
+        .collect();
+    if data.is_empty() {
+        return Err(anyhow!("No Apple Music tracks provided to add to Cloud Playlist"));
+    }
+    let url = format!(
+        "https://api.music.apple.com/v1/me/library/playlists/{}/tracks",
+        urlencode(&clean_pl)
+    );
+    let body = serde_json::json!({ "data": data });
+    let _ = apple_post_json(&url, &dev_token, &user_token, &body)?;
+    Ok(())
+}
+
+/// Creates a new personal Apple Music Cloud Library Playlist (`POST /v1/me/library/playlists`),
+/// optionally seeded with an initial list of Apple Music track IDs/URIs.
+pub fn create_apple_cloud_playlist(
+    settings: &SimpSettings,
+    name: &str,
+    description: Option<&str>,
+    song_ids_or_uris: &[String],
+) -> Result<AppleCloudPlaylistSummary> {
+    let (dev_token, user_token) = resolve_tokens(settings)?;
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("Missing Apple Music Cloud Playlist name"));
+    }
+    let data: Vec<Value> = song_ids_or_uris
+        .iter()
+        .map(|s| clean_apple_song_id(s))
+        .filter(|id| !id.is_empty())
+        .map(|id| {
+            let ty = if id.starts_with("i.") {
+                "library-songs"
+            } else {
+                "songs"
+            };
+            serde_json::json!({ "id": id, "type": ty })
+        })
+        .collect();
+
+    let desc = description
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Created in IMP");
+
+    let body = if data.is_empty() {
+        serde_json::json!({
+            "attributes": {
+                "name": trimmed,
+                "description": desc,
+            }
+        })
+    } else {
+        serde_json::json!({
+            "attributes": {
+                "name": trimmed,
+                "description": desc,
+            },
+            "relationships": {
+                "tracks": {
+                    "data": data
+                }
+            }
+        })
+    };
+
+    let resp = apple_post_json(
+        "https://api.music.apple.com/v1/me/library/playlists",
+        &dev_token,
+        &user_token,
+        &body,
+    )?;
+    if let Some(created) = resp
+        .pointer("/data/0")
+        .and_then(|v| super::catalog::parse_apple_playlist_summary(v, desc))
+    {
+        return Ok(created);
+    }
+    Err(anyhow!("Apple Music did not return the newly created Cloud Playlist"))
+}
+
 /// Resolves an Apple Music Artist Profile (`Top Tracks`, `Albums`, `Singles & EPs`, and `Related Artists`)
 /// by catalog artist ID or artist name (`name:<artist>`).
 pub fn fetch_apple_artist_profile(
@@ -525,16 +655,11 @@ pub fn fetch_new_feed(settings: &SimpSettings) -> Result<AppleNewFeedResponse> {
             for chart in pl_charts {
                 if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
                     for pl in arr {
-                        let Some(id) = pl.get("id").and_then(|v| v.as_str()) else { continue };
-                        if !seen_playlists.insert(id.to_string()) { continue; }
-                        let attrs = pl.get("attributes").unwrap_or(pl);
-                        playlists.push(AppleCloudPlaylistSummary {
-                            id: id.to_string(),
-                            name: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("Featured Playlist").to_string(),
-                            description: attrs.get("curatorName").or_else(|| attrs.pointer("/editorialNotes/short")).and_then(|v| v.as_str()).unwrap_or("Apple Music New & Featured").to_string(),
-                            art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
-                            kind: "catalog".to_string(),
-                        });
+                        if let Some(parsed) = super::catalog::parse_apple_playlist_summary(pl, "Apple Music New & Featured") {
+                            if seen_playlists.insert(parsed.id.clone()) {
+                                playlists.push(parsed);
+                            }
+                        }
                     }
                 }
             }

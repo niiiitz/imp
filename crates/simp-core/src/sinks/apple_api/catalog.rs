@@ -4,6 +4,68 @@ use serde_json::Value;
 use simp_protocol::{SimpSettings, TrackMetadata};
 use std::collections::HashSet;
 
+/// Parses an Apple Music `library-playlists` or `playlists` JSON node into `AppleCloudPlaylistSummary`,
+/// extracting `lastModifiedDate`, `canEdit`, and healed `mzstatic.com` artwork URLs when available.
+pub(crate) fn parse_apple_playlist_summary(
+    pl: &Value,
+    default_desc: &str,
+) -> Option<AppleCloudPlaylistSummary> {
+    let id = pl.get("id")?.as_str()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    let attrs = pl.get("attributes").unwrap_or(pl);
+    let name = attrs
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Apple Playlist")
+        .to_string();
+    let description = attrs
+        .pointer("/description/standard")
+        .or_else(|| attrs.get("curatorName"))
+        .or_else(|| attrs.pointer("/editorialNotes/short"))
+        .or_else(|| pl.pointer("/relationships/catalog/data/0/attributes/description/standard"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(default_desc)
+        .to_string();
+    let rel_catalog_art = pl
+        .pointer("/relationships/catalog/data/0/attributes/artwork/url")
+        .and_then(|v| v.as_str());
+    let attr_art = attrs.pointer("/artwork/url").and_then(|v| v.as_str());
+    let raw_art = match (attr_art, rel_catalog_art) {
+        (Some(a), Some(c)) if a.contains("blobstore.apple.com") => Some(c),
+        (Some(a), _) => Some(a),
+        (None, Some(c)) => Some(c),
+        (None, None) => None,
+    };
+    let art_url = format_apple_art_url(raw_art, 300);
+    let kind = if id.starts_with("pl.") {
+        "catalog"
+    } else {
+        "library"
+    }
+    .to_string();
+    let last_modified_date = attrs
+        .get("lastModifiedDate")
+        .or_else(|| pl.pointer("/relationships/catalog/data/0/attributes/lastModifiedDate"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let can_edit = attrs
+        .get("canEdit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or_else(|| id.starts_with("p.") && kind == "library");
+
+    Some(AppleCloudPlaylistSummary {
+        id: id.to_string(),
+        name,
+        description,
+        art_url,
+        kind,
+        last_modified_date,
+        can_edit,
+    })
+}
+
 /// Fetches the user's Apple Music Cloud Playlists in native Rust (up to 2,500 playlists).
 /// Requests `?include=catalog` so catalog playlists in the user's library use permanent `mzstatic.com` CDN artwork
 /// instead of throttled/expiring `blobstore.apple.com` URLs.
@@ -29,50 +91,11 @@ pub fn fetch_cloud_playlists(settings: &SimpSettings) -> Result<Vec<AppleCloudPl
         };
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for pl in arr {
-                let Some(id) = pl.get("id").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                if !seen_ids.insert(id.to_string()) {
-                    continue;
+                if let Some(parsed) = parse_apple_playlist_summary(pl, "iCloud Music Library Playlist") {
+                    if seen_ids.insert(parsed.id.clone()) {
+                        items.push(parsed);
+                    }
                 }
-                let attrs = pl.get("attributes").unwrap_or(pl);
-                let name = attrs
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Apple Playlist")
-                    .to_string();
-                let description = attrs
-                    .pointer("/description/standard")
-                    .or_else(|| {
-                        pl.pointer("/relationships/catalog/data/0/attributes/description/standard")
-                    })
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("iCloud Music Library Playlist")
-                    .to_string();
-                let rel_catalog_art = pl
-                    .pointer("/relationships/catalog/data/0/attributes/artwork/url")
-                    .and_then(|v| v.as_str());
-                let attr_art = attrs.pointer("/artwork/url").and_then(|v| v.as_str());
-                let raw_art = match (attr_art, rel_catalog_art) {
-                    (Some(a), Some(c)) if a.contains("blobstore.apple.com") => Some(c),
-                    (Some(a), _) => Some(a),
-                    (None, Some(c)) => Some(c),
-                    (None, None) => None,
-                };
-                let art_url = format_apple_art_url(raw_art, 300);
-                let kind = if id.starts_with("pl.") {
-                    "catalog"
-                } else {
-                    "library"
-                }
-                .to_string();
-                items.push(AppleCloudPlaylistSummary {
-                    id: id.to_string(),
-                    name,
-                    description,
-                    art_url,
-                    kind,
-                });
             }
         }
         next_url = json
@@ -633,31 +656,11 @@ pub fn search_catalog(settings: &SimpSettings, term: &str) -> Result<AppleCatalo
             .and_then(|v| v.as_array())
         {
             for pl in arr {
-                let Some(id) = pl.get("id").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                if !seen_playlist_ids.insert(id.to_string()) {
-                    continue;
+                if let Some(parsed) = parse_apple_playlist_summary(pl, "☁️ In Your Library") {
+                    if seen_playlist_ids.insert(parsed.id.clone()) {
+                        playlists.push(parsed);
+                    }
                 }
-                let attrs = pl.get("attributes").unwrap_or(pl);
-                playlists.push(AppleCloudPlaylistSummary {
-                    id: id.to_string(),
-                    name: attrs
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Library Playlist")
-                        .to_string(),
-                    description: attrs
-                        .pointer("/description/standard")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("☁️ In Your Library")
-                        .to_string(),
-                    art_url: format_apple_art_url(
-                        attrs.pointer("/artwork/url").and_then(|v| v.as_str()),
-                        300,
-                    ),
-                    kind: "library".to_string(),
-                });
             }
         }
 
@@ -762,31 +765,11 @@ pub fn search_catalog(settings: &SimpSettings, term: &str) -> Result<AppleCatalo
             .and_then(|v| v.as_array())
         {
             for pl in arr {
-                let Some(id) = pl.get("id").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                if !seen_playlist_ids.insert(id.to_string()) {
-                    continue;
+                if let Some(parsed) = parse_apple_playlist_summary(pl, "Apple Music Playlist") {
+                    if seen_playlist_ids.insert(parsed.id.clone()) {
+                        playlists.push(parsed);
+                    }
                 }
-                let attrs = pl.get("attributes").unwrap_or(pl);
-                playlists.push(AppleCloudPlaylistSummary {
-                    id: id.to_string(),
-                    name: attrs
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Playlist")
-                        .to_string(),
-                    description: attrs
-                        .get("curatorName")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Apple Music Playlist")
-                        .to_string(),
-                    art_url: format_apple_art_url(
-                        attrs.pointer("/artwork/url").and_then(|v| v.as_str()),
-                        300,
-                    ),
-                    kind: "catalog".to_string(),
-                });
             }
         }
 

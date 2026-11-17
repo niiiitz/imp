@@ -206,17 +206,66 @@ pub(super) async fn soundcloud_client_auth_handler(State(state): State<DaemonIpc
 
 pub(super) async fn soundcloud_playlists_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
     let cfg = state.settings.lock().unwrap().clone();
+    let db = state.db.clone();
     let res = tokio::task::spawn_blocking(move || {
-        simp_core::sinks::soundcloud_api::fetch_user_playlists_and_likes(&cfg)
+        let data = simp_core::sinks::soundcloud_api::fetch_user_playlists_and_likes(&cfg)?;
+        let sync_map = db.get_playlist_remote_sync_map("soundcloud_remote");
+        let existing_pinned: std::collections::HashMap<String, simp_protocol::PlaylistRecord> = db
+            .get_playlists()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.origin == "soundcloud_remote")
+            .map(|p| (p.id.clone(), p))
+            .collect();
+        let mut updated_pinned = 0usize;
+        for pl in &data.playlists {
+            let db_pl_id = format!("soundcloud:playlist:{}", pl.id);
+            if let Some((stored_ts, stored_count)) = sync_map.get(&db_pl_id) {
+                let remote_ts = pl.last_modified.as_deref();
+                let ts_changed = match (remote_ts, stored_ts.as_deref()) {
+                    (Some(cur), Some(prev)) => cur != prev,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+                let count_changed = pl.track_count > 0 && pl.track_count != *stored_count;
+                if (ts_changed || count_changed) && updated_pinned < 8 {
+                    let tracks = if !pl.tracks.is_empty() {
+                        pl.tracks.clone()
+                    } else {
+                        simp_core::sinks::soundcloud_api::fetch_playlist_tracks(&cfg, &pl.id)
+                            .unwrap_or_default()
+                    };
+                    if !tracks.is_empty() {
+                        if let Some(mut rec) = existing_pinned.get(&db_pl_id).cloned() {
+                            rec.name = format!("📌 {}", pl.name);
+                            rec.description = pl.description.clone();
+                            if pl.art_url.is_some() {
+                                rec.cover_art_url = pl.art_url.clone();
+                            }
+                            rec.track_count = tracks.len();
+                            if db.import_catalog_bundle("soundcloud", None, Some(&rec), &tracks).is_ok() {
+                                let _ = db.set_playlist_remote_updated_at(&db_pl_id, remote_ts);
+                                updated_pinned += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok::<_, anyhow::Error>((data, updated_pinned))
     })
     .await;
     sync_soundcloud_tokens_into_daemon_state(&state);
     match res {
-        Ok(Ok(data)) => {
+        Ok(Ok((data, updated_pinned))) => {
             state
                 .db
                 .sync_soundcloud_comment_hints_for_known_tracks(&data.liked_tracks_preview);
-            Json(serde_json::json!({ "ok": true, "data": data }))
+            Json(serde_json::json!({
+                "ok": true,
+                "data": data,
+                "synced_pinned": updated_pinned,
+            }))
         }
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
@@ -516,6 +565,52 @@ pub(super) async fn soundcloud_open_handler(
     .await
     .unwrap_or_else(|_| "https://soundcloud.com".to_string());
     axum::response::Redirect::temporary(&target_url)
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct SoundCloudPlaylistAddTracksBody {
+    playlist_id: String,
+    track_ids: Vec<String>,
+}
+
+pub(super) async fn soundcloud_playlist_add_tracks_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<SoundCloudPlaylistAddTracksBody>,
+) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap().clone();
+    let db = state.db.clone();
+    let pl_id = body.playlist_id.clone();
+    let track_ids = body.track_ids.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let updated_tracks = simp_core::sinks::soundcloud_api::add_tracks_to_soundcloud_set(
+            &cfg, &pl_id, &track_ids,
+        )?;
+        let clean_pl = pl_id
+            .trim()
+            .strip_prefix("soundcloud:playlist:")
+            .unwrap_or(pl_id.trim())
+            .to_string();
+        let db_pl_id = format!("soundcloud:playlist:{clean_pl}");
+        if let Some(mut rec) = db
+            .get_playlists()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|p| p.id == db_pl_id && p.origin == "soundcloud_remote")
+        {
+            if !updated_tracks.is_empty() {
+                rec.track_count = updated_tracks.len();
+                let _ = db.import_catalog_bundle("soundcloud", None, Some(&rec), &updated_tracks);
+            }
+        }
+        Ok::<_, anyhow::Error>(updated_tracks)
+    })
+    .await;
+    sync_soundcloud_tokens_into_daemon_state(&state);
+    match res {
+        Ok(Ok(tracks)) => Json(serde_json::json!({ "ok": true, "data": tracks })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
 }
 
 pub(super) async fn apple_open_handler(

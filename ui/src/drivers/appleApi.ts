@@ -4,6 +4,7 @@ import {
   PlaylistRecord,
   TrackMetadata,
 } from '@simp/client';
+import { markTrackLyricsStatus } from '../views/library/libraryHelpers';
 
 declare global {
   interface Window {
@@ -17,6 +18,8 @@ export interface AppleCloudPlaylistSummary {
   description: string;
   art_url: string | null;
   kind: 'library' | 'catalog';
+  last_modified_date?: string | null;
+  can_edit?: boolean;
 }
 
 export interface AppleCloudAlbumSummary {
@@ -344,11 +347,18 @@ export async function disconnectAppleMusicCleanSlate(
   onToast?.('Disconnected Apple Music & wiped cached auth tokens');
 }
 
-async function fetchAppleDaemonJson<T>(endpoint: string): Promise<T> {
-  const r = await fetch(`http://127.0.0.1:18888${endpoint}`);
+async function fetchAppleDaemonJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const r = await fetch(`http://127.0.0.1:18888${endpoint}`, options);
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
     throw new Error(j.error || `Apple Music daemon request failed (${endpoint})`);
+  }
+  if (typeof window !== 'undefined' && typeof j.synced_pinned === 'number' && j.synced_pinned > 0) {
+    window.dispatchEvent(
+      new CustomEvent('simp-library-refresh-needed', {
+        detail: { provider: 'apple_music', count: j.synced_pinned },
+      })
+    );
   }
   return j.data as T;
 }
@@ -358,6 +368,46 @@ async function fetchAppleDaemonJson<T>(endpoint: string): Promise<T> {
  */
 export async function fetchAppleCloudPlaylists(): Promise<AppleCloudPlaylistSummary[]> {
   return fetchAppleDaemonJson<AppleCloudPlaylistSummary[]>('/api/apple/playlists');
+}
+
+/**
+ * Appends Apple Music song IDs / URIs to a user-owned editable Apple Music Cloud Playlist.
+ */
+export async function addTracksToAppleCloudPlaylist(
+  playlistId: string,
+  trackIds: string[]
+): Promise<void> {
+  const r = await fetch('http://127.0.0.1:18888/api/apple/playlist-add-tracks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      playlist_id: playlistId,
+      track_ids: trackIds,
+    }),
+  });
+  const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
+  if (!r.ok || !j.ok) {
+    throw new Error(j.error || 'Failed to update Apple Music Cloud Playlist');
+  }
+}
+
+/**
+ * Creates a new personal Apple Music Cloud Playlist and optionally populates it with initial tracks.
+ */
+export async function createAppleCloudPlaylist(
+  name: string,
+  description?: string,
+  trackIds: string[] = []
+): Promise<AppleCloudPlaylistSummary> {
+  return fetchAppleDaemonJson<AppleCloudPlaylistSummary>('/api/apple/playlist-create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      description: description || undefined,
+      track_ids: trackIds,
+    }),
+  });
 }
 
 /**
@@ -518,7 +568,19 @@ export async function fetchTrackLyrics(params: {
       synced_lines: [],
     };
   }
-  return j.data as TrackLyricsResponse;
+  const data = j.data as TrackLyricsResponse;
+  if (data.found && params.uri) {
+    const hasSynced = Array.isArray(data.synced_lines) && data.synced_lines.length > 0;
+    markTrackLyricsStatus(params.uri, hasSynced);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('simp-track-properties-updated', {
+          detail: { uri: params.uri, hasSynced },
+        })
+      );
+    }
+  }
+  return data;
 }
 
 /**

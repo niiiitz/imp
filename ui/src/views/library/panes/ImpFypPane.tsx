@@ -13,11 +13,14 @@ import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
 import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
 import { SourceVisibilityPrefs } from '../../SettingsModal';
 import type { LibraryContextTarget } from '../../LibraryBrowserView';
+import { CollapsibleSectionHeader, FilterTriggerButton } from '../PinnableSectionHeader';
 
 export interface ImpFypPaneProps {
   browserSourceFilter: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
   selectedSources: Array<'local' | 'apple_music' | 'soundcloud' | 'internet_archive'>;
   sourceVisibility: SourceVisibilityPrefs;
+  mediaTypeFilter?: 'all' | 'video' | 'audio';
+  onOpenFilters?: () => void;
   snap: SimpStateSnapshot | null;
   localDiscover: LocalDiscoverResponse;
   tileGridStyle: React.CSSProperties;
@@ -53,6 +56,8 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
   browserSourceFilter,
   selectedSources,
   sourceVisibility,
+  mediaTypeFilter = 'all',
+  onOpenFilters,
   snap,
   localDiscover,
   tileGridStyle,
@@ -555,6 +560,14 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
           </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <FilterTriggerButton
+            summary={mediaTypeFilter === 'all' ? 'All Media' : mediaTypeFilter === 'video' ? 'Video' : 'Audio'}
+            active={mediaTypeFilter !== 'all'}
+            accentColor="#eab308"
+            activeBg="#1c1908"
+            activeText="#fde047"
+            onClick={onOpenFilters}
+          />
           <button
             type="button"
             data-right-filter-pill="true"
@@ -824,103 +837,93 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
             <section
               key={rec.shelf_uid}
               ref={(el) => registerShelfElement(el, descriptor)}
+              data-section-anchor={rec.shelf_uid}
               data-fyp-shelf-uid={rec.shelf_uid}
               data-fyp-shelf-title={rec.title}
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                  paddingBottom: 6,
-                  borderBottom: '1px solid #181822',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    fontSize: 12,
-                    fontWeight: 900,
-                    letterSpacing: 0.4,
-                    textTransform: 'uppercase',
-                    color: '#cbd5e1',
-                  }}
-                >
-                  {renderProviderMark(descriptor.provider)}
-                  <span>{rec.title}</span>
-                  {items.length > 0 && (
-                    <span style={{ fontFamily: 'monospace', color: '#64748b', fontSize: 11 }}>
-                      ({items.length})
-                    </span>
-                  )}
-                  {isUpdating && (
-                    <span style={{ fontSize: 10, color: '#38bdf8', fontFamily: 'monospace' }}>
-                      ↻
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    data-right-filter-pill="true"
-                    data-fyp-pin-btn="true"
-                    data-fyp-shelf-uid={rec.shelf_uid}
-                    data-fyp-shelf-title={rec.title}
-                    data-fyp-shelf-pinned="true"
-                    onClick={() => unpinShelf(rec.shelf_uid)}
-                    title={`Remove "${rec.title}" from Imp FYP`}
-                    style={{
-                      minHeight: 26,
-                      padding: '0 8px',
-                      borderRadius: 7,
-                      background: '#161822',
-                      border: '1px solid #383c52',
-                      color: '#e2e8f0',
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <ImpIcon name="check" size={11} color="#e2e8f0" />
-                    <span>In FYP</span>
-                  </button>
-                  <button
-                    type="button"
-                    data-right-filter-pill="true"
-                    data-fyp-open-source-btn="true"
-                    data-fyp-shelf-title={rec.title}
-                    onClick={() =>
-                      window.dispatchEvent(
-                        new CustomEvent('simp-restore-origin-route', {
-                          detail: descriptor.originRoute,
-                        })
-                      )
-                    }
-                    title="Open this shelf inside its source hub"
-                    style={{
-                      minHeight: 26,
-                      padding: '0 9px',
-                      borderRadius: 7,
-                      background: '#12131c',
-                      border: '1px solid #26293a',
-                      color: '#93c5fd',
-                      fontSize: 10.5,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Open Source ▸
-                  </button>
-                </div>
-              </div>
+              <CollapsibleSectionHeader
+                sectionKey={rec.shelf_uid}
+                accentColor="#cbd5e1"
+                title={
+                  <>
+                    {renderProviderMark(descriptor.provider)}
+                    <span>{rec.title}</span>
+                    {items.length > 0 && (
+                      <span style={{ fontFamily: 'monospace', color: '#64748b', fontSize: 11 }}>
+                        ({items.length})
+                      </span>
+                    )}
+                    {isUpdating && (
+                      <span style={{ fontSize: 10, color: '#38bdf8', fontFamily: 'monospace' }}>
+                        ↻
+                      </span>
+                    )}
+                  </>
+                }
+                trailing={
+                  <>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      data-no-dpad-focus="true"
+                      data-right-filter-pill="true"
+                      data-fyp-pin-btn="true"
+                      data-fyp-shelf-uid={rec.shelf_uid}
+                      data-fyp-shelf-title={rec.title}
+                      data-fyp-shelf-pinned="true"
+                      onClick={() => unpinShelf(rec.shelf_uid)}
+                      title={`Remove "${rec.title}" from Imp FYP`}
+                      style={{
+                        minHeight: 26,
+                        padding: '0 8px',
+                        borderRadius: 7,
+                        background: '#161822',
+                        border: '1px solid #383c52',
+                        color: '#e2e8f0',
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <ImpIcon name="check" size={11} color="#e2e8f0" />
+                      <span>In FYP</span>
+                    </button>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      data-no-dpad-focus="true"
+                      data-right-filter-pill="true"
+                      data-fyp-open-source-btn="true"
+                      data-fyp-shelf-title={rec.title}
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent('simp-restore-origin-route', {
+                            detail: descriptor.originRoute,
+                          })
+                        )
+                      }
+                      title="Open this shelf inside its source hub"
+                      style={{
+                        minHeight: 26,
+                        padding: '0 9px',
+                        borderRadius: 7,
+                        background: '#12131c',
+                        border: '1px solid #26293a',
+                        color: '#93c5fd',
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Open Source ▸
+                    </button>
+                  </>
+                }
+              />
               {renderShelfBody(descriptor, items)}
             </section>
           );

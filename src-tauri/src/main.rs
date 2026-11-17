@@ -126,6 +126,7 @@ fn main() {
     // Worker threads opt into Efficiency Cores (Windows EcoQoS / Apple Silicon Utility QoS / Linux EAS nice +5)
     // while the dedicated AudioOrchestrator / Rodio thread remains at full unthrottled priority.
     if args.iter().any(|arg| arg == "--daemon" || arg == "-d") {
+        simp_core::prefer_efficiency_cores_for_macos_process();
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .on_thread_start(|| {

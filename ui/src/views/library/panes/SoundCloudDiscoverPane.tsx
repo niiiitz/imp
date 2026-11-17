@@ -15,14 +15,16 @@ import {
 import {
   tileGridStyle,
 } from "../libraryHelpers";
-import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import { TTL_CATALOG_FEED_SEC, TTL_FAST_FEED_SEC } from "../../../api/servicesCacheApi";
 
 export interface SoundCloudDiscoverPaneProps {
+  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   cloudLoading: boolean;
   handleStartSoundCloudTrackRadio: any;
   loadMoreScDiscover: any;
+  onOpenFilters?: () => void;
   recentlyPlayed: TrackMetadata[];
   renderSingleSongRow: any;
   renderSoundCloudPlaylistCard: any;
@@ -49,13 +51,9 @@ export interface SoundCloudDiscoverPaneProps {
   setScDiscoverNextHref: any;
   setScFollowings: any;
   setScLikedTracks: any;
-  setScLikesFilter: any;
   setScPlaylists: any;
-  setScSelectedGenre: any;
-  setScStreamFilter: any;
   setScStreamPlaylists: any;
   setScStreamTracks: any;
-  setScTrendingFilter: any;
   setScTrendingMixes: any;
   setScTrendingPlaylists: any;
   setScTrendingTracks: any;
@@ -65,10 +63,11 @@ export interface SoundCloudDiscoverPaneProps {
 }
 
 export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
-  browserSourceFilter,
+  browseHubTarget,
   cloudLoading,
   handleStartSoundCloudTrackRadio,
   loadMoreScDiscover,
+  onOpenFilters,
   recentlyPlayed,
   renderSingleSongRow,
   renderSoundCloudPlaylistCard,
@@ -95,13 +94,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
   setScDiscoverNextHref,
   setScFollowings,
   setScLikedTracks,
-  setScLikesFilter,
   setScPlaylists,
-  setScSelectedGenre,
-  setScStreamFilter,
   setScStreamPlaylists,
   setScStreamTracks,
-  setScTrendingFilter,
   setScTrendingMixes,
   setScTrendingPlaylists,
   setScTrendingTracks,
@@ -114,7 +109,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     6. ☁️ SOUNDCLOUD LIKES & SETS HUB (Personal Account OAuth)
                    --------------------------------------------------------- */}
-                {browserSourceFilter === 'soundcloud' && soundCloudSubTab === 'likes_sets' && (
+                {browseHubTarget === 'soundcloud_discover' && soundCloudSubTab === 'likes_sets' && (
                   <>
                     <div
                       style={{
@@ -138,37 +133,16 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                         >
                           ❤️ Likes & Sets
                         </span>
-                        {(
-                          [
-                            { id: 'all', label: 'All' },
-                            { id: 'likes', label: `❤️ Liked Tracks (${scLikedTracks.length})` },
-                            { id: 'sets', label: `🎶 Sets & Playlists (${scPlaylists.length})` },
-                            { id: 'following', label: `👥 Following (${scFollowings.length})` },
-                          ] as const
-                        ).map((f) => {
-                          const active = scLikesFilter === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              data-right-filter-pill="true"
-                              onClick={() => setScLikesFilter(f.id)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                background: active ? '#2c140a' : '#101018',
-                                border: active ? '1px solid #ff5500' : '1px solid #222230',
-                                color: active ? '#fed7aa' : '#9ca3af',
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          );
-                        })}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <FilterTriggerButton
+                          summary={scLikesFilter === 'all' ? 'All' : scLikesFilter}
+                          active={scLikesFilter !== 'all'}
+                          accentColor="#ff5500"
+                          activeBg="#2c140a"
+                          activeText="#fed7aa"
+                          onClick={onOpenFilters}
+                        />
                         {scLikedTracks.length > 0 && (
                           <button
                             data-right-filter-pill="true"
@@ -338,7 +312,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     7. ⚡ SOUNDCLOUD STREAM & RADIO HUB (Following Stream + Listening History + Track Radio)
                    --------------------------------------------------------- */}
-                {browserSourceFilter === 'soundcloud' && soundCloudSubTab === 'stream_radio' && (
+                {browseHubTarget === 'soundcloud_discover' && soundCloudSubTab === 'stream_radio' && (
                   <>
                     <div
                       style={{
@@ -362,42 +336,16 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                         >
                           ⚡ Stream & Radio
                         </span>
-                        {(
-                          [
-                            { id: 'all', label: 'All' },
-                            {
-                              id: 'history',
-                              label: `🕒 Listening History (${
-                                recentlyPlayed.filter((t) => t.source === 'soundcloud').length
-                              })`,
-                            },
-                            { id: 'stream', label: `⚡ Following Stream (${scStreamTracks.length})` },
-                            { id: 'sets', label: `🎶 Reposted Sets (${scStreamPlaylists.length})` },
-                          ] as const
-                        ).map((f) => {
-                          const active = scStreamFilter === f.id;
-                          return (
-                            <button
-                              key={f.id}
-                              data-right-filter-pill="true"
-                              onClick={() => setScStreamFilter(f.id)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                background: active ? '#2c140a' : '#101018',
-                                border: active ? '1px solid #ff5500' : '1px solid #222230',
-                                color: active ? '#fed7aa' : '#9ca3af',
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          );
-                        })}
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <FilterTriggerButton
+                          summary={scStreamFilter === 'all' ? 'All' : scStreamFilter}
+                          active={scStreamFilter !== 'all'}
+                          accentColor="#ff5500"
+                          activeBg="#2c140a"
+                          activeText="#fed7aa"
+                          onClick={onOpenFilters}
+                        />
                         {(scStreamTracks.length > 0 || scLikedTracks.length > 0) && (
                           <button
                             data-right-filter-pill="true"
@@ -545,7 +493,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                 {/* ---------------------------------------------------------
                     8. 🔥 SOUNDCLOUD TRENDING & MIXES HUB (Genres + 20m+ DJ Mixes + Featured Sets)
                    --------------------------------------------------------- */}
-                {browserSourceFilter === 'soundcloud' && soundCloudSubTab === 'trending' && (
+                {browseHubTarget === 'soundcloud_discover' && soundCloudSubTab === 'trending' && (
                   <>
                     <div
                       style={{
@@ -576,138 +524,44 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                           >
                             🔥 Trending & Mixes
                           </span>
-                          {(
-                            [
-                              { id: 'all' as const, label: 'All' },
-                              ...(scMoreOfWhatYouLike.length > 0
-                                ? [
-                                    {
-                                      id: 'for_you' as const,
-                                      label: `💡 For You (${scMoreOfWhatYouLike.length})`,
-                                    },
-                                  ]
-                                : []),
-                              ...(scFreshUploads.length > 0
-                                ? [
-                                    {
-                                      id: 'fresh' as const,
-                                      label: `🆕 Fresh (${scFreshUploads.length})`,
-                                    },
-                                  ]
-                                : []),
-                              ...(scRecommendedArtists.length > 0
-                                ? [
-                                    {
-                                      id: 'artists' as const,
-                                      label: `👥 Artists (${scRecommendedArtists.length})`,
-                                    },
-                                  ]
-                                : []),
-                              { id: 'mixes' as const, label: `🎧 20m+ DJ Mixes (${scTrendingMixes.length})` },
-                              { id: 'sets' as const, label: `🎶 Featured Sets (${scTrendingPlaylists.length})` },
-                              { id: 'tracks' as const, label: `🔥 Trending Tracks (${scTrendingTracks.length})` },
-                            ]
-                          ).map((f) => {
-                            const active = scTrendingFilter === f.id;
-                            return (
-                              <button
-                                key={f.id}
-                                data-right-filter-pill="true"
-                                onClick={() => setScTrendingFilter(f.id)}
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: 6,
-                                  background: active ? '#2c140a' : '#101018',
-                                  border: active ? '1px solid #ff5500' : '1px solid #222230',
-                                  color: active ? '#fed7aa' : '#9ca3af',
-                                  fontSize: 11,
-                                  fontWeight: 800,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                {f.label}
-                              </button>
-                            );
-                          })}
                         </div>
-                        <button
-                          data-right-filter-pill="true"
-                          onClick={() => {
-                            setCloudLoading(true);
-                            fetchSoundCloudDiscover(scSelectedGenre || undefined)
-                              .then((res) => {
-                                setScTrendingTracks(res.tracks);
-                                setScTrendingMixes(res.mixes);
-                                setScTrendingPlaylists(res.playlists);
-                                setScDiscoverNextHref?.(res.next_tracks_href || null);
-                              })
-                              .catch(() => {})
-                              .finally(() => setCloudLoading(false));
-                          }}
-                          style={{
-                            padding: '4px 9px',
-                            borderRadius: 6,
-                            background: '#161620',
-                            border: '1px solid #2a2a38',
-                            color: '#fdba74',
-                            fontSize: 11,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ↻ Refresh
-                        </button>
-                      </div>
-
-                      {/* Genre & Vibe Pills */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#9ca3af' }}>
-                          VIBE:
-                        </span>
-                        {[
-                          { id: '', label: '🌐 All Vibes' },
-                          { id: 'Electronic', label: '⚡ Electronic' },
-                          { id: 'House', label: '🪩 House' },
-                          { id: 'Techno', label: '🎛️ Techno' },
-                          { id: 'Drum & Bass', label: '🥁 Drum & Bass' },
-                          { id: 'Hip-hop & Rap', label: '🎤 Hip-Hop' },
-                          { id: 'Ambient', label: '🌌 Ambient' },
-                          { id: 'Synthwave', label: '🌆 Synthwave' },
-                          { id: 'Indie', label: '🎸 Indie' },
-                        ].map((g) => {
-                          const active = scSelectedGenre === g.id;
-                          return (
-                            <button
-                              key={g.id || 'all'}
-                              data-right-filter-pill="true"
-                              onClick={() => {
-                                setScSelectedGenre(g.id);
-                                setCloudLoading(true);
-                                fetchSoundCloudDiscover(g.id || undefined)
-                                  .then((res) => {
-                                    setScTrendingTracks(res.tracks);
-                                    setScTrendingMixes(res.mixes);
-                                    setScTrendingPlaylists(res.playlists);
-                                    setScDiscoverNextHref?.(res.next_tracks_href || null);
-                                  })
-                                  .catch(() => {})
-                                  .finally(() => setCloudLoading(false));
-                              }}
-                              style={{
-                                padding: '3px 8px',
-                                borderRadius: 999,
-                                background: active ? '#3c1c0f' : '#12121a',
-                                border: active ? '1px solid #ff5500' : '1px solid #232332',
-                                color: active ? '#fed7aa' : '#a1a1aa',
-                                fontSize: 10,
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {g.label}
-                            </button>
-                          );
-                        })}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <FilterTriggerButton
+                            summary={`${scTrendingFilter === 'all' ? 'All' : scTrendingFilter}${scSelectedGenre ? ` • ${scSelectedGenre}` : ' • All Vibes'}`}
+                            active={scTrendingFilter !== 'all' || Boolean(scSelectedGenre)}
+                            accentColor="#ff5500"
+                            activeBg="#2c140a"
+                            activeText="#fed7aa"
+                            onClick={onOpenFilters}
+                          />
+                          <button
+                            data-right-filter-pill="true"
+                            onClick={() => {
+                              setCloudLoading(true);
+                              fetchSoundCloudDiscover(scSelectedGenre || undefined)
+                                .then((res) => {
+                                  setScTrendingTracks(res.tracks);
+                                  setScTrendingMixes(res.mixes);
+                                  setScTrendingPlaylists(res.playlists);
+                                  setScDiscoverNextHref?.(res.next_tracks_href || null);
+                                })
+                                .catch(() => {})
+                                .finally(() => setCloudLoading(false));
+                            }}
+                            style={{
+                              padding: '4px 9px',
+                              borderRadius: 6,
+                              background: '#161620',
+                              border: '1px solid #2a2a38',
+                              color: '#fdba74',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            ↻ Refresh
+                          </button>
+                        </div>
                       </div>
                     </div>
 

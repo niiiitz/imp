@@ -1,5 +1,5 @@
 use super::*;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde_json::Value;
 use simp_protocol::SimpSettings;
 use std::time::{Duration, Instant};
@@ -765,5 +765,86 @@ pub fn set_soundcloud_user_followed(
         10,
     )?;
     Ok(())
+}
+
+/// Appends tracks to an owned SoundCloud User Set (`PUT /playlists/{id}`) by merging the
+/// existing set tracks with the new track IDs.
+pub fn add_tracks_to_soundcloud_set(
+    settings: &SimpSettings,
+    playlist_id_or_uri: &str,
+    track_uris_or_ids: &[String],
+) -> Result<Vec<TrackMetadata>> {
+    let playlist_id = clean_soundcloud_id(playlist_id_or_uri);
+    if playlist_id.is_empty() || playlist_id.eq_ignore_ascii_case("likes") {
+        return Err(anyhow!("Invalid SoundCloud Set ID"));
+    }
+    let token = ensure_valid_access_token(settings)?;
+    let auth_header = format!("OAuth {}", token.trim());
+
+    let existing_json = soundcloud_authed_get(
+        settings,
+        &format!("/playlists/{}?representation=full", url_encode_component(&playlist_id)),
+    )?;
+    let mut track_objs: Vec<Value> = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    if let Some(arr) = existing_json.get("tracks").and_then(|v| v.as_array()) {
+        for item in arr {
+            let cid = if let Some(n) = item.get("id").and_then(|v| v.as_u64()) {
+                n.to_string()
+            } else if let Some(s) = item.get("urn").and_then(|v| v.as_str()) {
+                clean_soundcloud_id(s)
+            } else {
+                String::new()
+            };
+            if !cid.is_empty() && seen_ids.insert(cid.clone()) {
+                if let Ok(num) = cid.parse::<u64>() {
+                    track_objs.push(serde_json::json!({ "id": num }));
+                } else {
+                    track_objs.push(serde_json::json!({ "id": cid }));
+                }
+            }
+        }
+    }
+
+    let mut added_any = false;
+    for raw in track_uris_or_ids {
+        let cid = clean_soundcloud_id(raw);
+        if !cid.is_empty() && seen_ids.insert(cid.clone()) {
+            added_any = true;
+            if let Ok(num) = cid.parse::<u64>() {
+                track_objs.push(serde_json::json!({ "id": num }));
+            } else {
+                track_objs.push(serde_json::json!({ "id": cid }));
+            }
+        }
+    }
+
+    if added_any {
+        let payload = serde_json::json!({
+            "playlist": {
+                "tracks": track_objs
+            }
+        });
+        let body_bytes = serde_json::to_vec(&payload)?;
+        let url = format!(
+            "https://api.soundcloud.com/playlists/{}",
+            url_encode_component(&playlist_id)
+        );
+        let _ = crate::http_pool::http_custom_bytes(
+            "PUT",
+            &url,
+            &[
+                ("Authorization", auth_header.as_str()),
+                ("Content-Type", "application/json"),
+                ("Accept", "application/json; charset=utf-8"),
+            ],
+            Some(&body_bytes),
+            12,
+        )
+        .with_context(|| format!("Failed to update SoundCloud Set {playlist_id}"))?;
+    }
+
+    super::catalog::fetch_playlist_tracks(settings, &playlist_id)
 }
 

@@ -3,6 +3,14 @@ import { PlaylistRecord } from '@simp/client';
 
 export const CLOUD_PAGE_SIZE = 50;
 
+export type BrowseHubTarget =
+  | 'imp_fyp'
+  | 'imp_library'
+  | 'apple_discover'
+  | 'soundcloud_discover'
+  | 'ia_discover'
+  | 'mount';
+
 export type AlphaBucket = 'all' | 'num' | 'a_f' | 'g_l' | 'm_r' | 's_z';
 
 export function matchesAlphaBucket(name: string, bucket: AlphaBucket): boolean {
@@ -150,6 +158,15 @@ export function getTrackLyricsBadge(uri?: string | null): 'LRC' | 'LYR' | null {
   return null;
 }
 
+export function markTrackLyricsStatus(uri: string, hasSynced: boolean): void {
+  if (!uri) return;
+  cachedAllLyricsUris.add(uri);
+  if (hasSynced) {
+    cachedSyncedLyricsUris.add(uri);
+  }
+  lyricsStatusListeners.forEach((cb) => cb());
+}
+
 export function useLibraryLyricsStatus(): {
   syncedUris: Set<string>;
   allLyricsUris: Set<string>;
@@ -160,7 +177,13 @@ export function useLibraryLyricsStatus(): {
     const listener = () => setTick((t) => t + 1);
     lyricsStatusListeners.add(listener);
     refreshLibraryLyricsStatus(false);
-    const onPropsUpdated = () => refreshLibraryLyricsStatus(true);
+    const onPropsUpdated = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ uri?: string; hasSynced?: boolean }>).detail;
+      if (detail?.uri) {
+        markTrackLyricsStatus(detail.uri, Boolean(detail.hasSynced));
+      }
+      refreshLibraryLyricsStatus(true);
+    };
     window.addEventListener('simp-track-properties-updated', onPropsUpdated);
     return () => {
       lyricsStatusListeners.delete(listener);
@@ -171,5 +194,92 @@ export function useLibraryLyricsStatus(): {
     syncedUris: cachedSyncedLyricsUris,
     allLyricsUris: cachedAllLyricsUris,
     refresh: () => refreshLibraryLyricsStatus(true),
+  };
+}
+
+const COLLAPSED_SECTIONS_STORAGE_KEY = 'simp_collapsed_sections_v1';
+let collapsedSectionsLoaded = false;
+const collapsedSectionKeys = new Set<string>();
+const collapsedSectionListeners = new Set<() => void>();
+
+function ensureCollapsedSectionsLoaded(): void {
+  if (collapsedSectionsLoaded) return;
+  collapsedSectionsLoaded = true;
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(COLLAPSED_SECTIONS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        for (const k of parsed) {
+          if (typeof k === 'string' && k) {
+            collapsedSectionKeys.add(k);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function persistCollapsedSections(): void {
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(
+        COLLAPSED_SECTIONS_STORAGE_KEY,
+        JSON.stringify(Array.from(collapsedSectionKeys))
+      );
+    } catch {
+      // ignore
+    }
+  }
+  collapsedSectionListeners.forEach((cb) => cb());
+}
+
+export function isSectionCollapsed(sectionKey: string): boolean {
+  ensureCollapsedSectionsLoaded();
+  return collapsedSectionKeys.has(sectionKey);
+}
+
+export function setSectionCollapsed(sectionKey: string, collapsed: boolean): void {
+  if (!sectionKey) return;
+  ensureCollapsedSectionsLoaded();
+  const had = collapsedSectionKeys.has(sectionKey);
+  if (collapsed && !had) {
+    collapsedSectionKeys.add(sectionKey);
+    persistCollapsedSections();
+  } else if (!collapsed && had) {
+    collapsedSectionKeys.delete(sectionKey);
+    persistCollapsedSections();
+  }
+}
+
+export function toggleSectionCollapsed(sectionKey: string): boolean {
+  if (!sectionKey) return false;
+  ensureCollapsedSectionsLoaded();
+  const nextCollapsed = !collapsedSectionKeys.has(sectionKey);
+  setSectionCollapsed(sectionKey, nextCollapsed);
+  return nextCollapsed;
+}
+
+export function useCollapsedSections(): {
+  isCollapsed: (sectionKey: string) => boolean;
+  toggle: (sectionKey: string) => boolean;
+  setCollapsed: (sectionKey: string, collapsed: boolean) => void;
+} {
+  ensureCollapsedSectionsLoaded();
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const listener = () => setTick((t) => t + 1);
+    collapsedSectionListeners.add(listener);
+    return () => {
+      collapsedSectionListeners.delete(listener);
+    };
+  }, []);
+  return {
+    isCollapsed: (key: string) => collapsedSectionKeys.has(key),
+    toggle: (key: string) => toggleSectionCollapsed(key),
+    setCollapsed: (key: string, collapsed: boolean) => setSectionCollapsed(key, collapsed),
   };
 }

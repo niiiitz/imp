@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  defaultSimpClient,
   SoundCloudComment,
   TrackMetadata,
   VideoQualityVariant,
@@ -35,6 +36,7 @@ export interface PlayerSelectModalProps {
   playerActionsOpen: boolean;
   setPlayerActionsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   track: TrackMetadata | null | undefined;
+  shuffle?: boolean;
   selectCategory: 'track_options' | 'collection' | 'interface';
   setSelectCategory: React.Dispatch<
     React.SetStateAction<'track_options' | 'collection' | 'interface'>
@@ -130,6 +132,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
   playerActionsOpen,
   setPlayerActionsOpen,
   track,
+  shuffle,
   selectCategory,
   setSelectCategory,
   handleOpenCurrentCollection,
@@ -334,7 +337,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       🎵 Track Options
                     </span>
                     <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                      Favorite, Hybrid, Radio, Artist
+                      Favorite, Shuffle, Hybrid, Artist
                     </span>
                   </div>
                   <span
@@ -544,7 +547,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                 ★ + Hybrid Playlist
                               </span>
                               <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                                Add track to active SIMP Hybrid Playlist
+                                Add track to SIMP Hybrid or Online Playlist
                               </span>
                             </div>
                             <span
@@ -554,6 +557,52 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             </span>
                           </button>
                         )}
+
+                        {/* 3b. Shuffle Queue ON / OFF (moved out of dedicated X/S hotkey into SELECT & transport UI) */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cur =
+                              typeof shuffle === 'boolean'
+                                ? shuffle
+                                : Boolean(defaultSimpClient.getState()?.shuffle);
+                            const next = !cur;
+                            defaultSimpClient.setShuffle(next);
+                            showToast?.(next ? '🔀 Shuffle Queue: ON' : '🔀 Shuffle Queue: OFF');
+                          }}
+                          style={{
+                            ...actionRowBtnStyle,
+                            minHeight: 46,
+                            padding: '8px 12px',
+                            background: shuffle ? '#0f222a' : '#101018',
+                            border: shuffle ? '1px solid #2aa3c4' : '1px solid #222230',
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <span
+                              style={{
+                                fontSize: 12.5,
+                                fontWeight: 800,
+                                color: shuffle ? '#67e8f9' : '#d4d4dc',
+                              }}
+                            >
+                              🔀 Shuffle Queue
+                            </span>
+                            <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
+                              Randomize upcoming track order in current queue
+                            </span>
+                          </div>
+                          <span
+                            style={{
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              fontWeight: 800,
+                              color: shuffle ? '#67e8f9' : '#71717a',
+                            }}
+                          >
+                            {shuffle ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
 
                         {/* 4. Radio Station / Artist Mix */}
                         {!isVideoTrack && (track.source === 'soundcloud' || primaryArtist) && (

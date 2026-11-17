@@ -54,6 +54,7 @@ pub fn show_simp_macos_window() {
         }
         win_ptr.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
+        simp_core::prefer_efficiency_cores_for_macos_process();
     });
 }
 
@@ -62,6 +63,7 @@ pub unsafe fn hide_simp_macos_window_to_tray(win: id) {
     if win != nil {
         let _: () = msg_send![win, orderOut: nil];
     }
+    simp_core::prefer_efficiency_cores_for_macos_process();
 }
 
 /// Toggles the main SIMP window between visible/focused and hidden in the Menu Bar.
@@ -84,6 +86,7 @@ pub unsafe fn toggle_simp_macos_window() {
         }
         win.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
+        simp_core::prefer_efficiency_cores_for_macos_process();
     }
 }
 
@@ -511,8 +514,12 @@ pub fn ensure_inprocess_or_existing_daemon() {
     let _ = std::thread::Builder::new()
         .name("simp-macos-daemon".to_string())
         .spawn(|| {
+            simp_core::prefer_efficiency_core_for_current_thread();
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
+                .on_thread_start(|| {
+                    simp_core::prefer_efficiency_core_for_current_thread();
+                })
                 .enable_all()
                 .build()
                 .expect("Failed to build Tokio runtime for in-process macOS daemon");
@@ -531,11 +538,13 @@ pub fn ensure_inprocess_or_existing_daemon() {
 pub fn run_macos_native_app(ui_url: &str) {
     ensure_inprocess_or_existing_daemon();
     simp_core::mpris::set_native_window_raiser(show_simp_macos_window);
+    simp_core::prefer_efficiency_cores_for_macos_process();
 
     unsafe {
         let _pool = NSAutoreleasePool::new(nil);
         let app = NSApp();
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
+        simp_core::prefer_efficiency_cores_for_macos_process();
 
         let delegate_cls = register_delegate_class();
         let delegate: id = msg_send![delegate_cls, new];
@@ -602,6 +611,7 @@ pub fn run_macos_native_app(ui_url: &str) {
 
         window.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
+        simp_core::prefer_efficiency_cores_for_macos_process();
         app.run();
     }
 }

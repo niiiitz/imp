@@ -43,6 +43,8 @@ pub struct SoundCloudPlaylistSummary {
     pub tracks: Vec<TrackMetadata>,
     #[serde(default)]
     pub gated_track_count: usize,
+    #[serde(default)]
+    pub last_modified: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -869,6 +871,13 @@ pub fn map_soundcloud_item_to_playlist(item: &Value, default_kind: &str) -> Opti
                 .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
         });
 
+    let last_modified = obj
+        .get("last_modified")
+        .or_else(|| obj.get("created_at"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     Some(SoundCloudPlaylistSummary {
         id: raw_id,
         name,
@@ -881,6 +890,7 @@ pub fn map_soundcloud_item_to_playlist(item: &Value, default_kind: &str) -> Opti
         permalink_url,
         tracks: embedded_tracks,
         gated_track_count,
+        last_modified,
     })
 }
 
@@ -1160,5 +1170,33 @@ mod tests {
         assert_eq!(stale_settings.services.soundcloud_username, "dj_tester");
 
         clear_cached_soundcloud_state();
+    }
+
+    #[test]
+    fn test_map_soundcloud_playlist_parses_last_modified() {
+        let sample_set = serde_json::json!({
+            "id": 987654321u64,
+            "kind": "playlist",
+            "title": "Sample DJ Set",
+            "track_count": 3,
+            "last_modified": "2026/11/17 15:45:00 +0000",
+            "user": { "username": "Example DJ" },
+            "tracks": [
+                {
+                    "id": 111,
+                    "kind": "track",
+                    "title": "Track 01",
+                    "duration": 180000,
+                    "access": "playable",
+                    "user": { "username": "Example DJ" }
+                }
+            ]
+        });
+        let parsed = map_soundcloud_item_to_playlist(&sample_set, "user_set")
+            .expect("should parse user set");
+        assert_eq!(
+            parsed.last_modified.as_deref(),
+            Some("2026/11/17 15:45:00 +0000")
+        );
     }
 }

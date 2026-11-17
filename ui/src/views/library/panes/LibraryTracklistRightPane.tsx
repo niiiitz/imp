@@ -21,6 +21,7 @@ import {
 } from "../libraryHelpers";
 import { ContentRatingBadge } from "../ContentRatingBadge";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
+import { FilterTriggerButton } from "../PinnableSectionHeader";
 
 export interface LibraryTracklistRightPaneProps {
   activeHubLabel: string;
@@ -33,6 +34,7 @@ export interface LibraryTracklistRightPaneProps {
   dvdAudioChoice: number;
   dvdSubChoice: string;
   favoritedUris: string[];
+  filterHasLyricsOnly: boolean;
   focusRightPaneFirstTile: any;
   handleAddAppleToCloudLibrary: any;
   handleAddTracksToPlaylist: any;
@@ -44,6 +46,7 @@ export interface LibraryTracklistRightPaneProps {
   handleWalkBack: any;
   iaLoading: boolean;
   navHistory: any[];
+  onOpenFilters?: () => void;
   openArtistProfile: any;
   openLibraryContextMenu: any;
   openLocalVideoFile: any;
@@ -75,6 +78,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
   dvdAudioChoice,
   dvdSubChoice,
   favoritedUris,
+  filterHasLyricsOnly,
   focusRightPaneFirstTile,
   handleAddAppleToCloudLibrary,
   handleAddTracksToPlaylist,
@@ -86,6 +90,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
   handleWalkBack,
   iaLoading,
   navHistory,
+  onOpenFilters,
   openArtistProfile,
   openLibraryContextMenu,
   openLocalVideoFile,
@@ -106,11 +111,6 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
   track,
 }) => {
   const { allLyricsUris } = useLibraryLyricsStatus();
-  const [filterHasLyricsOnly, setFilterHasLyricsOnly] = React.useState(false);
-
-  React.useEffect(() => {
-    setFilterHasLyricsOnly(false);
-  }, [browserTarget?.kind, browserTarget?.id]);
 
   const lyricsMatchedTracks = React.useMemo(
     () => browserTracks.filter((tr) => allLyricsUris.has(tr.uri)),
@@ -808,52 +808,14 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                   flexWrap: 'wrap',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                  <button
-                    data-right-filter-pill="true"
-                    onClick={() => setFilterHasLyricsOnly(false)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 6,
-                      background: !filterHasLyricsOnly ? 'rgba(56, 189, 248, 0.16)' : '#090d16',
-                      border: !filterHasLyricsOnly
-                        ? '1px solid #38bdf8'
-                        : '1px solid rgba(255,255,255,0.1)',
-                      color: !filterHasLyricsOnly ? '#7dd3fc' : '#94a3b8',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    All Tracks ({browserTracks.length})
-                  </button>
-                  <button
-                    data-right-filter-pill="true"
-                    onClick={() => setFilterHasLyricsOnly((prev) => !prev)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 6,
-                      background: filterHasLyricsOnly ? 'rgba(16, 185, 129, 0.18)' : '#090d16',
-                      border: filterHasLyricsOnly
-                        ? '1px solid #34d399'
-                        : '1px solid rgba(255,255,255,0.1)',
-                      color: filterHasLyricsOnly ? '#6ee7b7' : '#94a3b8',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                    }}
-                  >
-                    <ImpIcon
-                      name="lyrics"
-                      size={12}
-                      color={filterHasLyricsOnly ? '#34d399' : '#64748b'}
-                    />
-                    <span>Has Lyrics ({lyricsMatchedTracks.length})</span>
-                  </button>
-                </div>
+                <FilterTriggerButton
+                  summary={filterHasLyricsOnly ? `Has Lyrics (${lyricsMatchedTracks.length})` : `All Tracks (${browserTracks.length})`}
+                  active={filterHasLyricsOnly}
+                  accentColor="#34d399"
+                  activeBg="#0b241c"
+                  activeText="#6ee7b7"
+                  onClick={onOpenFilters}
+                />
 
                 <button
                   data-right-filter-pill="true"

@@ -14,6 +14,7 @@ export interface SimpPlaylistCardProps {
   activePlaylistId: string;
   rightPaneMode: 'browse' | 'tracks' | 'artist';
   browserTarget: BrowserTarget | null;
+  isEditableRemote?: boolean;
   setActivePlaylistId: (id: string) => void;
   selectLocalCollection: (target: BrowserTarget) => void;
   openLibraryContextMenu: (target: LibraryContextTarget) => void;
@@ -26,6 +27,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
   activePlaylistId,
   rightPaneMode,
   browserTarget,
+  isEditableRemote,
   setActivePlaylistId,
   selectLocalCollection,
   openLibraryContextMenu,
@@ -127,6 +129,13 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
           }}
         >
           <span
+            title={
+              isLocal
+                ? 'Editable IMP Hybrid Playlist'
+                : isEditableRemote ?? (pl.origin === 'apple_remote' && pl.id.replace(/^applemusic:playlist:/, '').startsWith('p.'))
+                  ? 'Editable Cloud Collection (supports online write-back or local fork)'
+                  : 'Read-Only Pinned Collection (fork to IMP Hybrid to edit)'
+            }
             style={{
               padding: '2px 6px',
               borderRadius: 6,
@@ -143,9 +152,20 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
             }}
           >
             {pl.origin === 'apple_remote' ? (
-              <AppleMusicLogo size={11} />
+              <>
+                <AppleMusicLogo size={11} />
+                <span>
+                  {(isEditableRemote ??
+                  pl.id.replace(/^applemusic:playlist:/, '').startsWith('p.'))
+                    ? '✎'
+                    : '🔒'}
+                </span>
+              </>
             ) : pl.origin === 'soundcloud_remote' ? (
-              <SoundCloudLogo width={30} color="#ffffff" />
+              <>
+                <SoundCloudLogo width={26} color="#ffffff" />
+                <span>{isEditableRemote ? '✎' : '🔒'}</span>
+              </>
             ) : (
               <>
                 <ImpIcon name="imp" size={11} color={isLocal ? '#67e8f9' : '#fda4af'} />

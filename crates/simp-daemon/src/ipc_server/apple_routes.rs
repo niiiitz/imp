@@ -11,6 +11,16 @@ pub(super) async fn apple_playlists_handler(State(state): State<DaemonIpcState>)
     let res = tokio::task::spawn_blocking(move || {
         let mut playlists = simp_core::sinks::apple_api::fetch_cloud_playlists(&cfg)?;
         let cached_art = db.get_all_cached_apple_playlist_art();
+        let sync_map = db.get_playlist_remote_sync_map("apple_remote");
+        let existing_pinned: std::collections::HashMap<String, simp_protocol::PlaylistRecord> = db
+            .get_playlists()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.origin == "apple_remote")
+            .map(|p| (p.id.clone(), p))
+            .collect();
+
+        let mut updated_pinned = 0usize;
         for pl in &mut playlists {
             let needs_heal = pl
                 .art_url
@@ -24,12 +34,46 @@ pub(super) async fn apple_playlists_handler(State(state): State<DaemonIpcState>)
             } else if let Some(ref valid_url) = pl.art_url {
                 let _ = db.set_cached_apple_playlist_art(&pl.id, valid_url);
             }
+
+            let db_pl_id = format!("applemusic:playlist:{}", pl.id);
+            if let Some((stored_remote_ts, _)) = sync_map.get(&db_pl_id) {
+                let remote_ts = pl.last_modified_date.as_deref();
+                let changed = match (remote_ts, stored_remote_ts.as_deref()) {
+                    (Some(cur), Some(prev)) => cur != prev,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+                if changed && updated_pinned < 8 {
+                    if let Ok(tracks) = simp_core::sinks::apple_api::fetch_playlist_tracks(
+                        &cfg,
+                        &pl.id,
+                        Some(&pl.kind),
+                    ) {
+                        if let Some(mut rec) = existing_pinned.get(&db_pl_id).cloned() {
+                            rec.name = format!("📌 {}", pl.name);
+                            rec.description = pl.description.clone();
+                            if pl.art_url.is_some() {
+                                rec.cover_art_url = pl.art_url.clone();
+                            }
+                            rec.track_count = tracks.len();
+                            if db.import_catalog_bundle("apple_music", None, Some(&rec), &tracks).is_ok() {
+                                let _ = db.set_playlist_remote_updated_at(&db_pl_id, remote_ts);
+                                updated_pinned += 1;
+                            }
+                        }
+                    }
+                }
+            }
         }
-        Ok::<_, anyhow::Error>(playlists)
+        Ok::<_, anyhow::Error>((playlists, updated_pinned))
     })
     .await;
     match res {
-        Ok(Ok(playlists)) => Json(serde_json::json!({ "ok": true, "data": playlists })),
+        Ok(Ok((playlists, updated_pinned))) => Json(serde_json::json!({
+            "ok": true,
+            "data": playlists,
+            "synced_pinned": updated_pinned,
+        })),
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
@@ -293,6 +337,81 @@ pub(super) async fn apple_native_probe_handler(
     .await;
     match res {
         Ok(Ok(report)) => Json(serde_json::json!({ "ok": true, "data": report })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ApplePlaylistAddTracksBody {
+    playlist_id: String,
+    track_ids: Vec<String>,
+}
+
+pub(super) async fn apple_playlist_add_tracks_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<ApplePlaylistAddTracksBody>,
+) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap().clone();
+    let db = state.db.clone();
+    let pl_id = body.playlist_id.clone();
+    let track_ids = body.track_ids.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        simp_core::sinks::apple_api::add_tracks_to_apple_cloud_playlist(&cfg, &pl_id, &track_ids)?;
+        let raw_id = pl_id
+            .trim()
+            .strip_prefix("applemusic:playlist:")
+            .unwrap_or(pl_id.trim())
+            .to_string();
+        let db_pl_id = format!("applemusic:playlist:{raw_id}");
+        if let Some(mut rec) = db
+            .get_playlists()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|p| p.id == db_pl_id && p.origin == "apple_remote")
+        {
+            if let Ok(tracks) =
+                simp_core::sinks::apple_api::fetch_playlist_tracks(&cfg, &raw_id, Some("library"))
+            {
+                rec.track_count = tracks.len();
+                let _ = db.import_catalog_bundle("apple_music", None, Some(&rec), &tracks);
+            }
+        }
+        Ok::<_, anyhow::Error>(())
+    })
+    .await;
+    match res {
+        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ApplePlaylistCreateBody {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    track_ids: Vec<String>,
+}
+
+pub(super) async fn apple_playlist_create_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<ApplePlaylistCreateBody>,
+) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap().clone();
+    let res = tokio::task::spawn_blocking(move || {
+        simp_core::sinks::apple_api::create_apple_cloud_playlist(
+            &cfg,
+            &body.name,
+            body.description.as_deref(),
+            &body.track_ids,
+        )
+    })
+    .await;
+    match res {
+        Ok(Ok(pl)) => Json(serde_json::json!({ "ok": true, "data": pl })),
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }

@@ -959,6 +959,7 @@ mod win32_tray {
                             crate::mpris::launch_simp_desktop_window();
                         }
                         ID_TRAY_QUIT => {
+                            crate::close_windows_ui_windows();
                             let _ = g.cmd_tx.send(AudioCommand::ShutdownDaemon);
                             crate::sinks::apple::AppleMusicSink::kill_headless_widevine_worker();
                             if let Ok(nid) = g.nid.lock() {

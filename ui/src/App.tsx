@@ -163,6 +163,29 @@ const ConsoleMainApp: React.FC = () => {
   const [selectedSources, setSelectedSources] = useState<
     Array<'local' | 'apple_music' | 'soundcloud' | 'internet_archive'>
   >([]);
+  const [browseHubTarget, setBrowseHubTargetState] = useState<
+    'imp_fyp' | 'imp_library' | 'apple_discover' | 'soundcloud_discover' | 'ia_discover' | 'mount'
+  >(() => {
+    try {
+      const saved = window.localStorage.getItem('simp_imp_fyp_active');
+      return saved === '0' ? 'imp_library' : 'imp_fyp';
+    } catch {
+      return 'imp_fyp';
+    }
+  });
+  const setBrowseHubTarget: React.Dispatch<
+    React.SetStateAction<
+      'imp_fyp' | 'imp_library' | 'apple_discover' | 'soundcloud_discover' | 'ia_discover' | 'mount'
+    >
+  > = useCallback((action) => {
+    setBrowseHubTargetState((prev) => {
+      const next = typeof action === 'function' ? action(prev) : action;
+      try {
+        window.localStorage.setItem('simp_imp_fyp_active', next === 'imp_fyp' ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  }, []);
   const setBrowserSourceFilter: React.Dispatch<
     React.SetStateAction<'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive'>
   > = useCallback((action) => {
@@ -787,6 +810,12 @@ const ConsoleMainApp: React.FC = () => {
   }, [browserSourceFilter, browserSearch]);
 
   useEffect(() => {
+    const onRefreshNeeded = () => refreshLibraryData();
+    window.addEventListener('simp-library-refresh-needed', onRefreshNeeded);
+    return () => window.removeEventListener('simp-library-refresh-needed', onRefreshNeeded);
+  }, [refreshLibraryData]);
+
+  useEffect(() => {
     if (view === 'browser' || sourceModalOpen || powerModalOpen) {
       refreshLibraryData();
     }
@@ -1128,18 +1157,20 @@ const ConsoleMainApp: React.FC = () => {
 
   // 3b. Apple Music Cloud Hub data loader (Stale-While-Revalidate via servicesCache.db)
   useEffect(() => {
-    if (view !== 'browser' || browserSourceFilter === 'local' || !snap?.apple_authenticated) {
+    if (view !== 'browser' || !snap?.apple_authenticated || !sourceVisibility.apple_music) {
       return;
     }
     const nowUnix = Math.floor(Date.now() / 1000);
-    if (
-      (appleSubTab === 'cloud_playlists' || Boolean(browserSearch.trim())) &&
+    const needCloudPlaylists =
+      ((browseHubTarget === 'apple_discover' && appleSubTab === 'cloud_playlists') ||
+        Boolean(browserSearch.trim()) ||
+        cloudPlaylists.length === 0) &&
       (cloudPlaylists.length === 0 ||
         nowUnix - applePlaylistsFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
-      !swrInFlightRef.current.has('apple:cloud_playlists')
-    ) {
+      !swrInFlightRef.current.has('apple:cloud_playlists');
+    if (needCloudPlaylists) {
       swrInFlightRef.current.add('apple:cloud_playlists');
-      if (cloudPlaylists.length === 0) setCloudLoading(true);
+      if (cloudPlaylists.length === 0 && browseHubTarget === 'apple_discover') setCloudLoading(true);
       fetchAppleCloudPlaylists()
         .then((list) => {
           setCloudPlaylists(list);
@@ -1156,7 +1187,7 @@ const ConsoleMainApp: React.FC = () => {
           ]);
         })
         .catch((err: any) => {
-          if (cloudPlaylists.length === 0) {
+          if (cloudPlaylists.length === 0 && browseHubTarget === 'apple_discover') {
             showToast(err?.message || 'Failed to load Cloud Playlists');
           }
         })
@@ -1165,6 +1196,7 @@ const ConsoleMainApp: React.FC = () => {
           setCloudLoading(false);
         });
     } else if (
+      browseHubTarget === 'apple_discover' &&
       (appleSubTab === 'for_you' || appleSubTab === 'radio') &&
       ((radioStations.length === 0 && forYouPlaylists.length === 0 && forYouAlbums.length === 0) ||
         nowUnix - appleForYouFetchedAtRef.current > TTL_FAST_FEED_SEC) &&
@@ -1207,6 +1239,7 @@ const ConsoleMainApp: React.FC = () => {
           setCloudLoading(false);
         });
     } else if (
+      browseHubTarget === 'apple_discover' &&
       appleSubTab === 'new' &&
       ((newFeedAlbums.length === 0 && newFeedPlaylists.length === 0 && newFeedSongs.length === 0) ||
         nowUnix - appleNewFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
@@ -1244,7 +1277,8 @@ const ConsoleMainApp: React.FC = () => {
     }
   }, [
     view,
-    browserSourceFilter,
+    browseHubTarget,
+    sourceVisibility.apple_music,
     snap?.apple_authenticated,
     appleSubTab,
     browserSearch,
@@ -1260,19 +1294,20 @@ const ConsoleMainApp: React.FC = () => {
 
   // 3c. SoundCloud Cloud Hub data loader (Stale-While-Revalidate via servicesCache.db)
   useEffect(() => {
-    if (view !== 'browser' || browserSourceFilter !== 'soundcloud') {
+    if (view !== 'browser' || !sourceVisibility.soundcloud) {
       return;
     }
     const nowUnix = Math.floor(Date.now() / 1000);
-    if (
-      soundCloudSubTab === 'likes_sets' &&
+    const needScLikesSets =
+      ((browseHubTarget === 'soundcloud_discover' && soundCloudSubTab === 'likes_sets') ||
+        (Boolean(snap?.soundcloud_authenticated) && scPlaylists.length === 0)) &&
       ((scLikedTracks.length === 0 && scPlaylists.length === 0) ||
         nowUnix - scLikesFetchedAtRef.current > TTL_CATALOG_FEED_SEC) &&
-      !swrInFlightRef.current.has('sc:likes_sets')
-    ) {
+      !swrInFlightRef.current.has('sc:likes_sets');
+    if (needScLikesSets) {
       swrInFlightRef.current.add('sc:likes_sets');
       const isEmpty = scLikedTracks.length === 0 && scPlaylists.length === 0;
-      if (isEmpty) setCloudLoading(true);
+      if (isEmpty && browseHubTarget === 'soundcloud_discover') setCloudLoading(true);
       fetchSoundCloudLikesAndPlaylists()
         .then((res) => {
           setScLikedTracks(res.likedTracks);
@@ -1295,6 +1330,7 @@ const ConsoleMainApp: React.FC = () => {
           setCloudLoading(false);
         });
     } else if (
+      browseHubTarget === 'soundcloud_discover' &&
       soundCloudSubTab === 'stream_radio' &&
       ((scStreamTracks.length === 0 && scStreamPlaylists.length === 0) ||
         nowUnix - scStreamFetchedAtRef.current > TTL_FAST_FEED_SEC) &&
@@ -1324,7 +1360,10 @@ const ConsoleMainApp: React.FC = () => {
           swrInFlightRef.current.delete('sc:stream_radio');
           setCloudLoading(false);
         });
-    } else if (soundCloudSubTab === 'trending') {
+    } else if (
+      browseHubTarget === 'soundcloud_discover' &&
+      soundCloudSubTab === 'trending'
+    ) {
       const genreKey = scSelectedGenre || 'all';
       const lastFetched = scTrendingFetchedAtRef.current[genreKey] || 0;
       const isEmpty =
@@ -1369,7 +1408,8 @@ const ConsoleMainApp: React.FC = () => {
     }
   }, [
     view,
-    browserSourceFilter,
+    browseHubTarget,
+    sourceVisibility.soundcloud,
     snap?.soundcloud_authenticated,
     soundcloudAuthCfg?.soundcloud_authenticated,
     soundCloudSubTab,
@@ -1635,6 +1675,37 @@ const ConsoleMainApp: React.FC = () => {
       oskTarget ||
       pendingHybridAdd
   );
+
+  // Auto-dismiss transient volume/brightness popovers after 8s of inactivity so
+  // leaving them open never suppresses lock-screen or screensaver idle timers.
+  useEffect(() => {
+    if (!volumePopoverOpen && !brightnessPopoverOpen) return;
+
+    let dismissTimerId: number | undefined;
+    const armDismissTimer = () => {
+      if (dismissTimerId) window.clearTimeout(dismissTimerId);
+      dismissTimerId = window.setTimeout(() => {
+        setVolumePopoverOpen(false);
+        setBrightnessPopoverOpen(false);
+      }, 8_000);
+    };
+
+    armDismissTimer();
+    window.addEventListener('pointerdown', armDismissTimer, { passive: true });
+    window.addEventListener('wheel', armDismissTimer, { passive: true });
+    window.addEventListener('keydown', armDismissTimer);
+    window.addEventListener('touchstart', armDismissTimer, { passive: true });
+    window.addEventListener('simp-wake-idle', armDismissTimer);
+
+    return () => {
+      if (dismissTimerId) window.clearTimeout(dismissTimerId);
+      window.removeEventListener('pointerdown', armDismissTimer);
+      window.removeEventListener('wheel', armDismissTimer);
+      window.removeEventListener('keydown', armDismissTimer);
+      window.removeEventListener('touchstart', armDismissTimer);
+      window.removeEventListener('simp-wake-idle', armDismissTimer);
+    };
+  }, [volumePopoverOpen, brightnessPopoverOpen, currentVolume, brightnessPct]);
 
   useEffect(() => {
     let timerId: number | undefined;
@@ -2235,25 +2306,20 @@ const ConsoleMainApp: React.FC = () => {
     trackMetadata?: TrackMetadata[]
   ) => {
     if (uris.length === 0) return;
-    const writablePlaylists = playlists.filter((p) => p.origin === 'simp_local');
-    const hasPinnedPlaylists = playlists.some((p) => p.origin !== 'simp_local');
-    // When > 1 playlist exists or when Pinned collections exist alongside Hybrid playlists, prompt user to choose (or Fork & Add)
-    if (writablePlaylists.length > 1 || (hasPinnedPlaylists && playlists.length >= 1)) {
-      setPendingHybridAdd({
-        uris,
-        label,
-        trackMetadata,
-        creatingNew: false,
-      });
-      window.setTimeout(() => {
-        const firstChoice = document.querySelector<HTMLElement>(
-          '[data-hybrid-picker-modal="true"] button[data-default-focus="true"], [data-hybrid-picker-modal="true"] button:not([disabled])'
-        );
-        if (firstChoice) applyFocusMarker(firstChoice);
-      }, 30);
-      return;
-    }
-    await commitAddTracksToPlaylist(uris, label, trackMetadata);
+    // Always open the playlist picker so users can pick an existing playlist,
+    // update an editable online Apple/SoundCloud collection, or create a new playlist.
+    setPendingHybridAdd({
+      uris,
+      label,
+      trackMetadata,
+      creatingNew: false,
+    });
+    window.setTimeout(() => {
+      const firstChoice = document.querySelector<HTMLElement>(
+        '[data-hybrid-picker-modal="true"] button[data-default-focus="true"], [data-hybrid-picker-modal="true"] button:not([disabled])'
+      );
+      if (firstChoice) applyFocusMarker(firstChoice);
+    }, 30);
   };
 
   const handleFavoriteTrack = async (favTrack: TrackMetadata) => {
@@ -2768,6 +2834,8 @@ const ConsoleMainApp: React.FC = () => {
           selectedSources={selectedSources}
           setSelectedSources={setSelectedSources}
           setBrowserSourceFilterRaw={setBrowserSourceFilterState}
+          browseHubTarget={browseHubTarget}
+          setBrowseHubTarget={setBrowseHubTarget}
           browserSearch={browserSearch}
           setBrowserSearch={setBrowserSearch}
           searchPreferredSource={searchPreferredSource}
@@ -2972,7 +3040,7 @@ const ConsoleMainApp: React.FC = () => {
         />
       )}
 
-      {/* On-Demand SIMP Hybrid Playlist Chooser Modal (shown when > 1 Hybrid Playlist exists) */}
+      {/* On-Demand SIMP Hybrid & Cloud Playlist Chooser Modal */}
       <HybridPlaylistPickerModal
         pendingHybridAdd={pendingHybridAdd}
         setPendingHybridAdd={setPendingHybridAdd}
@@ -2983,6 +3051,16 @@ const ConsoleMainApp: React.FC = () => {
         setNewPlaylistName={setNewPlaylistName}
         applyFocusMarker={applyFocusMarker}
         newPlaylistName={newPlaylistName}
+        cloudPlaylists={cloudPlaylists}
+        setCloudPlaylists={setCloudPlaylists}
+        scPlaylists={scPlaylists}
+        setScPlaylists={setScPlaylists}
+        appleAuthenticated={Boolean(snap?.apple_authenticated)}
+        scAuthenticated={Boolean(snap?.soundcloud_authenticated)}
+        browserTarget={browserTarget}
+        setBrowserTracks={setBrowserTracks}
+        refreshLibraryData={refreshLibraryData}
+        showToast={showToast}
       />
 
       <AppOnScreenKeyboardBar

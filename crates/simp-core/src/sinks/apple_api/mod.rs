@@ -28,6 +28,10 @@ pub struct AppleCloudPlaylistSummary {
     pub description: String,
     pub art_url: Option<String>,
     pub kind: String, // "library" | "catalog"
+    #[serde(default)]
+    pub last_modified_date: Option<String>,
+    #[serde(default)]
+    pub can_edit: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -646,5 +650,47 @@ mod tests {
         assert_eq!(summary.track_count, 14);
         assert_eq!(summary.release_year, Some(2024));
         assert_eq!(summary.date_added.as_deref(), Some("2026-11-16T22:00:00Z"));
+    }
+
+    #[test]
+    fn test_parse_apple_playlist_summary_extracts_last_modified_and_can_edit() {
+        let user_pl = serde_json::json!({
+            "id": "p.userPlaylist01",
+            "type": "library-playlists",
+            "attributes": {
+                "name": "Sample Roadtrip Mix",
+                "canEdit": true,
+                "lastModifiedDate": "2026-11-17T10:15:30Z",
+                "artwork": {
+                    "url": "https://is1-ssl.mzstatic.com/image/thumb/pl.jpg/{w}x{h}bb.jpg"
+                }
+            }
+        });
+        let parsed = parse_apple_playlist_summary(&user_pl, "iCloud Music Library Playlist")
+            .expect("should parse user playlist");
+        assert_eq!(parsed.kind, "library");
+        assert!(parsed.can_edit);
+        assert_eq!(
+            parsed.last_modified_date.as_deref(),
+            Some("2026-11-17T10:15:30Z")
+        );
+
+        let catalog_pl = serde_json::json!({
+            "id": "pl.curator01",
+            "type": "playlists",
+            "attributes": {
+                "name": "Sample Editorial Essentials",
+                "curatorName": "Apple Music",
+                "lastModifiedDate": "2026-11-01T00:00:00Z"
+            }
+        });
+        let parsed_cat = parse_apple_playlist_summary(&catalog_pl, "Playlist")
+            .expect("should parse catalog playlist");
+        assert_eq!(parsed_cat.kind, "catalog");
+        assert!(!parsed_cat.can_edit);
+        assert_eq!(
+            parsed_cat.last_modified_date.as_deref(),
+            Some("2026-11-01T00:00:00Z")
+        );
     }
 }

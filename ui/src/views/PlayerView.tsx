@@ -212,6 +212,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       return true;
     }
   });
+  const prevLyricsBeforeKaraokeRef = useRef<boolean | null>(
+    (() => {
+      try {
+        const saved = window.localStorage.getItem('simp_prev_lyrics_before_karaoke');
+        if (saved === '1') return true;
+        if (saved === '0') return false;
+      } catch {}
+      return null;
+    })()
+  );
   const [lyricsVizEnabled, setLyricsVizEnabled] = useState<boolean>(() => {
     try {
       const explicit = window.localStorage.getItem('simp_lyrics_viz_enabled');
@@ -824,6 +834,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       const next = !prev;
       try {
         window.localStorage.setItem('simp_lyrics_karaoke_enabled', next ? '1' : '0');
+        if (prevLyricsBeforeKaraokeRef.current !== null) {
+          prevLyricsBeforeKaraokeRef.current = next;
+          window.localStorage.setItem('simp_prev_lyrics_before_karaoke', next ? '1' : '0');
+        }
       } catch {}
       showToast?.(
         next ? 'Karaoke / Foreground Lyrics: ON' : 'Karaoke / Foreground Lyrics: OFF'
@@ -847,8 +861,23 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     });
   }, [showToast]);
 
+  const restoreLyricsAfterKaraoke = useCallback((): boolean | null => {
+    if (prevLyricsBeforeKaraokeRef.current === null) return null;
+    const restoreVal = prevLyricsBeforeKaraokeRef.current;
+    prevLyricsBeforeKaraokeRef.current = null;
+    try {
+      window.localStorage.removeItem('simp_prev_lyrics_before_karaoke');
+      window.localStorage.setItem('simp_lyrics_karaoke_enabled', restoreVal ? '1' : '0');
+    } catch {}
+    setLyricsKaraokeEnabled(restoreVal);
+    return restoreVal;
+  }, []);
+
   const handleUpdateDsp = useCallback(
     (patch: Partial<DspConfigState>) => {
+      if (patch.vocal_mode === 'off' || patch.vocal_mode === 'vocal_isolate') {
+        restoreLyricsAfterKaraoke();
+      }
       setDspState((prev) => {
         const next: DspConfigState = { ...prev, ...patch };
         fetch('http://127.0.0.1:18888/api/dsp', {
@@ -866,12 +895,21 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         return next;
       });
     },
-    []
+    [restoreLyricsAfterKaraoke]
   );
 
   const handleToggleKaraokeMode = useCallback(
     (enable: boolean) => {
       if (enable) {
+        if (prevLyricsBeforeKaraokeRef.current === null) {
+          prevLyricsBeforeKaraokeRef.current = lyricsKaraokeEnabled;
+          try {
+            window.localStorage.setItem(
+              'simp_prev_lyrics_before_karaoke',
+              lyricsKaraokeEnabled ? '1' : '0'
+            );
+          } catch {}
+        }
         setLyricsKaraokeEnabled(true);
         try {
           window.localStorage.setItem('simp_lyrics_karaoke_enabled', '1');
@@ -879,11 +917,23 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         handleUpdateDsp({ vocal_mode: 'vocal_remover' });
         showToast?.('Karaoke Mode ON (Vocal Remover + Synced Lyrics)');
       } else {
+        const restored = restoreLyricsAfterKaraoke();
+        if (restored === null) {
+          try {
+            window.localStorage.setItem('simp_lyrics_karaoke_enabled', '0');
+          } catch {}
+          setLyricsKaraokeEnabled(false);
+        }
+        const lyricsStillOn = restored ?? false;
         handleUpdateDsp({ vocal_mode: 'off' });
-        showToast?.('Karaoke Vocal Remover OFF');
+        showToast?.(
+          lyricsStillOn
+            ? 'Karaoke Vocal Remover OFF (Foreground Lyrics preserved)'
+            : 'Karaoke Mode OFF'
+        );
       }
     },
-    [handleUpdateDsp, showToast]
+    [handleUpdateDsp, lyricsKaraokeEnabled, restoreLyricsAfterKaraoke, showToast]
   );
 
   useEffect(() => {
@@ -1725,6 +1775,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         scWaveformBars={scWaveformBars}
         trackPropsState={trackPropsState}
         lyricsKaraokeEnabled={lyricsKaraokeEnabled}
+        karaokeModeActive={dspState.vocal_mode === 'vocal_remover' && lyricsKaraokeEnabled}
         idleOpacityPct={idleOpacityPct}
         lyricsData={lyricsData}
         activeLyricIdx={activeLyricIdx}
@@ -1752,6 +1803,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         playerActionsOpen={playerActionsOpen}
         setPlayerActionsOpen={setPlayerActionsOpen}
         track={track}
+        shuffle={Boolean(snap?.shuffle)}
         selectCategory={selectCategory}
         setSelectCategory={setSelectCategory}
         handleOpenCurrentCollection={handleOpenCurrentCollection}

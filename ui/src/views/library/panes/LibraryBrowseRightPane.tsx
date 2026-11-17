@@ -22,6 +22,7 @@ import {
 import { isUiVideoTrack } from "../../PlayerView";
 import {
   AlphaBucket,
+  type BrowseHubTarget,
   tileGridStyle,
   useLibraryLyricsStatus,
 } from "../libraryHelpers";
@@ -33,7 +34,12 @@ import { ImpFypPane } from "./ImpFypPane";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { SourceVisibilityPrefs } from "../../SettingsModal";
-import { PinnableSectionHeader } from "../PinnableSectionHeader";
+import {
+  CollapsibleSectionHeader,
+  FilterTriggerButton,
+  PinnableSectionHeader,
+} from "../PinnableSectionHeader";
+import { type SmartFacetKind } from "../../../components/LibraryFilterModal";
 import {
   DEFAULT_STARTER_FYP_DESCRIPTORS,
   LocalDiscoverResponse,
@@ -43,8 +49,12 @@ import {
 export interface LibraryBrowseRightPaneProps {
   activeHubLabel: string;
   activeMountPlaceObj: { mount_root: string; label: string; track_count: number; is_online: boolean } | null | undefined;
+  activeSmartFacet: SmartFacetKind;
+  setActiveSmartFacet: React.Dispatch<React.SetStateAction<SmartFacetKind>>;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  browseHubTarget: BrowseHubTarget;
   impFypActive: boolean;
+  onOpenFilters?: () => void;
   selectedSources: Array<"local" | "apple_music" | "soundcloud" | "internet_archive">;
   sourceVisibility: SourceVisibilityPrefs;
   localDiscover: LocalDiscoverResponse;
@@ -148,27 +158,21 @@ export interface LibraryBrowseRightPaneProps {
   searchLower: string;
   searchMatchedPlaylists: PlaylistRecord[];
   searchPreferredSource: "local" | "apple_music" | "soundcloud" | "internet_archive" | null | undefined;
-  setAppleRadioFilter: any;
-  setAppleRadioGenre: any;
   setAppleRecentlyPlayedTracks: any;
   setArtistRadioShows: any;
-  setCloudAlpha: any;
   setCloudLoading: any;
   setCloudPlaylists: React.Dispatch<React.SetStateAction<AppleCloudPlaylistSummary[]>>;
   setClubMixes: any;
   setForYouAlbums: any;
-  setForYouFilter: any;
   setForYouNewReleases: any;
   setForYouPlaylists: any;
   setForYouShelves: any;
   setGenreRadioStations: any;
-  setIaSubFilter: any;
   setLiveRadioStations: any;
   setNewFeedAlbums: any;
   setNewFeedPlaylists: any;
   setNewFeedRecentReleases: any;
   setNewFeedSongs: any;
-  setNewFilter: any;
   setNewPlaylistName: any;
   setOskTarget: any;
   setPersonalRadioStations: any;
@@ -178,17 +182,12 @@ export interface LibraryBrowseRightPaneProps {
   setScDiscoverNextHref: any;
   setScFollowings: any;
   setScLikedTracks: any;
-  setScLikesFilter: any;
   setScPlaylists: any;
-  setScSelectedGenre: any;
-  setScStreamFilter: any;
   setScStreamPlaylists: any;
   setScStreamTracks: any;
-  setScTrendingFilter: any;
   setScTrendingMixes: any;
   setScTrendingPlaylists: any;
   setScTrendingTracks: any;
-  setSimpHubFilter: any;
   setSourceModalOpen: any;
   setView: any;
   simpHubFilter: "all" | "recent" | "hybrid" | "pinned" | "albums" | "videos";
@@ -199,8 +198,12 @@ export interface LibraryBrowseRightPaneProps {
 export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   activeHubLabel,
   activeMountPlaceObj,
+  activeSmartFacet,
+  setActiveSmartFacet,
   appleAuthState,
+  browseHubTarget,
   impFypActive,
+  onOpenFilters,
   selectedSources,
   sourceVisibility,
   localDiscover,
@@ -304,27 +307,21 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   searchLower,
   searchMatchedPlaylists,
   searchPreferredSource,
-  setAppleRadioFilter,
-  setAppleRadioGenre,
   setAppleRecentlyPlayedTracks,
   setArtistRadioShows,
-  setCloudAlpha,
   setCloudLoading,
   setCloudPlaylists,
   setClubMixes,
   setForYouAlbums,
-  setForYouFilter,
   setForYouNewReleases,
   setForYouPlaylists,
   setForYouShelves,
   setGenreRadioStations,
-  setIaSubFilter,
   setLiveRadioStations,
   setNewFeedAlbums,
   setNewFeedPlaylists,
   setNewFeedRecentReleases,
   setNewFeedSongs,
-  setNewFilter,
   setNewPlaylistName,
   setOskTarget,
   setPersonalRadioStations,
@@ -334,17 +331,12 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   setScDiscoverNextHref,
   setScFollowings,
   setScLikedTracks,
-  setScLikesFilter,
   setScPlaylists,
-  setScSelectedGenre,
-  setScStreamFilter,
   setScStreamPlaylists,
   setScStreamTracks,
-  setScTrendingFilter,
   setScTrendingMixes,
   setScTrendingPlaylists,
   setScTrendingTracks,
-  setSimpHubFilter,
   setSourceModalOpen,
   setView,
   simpHubFilter,
@@ -352,9 +344,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   soundCloudSubTab,
 }) => {
   useLibraryLyricsStatus();
-  const [activeSmartFacet, setActiveSmartFacet] = React.useState<
-    'synced_lyrics' | 'has_lyrics' | 'has_art' | 'missing_art' | 'has_factoids' | 'has_comments' | null
-  >(null);
   const [facetTracks, setFacetTracks] = React.useState<TrackMetadata[]>([]);
   const [facetLoading, setFacetLoading] = React.useState(false);
 
@@ -397,12 +386,10 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
 
   return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, width: '100%' }}>
-            {/* Not Signed In Setup Card (only shown when opening an Apple Cloud Hub while not authenticated) */}
+            {/* Not Signed In Setup Card (only shown when opening Apple Discover while not authenticated) */}
             {!snap?.apple_authenticated &&
-              appleSubTab !== 'pinned' &&
-              browserSourceFilter !== 'local' &&
-              browserSourceFilter !== 'soundcloud' &&
-              browserSourceFilter !== 'internet_archive' && (
+              browseHubTarget === 'apple_discover' &&
+              appleSubTab !== 'pinned' && (
                 <div
                   style={{
                     padding: 14,
@@ -453,7 +440,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
               )}
 
             {/* SoundCloud Setup Card (shown when opening SoundCloud hubs before connecting) */}
-            {browserSourceFilter === 'soundcloud' &&
+            {browseHubTarget === 'soundcloud_discover' &&
               !snap?.soundcloud_authenticated &&
               soundCloudSubTab !== 'pinned' && (
                 <div
@@ -503,17 +490,17 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                   fontSize: 12,
                   fontFamily: 'monospace',
                   color:
-                    browserSourceFilter === 'internet_archive'
+                    browseHubTarget === 'ia_discover'
                       ? '#fde68a'
-                      : browserSourceFilter === 'soundcloud'
+                      : browseHubTarget === 'soundcloud_discover'
                       ? '#fdba74'
                       : '#fda4af',
                   padding: '4px 2px',
                 }}
               >
-                {browserSourceFilter === 'internet_archive' || iaLoading
+                {browseHubTarget === 'ia_discover' || iaLoading
                   ? '⏳ Loading from Internet Archive...'
-                  : browserSourceFilter === 'soundcloud'
+                  : browseHubTarget === 'soundcloud_discover'
                   ? '⏳ Loading from SoundCloud...'
                   : '⏳ Loading from Apple Music Cloud...'}
               </div>
@@ -712,6 +699,8 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 browserSourceFilter={browserSourceFilter}
                 selectedSources={selectedSources}
                 sourceVisibility={sourceVisibility}
+                mediaTypeFilter={mediaTypeFilter}
+                onOpenFilters={onOpenFilters}
                 snap={snap}
                 localDiscover={localDiscover}
                 tileGridStyle={tileGridStyle}
@@ -734,11 +723,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 {/* ---------------------------------------------------------
                     2B. 📌 MY SIMP LIBRARY HUB (4-Column Visual Card Grid & Playlist Manager)
                    --------------------------------------------------------- */}
-                {((browserSourceFilter !== 'soundcloud' &&
-                  browserSourceFilter !== 'internet_archive' &&
-                  appleSubTab === 'pinned') ||
-                  (browserSourceFilter === 'soundcloud' && soundCloudSubTab === 'pinned') ||
-                  (browserSourceFilter === 'internet_archive' && iaSubTab === 'pinned')) && (
+                {browseHubTarget === 'imp_library' && (
                   <>
                     <div
                       style={{
@@ -766,150 +751,18 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                           <ImpIcon name="imp" size={15} color="#bfeaf5" />
                           <span>{activeHubLabel}</span>
                         </span>
-                        {(
-                          [
-                            { id: 'all', label: 'All' },
-                            ...(filteredRecentlyPlayed.length > 0
-                              ? [
-                                  {
-                                    id: 'recent' as const,
-                                    label: `🕒 Recent (${filteredRecentlyPlayed.length})`,
-                                  },
-                                ]
-                              : []),
-                            {
-                              id: 'hybrid',
-                              label: `★ Saved / Playlists (${unifiedSavedPlaylists.length})`,
-                            },
-                            ...(browserSourceFilter !== 'local' || pinnedPlaylistsList.length > 0
-                              ? [
-                                  {
-                                    id: 'pinned' as const,
-                                    label: `📌 Pinned (${pinnedPlaylistsList.length})`,
-                                  },
-                                ]
-                              : []),
-                            ...(mediaTypeFilter !== 'video'
-                              ? [
-                                  {
-                                    id: 'albums' as const,
-                                    label: `💿 Albums (${filteredAlbums.length})`,
-                                  },
-                                ]
-                              : []),
-                            ...(isSourceIncluded('local') &&
-                            mediaTypeFilter !== 'audio' &&
-                            localVideos.length > 0
-                              ? [
-                                  {
-                                    id: 'videos' as const,
-                                    label: `🎬 Videos (${localVideos.length})`,
-                                  },
-                                ]
-                              : []),
-                          ] as const
-                        ).map((f) => {
-                          const active = simpHubFilter === f.id && !activeSmartFacet;
-                          return (
-                            <button
-                              key={f.id}
-                              data-right-filter-pill="true"
-                              onClick={() => {
-                                setActiveSmartFacet(null);
-                                setSimpHubFilter(f.id);
-                              }}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 6,
-                                background: active ? '#0f222a' : '#101018',
-                                border: active ? '1px solid #2aa3c4' : '1px solid #222230',
-                                color: active ? '#bfeaf5' : '#9ca3af',
-                                fontSize: 11,
-                                fontWeight: 800,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {f.label}
-                            </button>
-                          );
-                        })}
                       </div>
-
-                      {/* Smart Facet Filter Bar (Local / My Library View) */}
-                      {(browserSourceFilter === 'all' || browserSourceFilter === 'local') && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          {(
-                            [
-                              {
-                                id: 'synced_lyrics' as const,
-                                icon: 'lyrics' as const,
-                                label: 'Karaoke / Has Lyrics',
-                                accent: '#34d399',
-                              },
-                              {
-                                id: 'has_factoids' as const,
-                                icon: 'factoid' as const,
-                                label: 'Pop-Up Factoids',
-                                accent: '#c084fc',
-                              },
-                              {
-                                id: 'has_comments' as const,
-                                icon: 'comments' as const,
-                                label: 'Timed Comments',
-                                accent: '#fb923c',
-                              },
-                              {
-                                id: 'has_art' as const,
-                                icon: 'artwork' as const,
-                                label: 'Has Artwork',
-                                accent: '#38bdf8',
-                              },
-                              {
-                                id: 'missing_art' as const,
-                                icon: 'artwork-missing' as const,
-                                label: 'Missing Artwork',
-                                accent: '#facc15',
-                              },
-                            ] as const
-                          ).map((facet) => {
-                            const active =
-                              activeSmartFacet === facet.id ||
-                              (facet.id === 'synced_lyrics' && activeSmartFacet === 'has_lyrics');
-                            return (
-                              <button
-                                key={facet.id}
-                                data-right-filter-pill="true"
-                                onClick={() =>
-                                  setActiveSmartFacet((prev) =>
-                                    prev === facet.id ||
-                                    (facet.id === 'synced_lyrics' && prev === 'has_lyrics')
-                                      ? null
-                                      : facet.id,
-                                  )
-                                }
-                                style={{
-                                  padding: '4px 10px',
-                                  borderRadius: 6,
-                                  background: active ? 'rgba(52, 211, 153, 0.14)' : '#0d1017',
-                                  border: active
-                                    ? `1px solid ${facet.accent}`
-                                    : '1px solid rgba(255,255,255,0.1)',
-                                  color: active ? facet.accent : '#94a3b8',
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  cursor: 'pointer',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 5,
-                                }}
-                              >
-                                <ImpIcon name={facet.icon} size={12} color={active ? facet.accent : '#64748b'} />
-                                {facet.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <FilterTriggerButton
+                        summary={
+                          activeSmartFacet
+                            ? `Facet: ${activeSmartFacet.replace('_', ' ')}`
+                            : `${simpHubFilter === 'all' ? 'All' : simpHubFilter}${
+                                mediaTypeFilter !== 'all' ? ` • ${mediaTypeFilter}` : ''
+                              }`
+                        }
+                        active={simpHubFilter !== 'all' || Boolean(activeSmartFacet) || mediaTypeFilter !== 'all'}
+                        onClick={onOpenFilters}
+                      />
                     </div>
 
                     {activeSmartFacet && (
@@ -1133,10 +986,15 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                     {/* Recently Played Section */}
                     {(simpHubFilter === 'all' || simpHubFilter === 'recent') &&
                       filteredRecentlyPlayed.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                            🕒 RECENTLY PLAYED ({filteredRecentlyPlayed.length})
-                          </div>
+                        <section
+                          data-section-anchor="imp_lib_recent"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <CollapsibleSectionHeader
+                            sectionKey="imp_lib:recent"
+                            accentColor="#2aa3c4"
+                            title={`🕒 RECENTLY PLAYED (${filteredRecentlyPlayed.length})`}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {(simpHubFilter === 'recent'
                               ? filteredRecentlyPlayed
@@ -1151,44 +1009,63 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                               )
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {/* Saved / Hybrid Playlists Section (Unifies Hybrid + Pinned when on `hybrid` tab) */}
                     {simpHubFilter === 'hybrid' && unifiedSavedPlaylists.length > 0 && (
-                      <>
-                        <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                          ★ SAVED & HYBRID PLAYLISTS ({unifiedSavedPlaylists.length})
-                        </div>
+                      <section
+                        data-section-anchor="imp_lib_saved_hybrid"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                      >
+                        <CollapsibleSectionHeader
+                          sectionKey="imp_lib:saved_hybrid"
+                          accentColor="#2aa3c4"
+                          title={`★ SAVED & HYBRID PLAYLISTS (${unifiedSavedPlaylists.length})`}
+                        />
                         <div style={tileGridStyle}>
                           {unifiedSavedPlaylists.map(renderSimpPlaylistCard)}
                         </div>
-                      </>
+                      </section>
                     )}
 
                     {simpHubFilter === 'all' && hybridPlaylistsList.length > 0 && (
-                      <>
-                        <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                          ★ IMP HYBRID PLAYLISTS ({hybridPlaylistsList.length})
-                        </div>
+                      <section
+                        data-section-anchor="imp_lib_hybrid"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                      >
+                        <CollapsibleSectionHeader
+                          sectionKey="imp_lib:hybrid"
+                          accentColor="#2aa3c4"
+                          title={`★ IMP HYBRID PLAYLISTS (${hybridPlaylistsList.length})`}
+                        />
                         <div style={tileGridStyle}>
                           {hybridPlaylistsList.map(renderSimpPlaylistCard)}
                         </div>
-                      </>
+                      </section>
                     )}
 
                     {/* Pinned Cloud Playlists Section */}
                     {(simpHubFilter === 'all' || simpHubFilter === 'pinned') &&
                       pinnedPlaylistsList.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                            <ImpIcon name="imp" size={12} color="#fda4af" />
-                            <span>PINNED CLOUD PLAYLISTS ({pinnedPlaylistsList.length})</span>
-                          </div>
+                        <section
+                          data-section-anchor="imp_lib_pinned"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <CollapsibleSectionHeader
+                            sectionKey="imp_lib:pinned"
+                            accentColor="#fda4af"
+                            title={
+                              <>
+                                <ImpIcon name="imp" size={12} color="#fda4af" />
+                                <span>PINNED CLOUD PLAYLISTS ({pinnedPlaylistsList.length})</span>
+                              </>
+                            }
+                          />
                           <div style={tileGridStyle}>
                             {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {/* Local Discovery Shelves (Smart Stations, Rediscover Local Gems & Recently Added Releases) */}
@@ -1398,14 +1275,19 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                     {/* Local & Pinned Full Albums Section */}
                     {(simpHubFilter === 'all' || simpHubFilter === 'albums') &&
                       filteredAlbums.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                            💿 ALBUMS & SOUNDTRACKS ({filteredAlbums.length})
-                          </div>
+                        <section
+                          data-section-anchor="imp_lib_albums"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <CollapsibleSectionHeader
+                            sectionKey="imp_lib:albums"
+                            accentColor="#2aa3c4"
+                            title={`💿 ALBUMS & SOUNDTRACKS (${filteredAlbums.length})`}
+                          />
                           <div style={tileGridStyle}>
                             {filteredAlbums.map(renderSimpAlbumCard)}
                           </div>
-                        </>
+                        </section>
                       )}
 
                     {/* Indexed Local Unencrypted Video Files Section */}
@@ -1413,16 +1295,21 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                       isSourceIncluded('local') &&
                       mediaTypeFilter !== 'audio' &&
                       localVideos.length > 0 && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                            LOCAL VIDEOS ({localVideos.length})
-                          </div>
+                        <section
+                          data-section-anchor="imp_lib_videos"
+                          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                        >
+                          <CollapsibleSectionHeader
+                            sectionKey="imp_lib:videos"
+                            accentColor="#2aa3c4"
+                            title={`LOCAL VIDEOS (${localVideos.length})`}
+                          />
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {localVideos.map((v) =>
                               renderSingleSongRow(v, localVideos, 'local_video_hub')
                             )}
                           </div>
-                        </>
+                        </section>
                       )}
                   </>
                 )}
@@ -1433,6 +1320,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 appleRecentlyPlayedTracks={appleRecentlyPlayedTracks}
                 appleSubTab={appleSubTab}
                 artistRadioShows={artistRadioShows}
+                browseHubTarget={browseHubTarget}
                 browserSourceFilter={browserSourceFilter}
                 cloudAlpha={cloudAlpha}
                 cloudLoading={cloudLoading}
@@ -1451,6 +1339,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 newFeedRecentReleases={newFeedRecentReleases}
                 newFeedSongs={newFeedSongs}
                 newFilter={newFilter}
+                onOpenFilters={onOpenFilters}
                 pagedCloudPlaylists={pagedCloudPlaylists}
                 personalRadioStations={personalRadioStations}
                 radioStations={radioStations}
@@ -1462,16 +1351,12 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 resetCloudPlaylistsLimit={resetCloudPlaylistsLimit}
                 hasMoreCloudPlaylists={hasMoreCloudPlaylists}
                 loadMoreCloudPlaylists={loadMoreCloudPlaylists}
-                setAppleRadioFilter={setAppleRadioFilter}
-                setAppleRadioGenre={setAppleRadioGenre}
                 setAppleRecentlyPlayedTracks={setAppleRecentlyPlayedTracks}
                 setArtistRadioShows={setArtistRadioShows}
-                setCloudAlpha={setCloudAlpha}
                 setCloudLoading={setCloudLoading}
                 setCloudPlaylists={setCloudPlaylists}
                 setClubMixes={setClubMixes}
                 setForYouAlbums={setForYouAlbums}
-                setForYouFilter={setForYouFilter}
                 setForYouNewReleases={setForYouNewReleases}
                 setForYouPlaylists={setForYouPlaylists}
                 setForYouShelves={setForYouShelves}
@@ -1481,17 +1366,18 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 setNewFeedPlaylists={setNewFeedPlaylists}
                 setNewFeedRecentReleases={setNewFeedRecentReleases}
                 setNewFeedSongs={setNewFeedSongs}
-                setNewFilter={setNewFilter}
                 setPersonalRadioStations={setPersonalRadioStations}
                 setRadioStations={setRadioStations}
                 setRecentlyAddedCloudAlbums={setRecentlyAddedCloudAlbums}
                 snap={snap}
               />
               <SoundCloudDiscoverPane
+                browseHubTarget={browseHubTarget}
                 browserSourceFilter={browserSourceFilter}
                 cloudLoading={cloudLoading}
                 handleStartSoundCloudTrackRadio={handleStartSoundCloudTrackRadio}
                 loadMoreScDiscover={loadMoreScDiscover}
+                onOpenFilters={onOpenFilters}
                 recentlyPlayed={recentlyPlayed}
                 renderSingleSongRow={renderSingleSongRow}
                 renderSoundCloudPlaylistCard={renderSoundCloudPlaylistCard}
@@ -1518,13 +1404,9 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 setScDiscoverNextHref={setScDiscoverNextHref}
                 setScFollowings={setScFollowings}
                 setScLikedTracks={setScLikedTracks}
-                setScLikesFilter={setScLikesFilter}
                 setScPlaylists={setScPlaylists}
-                setScSelectedGenre={setScSelectedGenre}
-                setScStreamFilter={setScStreamFilter}
                 setScStreamPlaylists={setScStreamPlaylists}
                 setScStreamTracks={setScStreamTracks}
-                setScTrendingFilter={setScTrendingFilter}
                 setScTrendingMixes={setScTrendingMixes}
                 setScTrendingPlaylists={setScTrendingPlaylists}
                 setScTrendingTracks={setScTrendingTracks}
@@ -1534,6 +1416,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
               />
               <InternetArchiveDiscoverPane
                 activeHubLabel={activeHubLabel}
+                browseHubTarget={browseHubTarget}
                 browserSearch={browserSearch}
                 browserSourceFilter={browserSourceFilter}
                 filteredIaItems={filteredIaItems}
@@ -1546,9 +1429,9 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 iaSubTab={iaSubTab}
                 loadIaDiscover={loadIaDiscover}
                 loadMoreIaDiscover={loadMoreIaDiscover}
+                onOpenFilters={onOpenFilters}
                 playlists={playlists}
                 renderArchiveItemCard={renderArchiveItemCard}
-                setIaSubFilter={setIaSubFilter}
               />
               </>
             )}

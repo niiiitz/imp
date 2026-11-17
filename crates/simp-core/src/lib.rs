@@ -247,6 +247,14 @@ pub fn close_windows_headless_worker_windows() {
     }
 }
 
+/// Closes any open detached `"IMP — Interactive Media Player"` browser app windows on Windows when quitting from the System Tray.
+pub fn close_windows_ui_windows() {
+    #[cfg(target_os = "windows")]
+    {
+        win32_window_mgr::close_ui_windows();
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod win32_window_mgr {
     use std::ffi::c_void;
@@ -446,6 +454,20 @@ mod win32_window_mgr {
             EnumWindows(enum_close_worker_cb, 0);
         }
     }
+
+    unsafe extern "system" fn enum_close_ui_cb(hwnd: Hwnd, _l_param: Lparam) -> i32 {
+        let title = read_window_title(hwnd);
+        if is_ui_window_title(&title) && !is_worker_hwnd(hwnd, &title) {
+            PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+        1
+    }
+
+    pub fn close_ui_windows() {
+        unsafe {
+            EnumWindows(enum_close_ui_cb, 0);
+        }
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -459,11 +481,11 @@ pub struct DaemonPerfSnapshot {
 }
 
 /// Signals the OS kernel scheduler that the **current thread** prefers **Efficiency Cores (E-cores / little cores)**
-/// and power-throttled execution (`EcoQoS` on Windows 11, `QOS_CLASS_UTILITY` on Apple Silicon macOS,
+/// and power-throttled execution (`EcoQoS` on Windows 11, `QOS_CLASS_BACKGROUND` + `PRIO_DARWIN_THREAD` BG on Apple Silicon macOS,
 /// per-TID nice `+5` for EAS on Linux/SteamOS/Steam Frame).
 ///
 /// > **Audio Safety**: This is intentionally applied per-thread on background workers (Tokio IPC/HTTP pool,
-/// > system tray/SMTC loop, storage indexer, OpenVR bridge, gamepad readers) rather than process-wide,
+/// > system tray/SMTC loop, storage indexer, OpenVR bridge, gamepad readers) rather than real-time audio threads,
 /// > so the dedicated real-time audio output thread (`WASAPI` / `CoreAudio` / `PipeWire`) is never throttled.
 pub fn prefer_efficiency_core_for_current_thread() {
     #[cfg(target_os = "windows")]
@@ -507,12 +529,17 @@ pub fn prefer_efficiency_core_for_current_thread() {
 
     #[cfg(target_os = "macos")]
     unsafe {
-        // QOS_CLASS_UTILITY (0x11) steers threads onto Apple Silicon Efficiency (Icestorm/Sawtooth) cores
-        const QOS_CLASS_UTILITY: u32 = 0x11;
+        // `QOS_CLASS_BACKGROUND` (0x09) + `PRIO_DARWIN_BG` strictly steer the thread onto Apple Silicon
+        // Efficiency Cores (`TH_BUCKET_SHARE_BG`), while keeping thread disk I/O at `IOPOL_IMPORTANT`.
+        const QOS_CLASS_BACKGROUND: u32 = 0x09;
         extern "C" {
-            fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: libc::c_int) -> libc::c_int;
+            fn pthread_set_qos_class_self_np(
+                qos_class: u32,
+                relative_priority: libc::c_int,
+            ) -> libc::c_int;
         }
-        let _ = pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
+        let _ = pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
+        macos_qos::set_bg_with_important_io(macos_qos::PRIO_DARWIN_THREAD, &[macos_qos::IOPOL_SCOPE_THREAD]);
     }
 
     #[cfg(target_os = "linux")]
@@ -520,6 +547,49 @@ pub fn prefer_efficiency_core_for_current_thread() {
         // On Linux NPTL, `setpriority(PRIO_PROCESS, 0, nice)` applies only to the calling thread (TID),
         // signaling EAS (ARM64 big.LITTLE on Steam Frame & Intel Thread Director) to prefer efficiency cores.
         let _ = libc::setpriority(libc::PRIO_PROCESS, 0, 5);
+    }
+}
+
+/// Clamps the entire macOS `simp` process into `PRIO_DARWIN_BG` (`TH_BUCKET_SHARE_BG`, equivalent to
+/// `taskpolicy -b -p <pid>`) so Apple Silicon's Clutch scheduler routes `simp` (including Cocoa/AppKit/GCD
+/// main-thread UI callbacks) onto Efficiency Cores while keeping disk I/O unthrottled (`IOPOL_IMPORTANT`).
+///
+/// CoreAudio's real-time audio output thread uses Mach `THREAD_TIME_CONSTRAINT_POLICY` and is unaffected
+/// by BSD `PRIO_DARWIN_BG`. No-op on non-macOS targets.
+pub fn prefer_efficiency_cores_for_macos_process() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        macos_qos::set_bg_with_important_io(
+            macos_qos::PRIO_DARWIN_PROCESS,
+            &[macos_qos::IOPOL_SCOPE_PROCESS, macos_qos::IOPOL_SCOPE_DARWIN_BG],
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_qos {
+    pub const PRIO_DARWIN_THREAD: libc::c_int = 3;
+    pub const PRIO_DARWIN_PROCESS: libc::c_int = 4;
+    pub const PRIO_DARWIN_BG: libc::c_int = 0x1000;
+    pub const IOPOL_TYPE_DISK: libc::c_int = 0;
+    pub const IOPOL_SCOPE_PROCESS: libc::c_int = 0;
+    pub const IOPOL_SCOPE_THREAD: libc::c_int = 1;
+    pub const IOPOL_SCOPE_DARWIN_BG: libc::c_int = 2;
+    pub const IOPOL_IMPORTANT: libc::c_int = 1;
+
+    extern "C" {
+        fn setiopolicy_np(
+            iotype: libc::c_int,
+            scope: libc::c_int,
+            policy: libc::c_int,
+        ) -> libc::c_int;
+    }
+
+    pub unsafe fn set_bg_with_important_io(prio_which: libc::c_int, io_scopes: &[libc::c_int]) {
+        let _ = libc::setpriority(prio_which, 0, PRIO_DARWIN_BG);
+        for &scope in io_scopes {
+            let _ = setiopolicy_np(IOPOL_TYPE_DISK, scope, IOPOL_IMPORTANT);
+        }
     }
 }
 

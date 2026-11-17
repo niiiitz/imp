@@ -268,6 +268,7 @@ export function useGamepadNavigation({
         document.querySelector<HTMLElement>('[data-quick-help-modal="true"]') ||
         document.querySelector<HTMLElement>('[data-hybrid-picker-modal="true"]') ||
         document.querySelector<HTMLElement>('[data-library-context-modal="true"]') ||
+        document.querySelector<HTMLElement>('[data-filter-modal="true"]') ||
         (modalRoots.length > 0 ? modalRoots[modalRoots.length - 1] : null);
       const hasDomModal = Boolean(topModalRoot);
       const isModalOpen = sourceModalOpen || powerModalOpen || hasDomModal;
@@ -280,21 +281,22 @@ export function useGamepadNavigation({
         : topModalRoot
         ? Array.from(
             topModalRoot.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), input:not([disabled]), select:not([disabled]), a'
+              'button:not([disabled]):not([data-no-dpad-focus="true"]), input:not([disabled]), select:not([disabled]), a'
             )
           )
         : isModalOpen
         ? Array.from(
             document.querySelectorAll<HTMLElement>(
-              '[data-modal-root="true"] button:not([disabled]), [data-modal-root="true"] input:not([disabled]), [data-modal-root="true"] select:not([disabled]), [data-modal-root="true"] a'
+              '[data-modal-root="true"] button:not([disabled]):not([data-no-dpad-focus="true"]), [data-modal-root="true"] input:not([disabled]), [data-modal-root="true"] select:not([disabled]), [data-modal-root="true"] a'
             )
           )
         : Array.from(
             document.querySelectorAll<HTMLElement>(
-              'button:not([disabled]):not([data-tile-aux="true"]), input:not([disabled]), select:not([disabled]), [data-focusable="true"]'
+              'button:not([disabled]):not([data-tile-aux="true"]):not([data-no-dpad-focus="true"]), input:not([disabled]), select:not([disabled]), [data-focusable="true"]:not([data-no-dpad-focus="true"])'
             )
           );
       const nodes = rawNodes.filter((el) => {
+        if (el.dataset.noDpadFocus === 'true') return false;
         const rect = el.getBoundingClientRect();
         return rect.width > 0 && rect.height > 0;
       });
@@ -303,6 +305,72 @@ export function useGamepadNavigation({
       const active =
         (document.querySelector<HTMLElement>('[data-simp-active-focus="true"]') as HTMLElement | null) ||
         (document.activeElement as HTMLElement | null);
+
+      // XMB Crossbar Matrix Navigation for `LibraryFilterModal`:
+      // Handled before generic `!active` seeding so the very first arrow key press never
+      // jumps to a mouse-hovered node or stalls when opening the modal.
+      // - `Left`/`Right` moves horizontally within the current row and immediately applies the highlighted filter.
+      // - `Up`/`Down` moves vertically between rows, landing on each row's currently active option (`data-filter-xmb-active="true"`).
+      // - `Up` from Row 0 moves to `[Reset]`; `Down` from `[Reset]` returns to Row 0's active option.
+      const filterModal = document.querySelector<HTMLElement>('[data-filter-modal="true"]');
+      if (filterModal && !oskTarget) {
+        const filterActive =
+          (active && filterModal.contains(active) && nodes.includes(active) ? active : null) ||
+          filterModal.querySelector<HTMLElement>('[data-simp-active-focus="true"]') ||
+          filterModal.querySelector<HTMLElement>('button[data-default-focus="true"]:not([disabled])') ||
+          filterModal.querySelector<HTMLElement>('button[data-filter-xmb-item="true"]:not([disabled])');
+        const rows = Array.from(filterModal.querySelectorAll<HTMLElement>('[data-filter-xmb-row]'));
+        const curRowEl = filterActive?.closest<HTMLElement>('[data-filter-xmb-row]') || null;
+        if (dir === 'left' || dir === 'right') {
+          if (curRowEl && filterActive) {
+            const rowBtns = Array.from(
+              curRowEl.querySelectorAll<HTMLElement>('button[data-filter-xmb-item="true"]:not([disabled])')
+            );
+            const idx = rowBtns.indexOf(filterActive);
+            const nextIdx = dir === 'right' ? idx + 1 : idx - 1;
+            if (idx !== -1 && nextIdx >= 0 && nextIdx < rowBtns.length) {
+              const target = rowBtns[nextIdx];
+              applyFocusMarker(target);
+              target.scrollIntoView({ block: 'nearest', inline: 'center' });
+              target.click();
+            }
+          }
+          return;
+        }
+        const rowIdx = curRowEl ? rows.indexOf(curRowEl) : -1;
+        const focusRowActiveItem = (targetRow: HTMLElement | undefined) => {
+          if (!targetRow) return;
+          const activeItem =
+            targetRow.querySelector<HTMLElement>(
+              'button[data-filter-xmb-active="true"]:not([disabled])'
+            ) ||
+            targetRow.querySelector<HTMLElement>(
+              'button[data-filter-xmb-item="true"]:not([disabled])'
+            );
+          if (activeItem) {
+            applyFocusMarker(activeItem);
+            activeItem.scrollIntoView({ block: 'nearest', inline: 'center' });
+          }
+        };
+        if (dir === 'down') {
+          focusRowActiveItem(rowIdx === -1 ? rows[0] : rows[rowIdx + 1]);
+          return;
+        }
+        if (dir === 'up') {
+          if (rowIdx > 0) {
+            focusRowActiveItem(rows[rowIdx - 1]);
+          } else if (rowIdx === 0) {
+            const resetBtn = filterModal.querySelector<HTMLElement>(
+              'button[data-filter-reset="true"]:not([disabled])'
+            );
+            if (resetBtn) {
+              applyFocusMarker(resetBtn);
+            }
+          }
+          return;
+        }
+      }
+
       if (!active || !nodes.includes(active)) {
         // Hybrid VR Laser-Pointer + Thumbstick Handoff:
         // If the user is hovering over an interactive node with a VR laser pointer / mouse when they deflect
@@ -1210,6 +1278,13 @@ export function useGamepadNavigation({
             libraryContextClose.click();
             break;
           }
+          const filterModalClose = document.querySelector<HTMLElement>(
+            '[data-filter-modal-close="true"]'
+          );
+          if (filterModalClose) {
+            filterModalClose.click();
+            break;
+          }
           // In the Two-Column `SELECT` Player Actions modal, pressing `B` while in the Right Column
           // returns focus to the Left Column settings first; pressing `B` in the Left Column closes the modal.
           const activeModalEl =
@@ -1356,7 +1431,11 @@ export function useGamepadNavigation({
             folderSelectBtn.click();
             break;
           }
-          defaultSimpClient.setShuffle(!shuffle);
+          if (view === 'browser' && !sourceModalOpen && !powerModalOpen && !oskTarget) {
+            window.dispatchEvent(
+              new CustomEvent('simp-browser-gamepad-op', { detail: { op: 'toggle_collapse' } })
+            );
+          }
           break;
         }
         case 'repeat': {
@@ -1369,7 +1448,7 @@ export function useGamepadNavigation({
           }
           if (view === 'browser' && !sourceModalOpen && !powerModalOpen && !oskTarget) {
             window.dispatchEvent(
-              new CustomEvent('simp-browser-gamepad-op', { detail: { op: 'y' } })
+              new CustomEvent('simp-browser-gamepad-op', { detail: { op: 'filter' } })
             );
           } else {
             defaultSimpClient.cycleRepeat();
@@ -1572,7 +1651,7 @@ export function useGamepadNavigation({
         e.preventDefault();
         e.stopPropagation();
         handleGamepadAction('sources');
-      } else if (e.key === 'x' || e.key === 'X' || e.key === 's' || e.key === 'S') {
+      } else if (e.key === 'x' || e.key === 'X') {
         e.preventDefault();
         e.stopPropagation();
         handleGamepadAction('shuffle');
@@ -1604,7 +1683,21 @@ export function useGamepadNavigation({
         e.preventDefault();
         e.stopPropagation();
         defaultSimpClient.next();
-      } else if (e.key === 'b' || e.key === 'B' || e.key === '<') {
+      } else if (e.key === 'b' || e.key === 'B') {
+        e.preventDefault();
+        e.stopPropagation();
+        const isModalOpen =
+          sourceModalOpen ||
+          powerModalOpen ||
+          Boolean(
+            document.querySelector('[data-modal-root="true"], [data-folder-chooser-modal="true"]')
+          );
+        if (isModalOpen) {
+          handleGamepadAction('back');
+        } else {
+          defaultSimpClient.previous();
+        }
+      } else if (e.key === '<') {
         e.preventDefault();
         e.stopPropagation();
         defaultSimpClient.previous();

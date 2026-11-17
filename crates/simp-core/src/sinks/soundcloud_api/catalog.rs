@@ -49,6 +49,7 @@ pub fn fetch_user_playlists_and_likes(
         permalink_url: Some("https://soundcloud.com/you/likes".to_string()),
         tracks: liked_tracks_preview.clone(),
         gated_track_count: 0,
+        last_modified: None,
     });
 
     if let Ok(my_sets_json) = soundcloud_authed_get(

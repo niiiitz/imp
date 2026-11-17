@@ -224,6 +224,7 @@ impl LibraryDatabase {
         )?;
 
         let _ = conn.execute("ALTER TABLE tracks ADD COLUMN content_rating TEXT", []);
+        let _ = conn.execute("ALTER TABLE playlists ADD COLUMN remote_updated_at TEXT", []);
 
         // Self-heal temporary 24-hour iCloud Music Library `blobstore.apple.com` presigned artwork URLs
         // whenever another track from the same album already has a permanent `mzstatic.com` catalog URL!
@@ -1911,6 +1912,46 @@ impl LibraryDatabase {
         Ok(changed > 0)
     }
 
+    /// Returns a lookup map of `playlist_id -> (remote_updated_at, track_count)` for pinned playlists
+    /// of a given `origin` (`"apple_remote"` / `"soundcloud_remote"`), enabling targeted delta-sync.
+    pub fn get_playlist_remote_sync_map(
+        &self,
+        origin: &str,
+    ) -> HashMap<String, (Option<String>, usize)> {
+        let conn = self.conn.lock().unwrap();
+        let mut map = HashMap::new();
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id, remote_updated_at, track_count FROM playlists WHERE origin = ?1",
+        ) else {
+            return map;
+        };
+        if let Ok(rows) = stmt.query_map(params![origin], |row| {
+            let id: String = row.get(0)?;
+            let remote_updated_at: Option<String> = row.get(1)?;
+            let track_count: i64 = row.get(2)?;
+            Ok((id, remote_updated_at, track_count.max(0) as usize))
+        }) {
+            for (id, ts, tc) in rows.flatten() {
+                map.insert(id, (ts, tc));
+            }
+        }
+        map
+    }
+
+    /// Stores the latest observed remote modification timestamp on a pinned playlist after delta-sync.
+    pub fn set_playlist_remote_updated_at(
+        &self,
+        playlist_id: &str,
+        remote_updated_at: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE playlists SET remote_updated_at = ?2 WHERE id = ?1",
+            params![playlist_id.trim(), remote_updated_at],
+        )?;
+        Ok(())
+    }
+
     /// Purges all database records (tracks, pins, play history, favorites, and source caches)
     /// for a single source (`"local"`, `"apple"`, `"soundcloud"`, `"ia"`).
     pub fn purge_source_data(&self, source: &str) -> Result<usize> {
@@ -2449,6 +2490,55 @@ mod tests {
         assert!(station_ids.contains(&"local_station:lossless"));
         assert!(station_ids.contains(&"local_station:karaoke"));
         assert!(station_ids.contains(&"local_station:soundtracks"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_playlist_remote_sync_map_roundtrip() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "simp_test_remote_sync_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db = LibraryDatabase::open(&temp_dir).unwrap();
+
+        let pl = PlaylistRecord {
+            id: "applemusic:playlist:p.delta01".to_string(),
+            name: "Delta Sync Test".to_string(),
+            description: "Pinned Apple Playlist".to_string(),
+            origin: "apple_remote".to_string(),
+            cover_art_url: None,
+            track_count: 1,
+            updated_at: 0,
+            has_local: false,
+            has_apple: true,
+            has_soundcloud: false,
+            has_archive: false,
+        };
+        let tr = TrackMetadata {
+            uri: "applemusic:song:9001".to_string(),
+            title: "Track 01".to_string(),
+            artists: vec!["Example Artist".to_string()],
+            album: "Sample Album".to_string(),
+            album_id: None,
+            track_number: Some(1),
+            disc_number: Some(1),
+            art_url: None,
+            duration_ms: 180_000,
+            source: "apple_music".to_string(),
+            mount_root: None,
+            content_rating: None,
+        };
+        db.import_catalog_bundle("apple_music", None, Some(&pl), &[tr]).unwrap();
+        db.set_playlist_remote_updated_at(&pl.id, Some("2026-11-17T10:00:00Z"))
+            .unwrap();
+
+        let sync_map = db.get_playlist_remote_sync_map("apple_remote");
+        assert_eq!(
+            sync_map.get(&pl.id),
+            Some(&(Some("2026-11-17T10:00:00Z".to_string()), 1))
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

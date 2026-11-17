@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import {
   defaultSimpClient,
   SimpStateSnapshot,
@@ -40,6 +40,7 @@ export interface PlayerTransportBarProps {
     preferred_viz_mode?: string | null;
   };
   lyricsKaraokeEnabled: boolean;
+  karaokeModeActive?: boolean;
   idleOpacityPct: number;
   lyricsData: TrackLyricsResponse | null;
   activeLyricIdx: number;
@@ -71,6 +72,7 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
   scWaveformBars,
   trackPropsState,
   lyricsKaraokeEnabled,
+  karaokeModeActive = false,
   idleOpacityPct,
   lyricsData,
   activeLyricIdx,
@@ -90,6 +92,51 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
   scrubBottomPx,
   playerTheme,
 }) => {
+  const lyricsOuterRef = useRef<HTMLDivElement | null>(null);
+  const lyricsInnerRef = useRef<HTMLDivElement | null>(null);
+  const [karaokeFitScale, setKaraokeFitScale] = useState<number>(1);
+
+  useLayoutEffect(() => {
+    if (!karaokeModeActive || !lyricsKaraokeEnabled || isVideoTrack || hidden) {
+      setKaraokeFitScale(1);
+      return;
+    }
+
+    const measure = () => {
+      const outerEl = lyricsOuterRef.current;
+      const innerEl = lyricsInnerRef.current;
+      if (!outerEl || !innerEl) return;
+      const outerW = outerEl.clientWidth || window.innerWidth * 0.9;
+      const naturalW = innerEl.scrollWidth || 0;
+      if (naturalW <= 0 || outerW <= 0) {
+        setKaraokeFitScale(1.5);
+        return;
+      }
+      const rawScale = (outerW - 36) / naturalW;
+      const clamped = Math.max(0.72, Math.min(2.65, rawScale));
+      setKaraokeFitScale(clamped);
+    };
+
+    measure();
+    const outerEl = lyricsOuterRef.current;
+    const ro =
+      typeof ResizeObserver !== 'undefined' && outerEl ? new ResizeObserver(measure) : null;
+    if (ro && outerEl) ro.observe(outerEl);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [
+    karaokeModeActive,
+    lyricsKaraokeEnabled,
+    isVideoTrack,
+    hidden,
+    activeLyricIdx,
+    lyricsData,
+    videoTheatreExpanded,
+  ]);
+
   return (
     <>
     {/* Adaptive 7-Button Player Control Array — Anchored Above Lyrics Zone (Steps to Match Scrub Bar Center on Art Collision) */}
@@ -423,23 +470,28 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
       if (!showLyricsBubble || !lyricsData) return null;
       return (
         <div
+          ref={lyricsOuterRef}
           style={{
             position: 'absolute',
-            bottom: 18,
-            left: 48,
-            right: 48,
+            bottom: karaokeModeActive ? 22 : 18,
+            left: karaokeModeActive ? '5%' : 48,
+            right: karaokeModeActive ? '5%' : 48,
             zIndex: 3,
             pointerEvents: 'none',
             display: 'flex',
             justifyContent: 'center',
-            opacity: isForegroundFaded ? Math.max(0, Math.min(0.95, idleOpacityPct / 100)) : 1,
+            opacity:
+              karaokeModeActive || !isForegroundFaded
+                ? 1
+                : Math.max(0, Math.min(0.95, idleOpacityPct / 100)),
             transition: isForegroundFaded ? 'opacity 480ms ease' : 'opacity 60ms ease-out',
           }}
         >
           <div
+            ref={lyricsInnerRef}
             style={{
               width: 'fit-content',
-              maxWidth: '100%',
+              maxWidth: karaokeModeActive ? 'none' : '100%',
               padding: '6px 18px',
               borderRadius: 12,
               background: 'rgba(8, 9, 14, 0.82)',
@@ -452,9 +504,12 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
               textAlign: 'center',
               boxSizing: 'border-box',
               pointerEvents: 'auto',
-              transition: 'opacity 200ms ease',
-              transform:
-                !videoTheatreExpanded && playerScale > 1.02 ? `scale(${playerScale})` : undefined,
+              transition: 'opacity 200ms ease, transform 160ms ease-out',
+              transform: karaokeModeActive
+                ? `scale(${karaokeFitScale})`
+                : !videoTheatreExpanded && playerScale > 1.02
+                ? `scale(${playerScale})`
+                : undefined,
               transformOrigin: 'bottom center',
             }}
           >
@@ -480,13 +535,13 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
                     }}
                     title="Click to replay this lyric line"
                     style={{
-                      maxWidth: '100%',
+                      maxWidth: karaokeModeActive ? 'none' : '100%',
                       fontSize: 15,
                       fontWeight: 800,
                       color: '#67e8f9',
                       textShadow: '0 1px 6px rgba(0, 0, 0, 0.98)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      overflow: karaokeModeActive ? 'visible' : 'hidden',
+                      textOverflow: karaokeModeActive ? 'clip' : 'ellipsis',
                       whiteSpace: 'nowrap',
                       cursor: 'pointer',
                     }}
@@ -496,13 +551,13 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
                 ) : (
                   <div
                     style={{
-                      maxWidth: '100%',
+                      maxWidth: karaokeModeActive ? 'none' : '100%',
                       fontSize: 13.5,
                       fontFamily: 'monospace',
                       color: '#9ca3af',
                       textShadow: '0 1px 4px rgba(0, 0, 0, 0.98)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      overflow: karaokeModeActive ? 'visible' : 'hidden',
+                      textOverflow: karaokeModeActive ? 'clip' : 'ellipsis',
                       whiteSpace: 'nowrap',
                     }}
                   >
@@ -517,12 +572,12 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
                     }}
                     title="Click to jump to next lyric line"
                     style={{
-                      maxWidth: '100%',
+                      maxWidth: karaokeModeActive ? 'none' : '100%',
                       fontSize: 12,
                       color: '#8e8e99',
                       textShadow: '0 1px 4px rgba(0, 0, 0, 0.98)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      overflow: karaokeModeActive ? 'visible' : 'hidden',
+                      textOverflow: karaokeModeActive ? 'clip' : 'ellipsis',
                       whiteSpace: 'nowrap',
                       cursor: 'pointer',
                     }}
