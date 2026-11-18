@@ -6,6 +6,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
+    simp_core::prefer_efficiency_cores_for_macos_process();
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|arg| arg == "--version" || arg == "-V") {

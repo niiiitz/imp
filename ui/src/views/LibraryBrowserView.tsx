@@ -635,7 +635,19 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const { syncedUris, allLyricsUris } = useLibraryLyricsStatus();
   const [allLocalTracksVersion, setAllLocalTracksVersion] = useState(0);
   useEffect(() => {
-    const bump = () => setAllLocalTracksVersion((v) => v + 1);
+    const bump = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ properties?: unknown; lyrics?: unknown; factoids?: unknown }>)
+        .detail;
+      if (
+        detail &&
+        detail.properties === undefined &&
+        detail.lyrics === undefined &&
+        detail.factoids === undefined
+      ) {
+        return;
+      }
+      setAllLocalTracksVersion((v) => v + 1);
+    };
     window.addEventListener('simp-track-properties-updated', bump);
     return () => window.removeEventListener('simp-track-properties-updated', bump);
   }, []);

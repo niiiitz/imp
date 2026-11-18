@@ -108,7 +108,9 @@ pub fn ensure_daemon_running() {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         simp_core::configure_background_command(&mut cmd);
-        let _ = cmd.spawn();
+        if let Ok(child) = cmd.spawn() {
+            simp_core::apply_windows_efficiency_mode_to_child(&child);
+        }
 
         // Wait up to 2.0s for the daemon socket to come online
         for _ in 0..20 {
@@ -284,7 +286,8 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         simp_core::configure_background_command(&mut cmd);
-        if cmd.spawn().is_ok() {
+        if let Ok(child) = cmd.spawn() {
+            simp_core::apply_windows_efficiency_mode_to_child(&child);
             return;
         }
     }
@@ -297,7 +300,9 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     simp_core::configure_background_command(&mut fallback);
-    let _ = fallback.spawn();
+    if let Ok(child) = fallback.spawn() {
+        simp_core::apply_windows_efficiency_mode_to_child(&child);
+    }
 }
 
 

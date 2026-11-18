@@ -177,11 +177,21 @@ export function getTrackLyricsBadge(uri?: string | null): 'LRC' | 'LYR' | null {
 
 export function markTrackLyricsStatus(uri: string, hasSynced: boolean): void {
   if (!uri) return;
+  const hadAll = cachedAllLyricsUris.has(uri);
+  const hadSynced = cachedSyncedLyricsUris.has(uri);
   cachedAllLyricsUris.add(uri);
   if (hasSynced) {
     cachedSyncedLyricsUris.add(uri);
   }
-  lyricsStatusListeners.forEach((cb) => cb());
+  if (!hadAll || (hasSynced && !hadSynced)) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('simp-lyrics-badge-updated', { detail: { uri, hasSynced } })
+      );
+    } else {
+      lyricsStatusListeners.forEach((cb) => cb());
+    }
+  }
 }
 
 export function useLibraryLyricsStatus(): {
@@ -194,16 +204,33 @@ export function useLibraryLyricsStatus(): {
     const listener = () => setTick((t) => t + 1);
     lyricsStatusListeners.add(listener);
     refreshLibraryLyricsStatus(false);
-    const onPropsUpdated = (ev: Event) => {
-      const detail = (ev as CustomEvent<{ uri?: string; hasSynced?: boolean }>).detail;
-      if (detail?.uri) {
-        markTrackLyricsStatus(detail.uri, Boolean(detail.hasSynced));
-      }
-      refreshLibraryLyricsStatus(true);
+    const onBadgeUpdated = () => {
+      setTick((t) => t + 1);
     };
+    const onPropsUpdated = (ev: Event) => {
+      const detail = (
+        ev as CustomEvent<{
+          uri?: string;
+          hasSynced?: boolean;
+          properties?: unknown;
+          lyrics?: { found?: boolean; synced_lines?: unknown[] };
+        }>
+      ).detail;
+      if (detail?.uri && detail?.lyrics?.found) {
+        markTrackLyricsStatus(
+          detail.uri,
+          Array.isArray(detail.lyrics.synced_lines) && detail.lyrics.synced_lines.length > 0
+        );
+      }
+      if (detail?.properties !== undefined || detail?.lyrics !== undefined) {
+        refreshLibraryLyricsStatus(true);
+      }
+    };
+    window.addEventListener('simp-lyrics-badge-updated', onBadgeUpdated);
     window.addEventListener('simp-track-properties-updated', onPropsUpdated);
     return () => {
       lyricsStatusListeners.delete(listener);
+      window.removeEventListener('simp-lyrics-badge-updated', onBadgeUpdated);
       window.removeEventListener('simp-track-properties-updated', onPropsUpdated);
     };
   }, []);

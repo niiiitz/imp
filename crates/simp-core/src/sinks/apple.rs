@@ -1078,6 +1078,7 @@ fn spawn_windows_headless_widevine_browser() -> Option<Child> {
             .stderr(Stdio::null());
 
         if let Ok(child) = cmd.spawn() {
+            crate::apply_windows_efficiency_mode_to_child(&child);
             std::thread::spawn(|| {
                 for _ in 0..350 {
                     let _ = crate::hide_windows_headless_worker_windows();

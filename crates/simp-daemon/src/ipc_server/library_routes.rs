@@ -345,13 +345,25 @@ pub(super) async fn library_facets_handler(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let facet = params.get("facet").cloned().unwrap_or_default();
-    let uris = state.db.get_facet_matching_uris(&facet).unwrap_or_default();
-    let tracks = state.db.get_facet_matching_tracks(&facet).unwrap_or_default();
-    let (synced_uris, all_lyrics_uris) = if facet == "synced_lyrics" || facet == "has_lyrics" {
-        state.db.get_lyrics_uri_sets().unwrap_or_default()
-    } else {
-        (Vec::new(), Vec::new())
-    };
+    let db = state.db.clone();
+    let facet_for_task = facet.clone();
+    let (uris, tracks, synced_uris, all_lyrics_uris) = tokio::task::spawn_blocking(move || {
+        let uris = db
+            .get_facet_matching_uris(&facet_for_task)
+            .unwrap_or_default();
+        let tracks = db
+            .get_facet_matching_tracks(&facet_for_task)
+            .unwrap_or_default();
+        let (synced_uris, all_lyrics_uris) =
+            if facet_for_task == "synced_lyrics" || facet_for_task == "has_lyrics" {
+                db.get_lyrics_uri_sets().unwrap_or_default()
+            } else {
+                (Vec::new(), Vec::new())
+            };
+        (uris, tracks, synced_uris, all_lyrics_uris)
+    })
+    .await
+    .unwrap_or_default();
     Json(serde_json::json!({
         "ok": true,
         "facet": facet,
@@ -365,12 +377,53 @@ pub(super) async fn library_facets_handler(
 pub(super) async fn library_lyrics_status_handler(
     State(state): State<DaemonIpcState>,
 ) -> impl IntoResponse {
-    let (synced_uris, all_lyrics_uris) = state.db.get_lyrics_uri_sets().unwrap_or_default();
+    let db = state.db.clone();
+    let (synced_uris, all_lyrics_uris) = tokio::task::spawn_blocking(move || {
+        db.get_lyrics_uri_sets().unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
     Json(serde_json::json!({
         "ok": true,
         "synced_uris": synced_uris,
         "all_lyrics_uris": all_lyrics_uris,
     }))
+}
+
+static PENDING_DSP_SETTINGS_SAVE: std::sync::OnceLock<
+    std::sync::Mutex<Option<simp_protocol::SimpSettings>>,
+> = std::sync::OnceLock::new();
+static DSP_SETTINGS_SAVE_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn schedule_debounced_settings_save(cfg: simp_protocol::SimpSettings) {
+    let slot = PENDING_DSP_SETTINGS_SAVE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(mut guard) = slot.lock() {
+        *guard = Some(cfg);
+    }
+    if !DSP_SETTINGS_SAVE_ACTIVE.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                let next_cfg = slot.lock().ok().and_then(|mut g| g.take());
+                if let Some(cfg_to_write) = next_cfg {
+                    let _ = tokio::task::spawn_blocking(move || {
+                        let _ = crate::config::save_settings(&cfg_to_write);
+                    })
+                    .await;
+                    continue;
+                }
+                DSP_SETTINGS_SAVE_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+                let has_more = slot.lock().map(|g| g.is_some()).unwrap_or(false);
+                if has_more
+                    && !DSP_SETTINGS_SAVE_ACTIVE.swap(true, std::sync::atomic::Ordering::AcqRel)
+                {
+                    continue;
+                }
+                break;
+            }
+        });
+    }
 }
 
 pub(super) async fn dsp_get_handler() -> impl IntoResponse {
@@ -442,8 +495,9 @@ pub(super) async fn dsp_post_handler(
 
     dsp_state.apply_snapshot(&next);
 
-    // Persist DSP state to `~/.config/simp/settings.vdf`
-    {
+    // Persist DSP state to `~/.config/simp/settings.vdf` asynchronously (coalesced/debounced)
+    // so rapid EQ slider adjustments never block Tokio HTTP handlers on disk I/O.
+    let cfg_to_save = {
         let mut cfg = state.settings.lock().unwrap();
         cfg.audio.eq_enabled = next.eq_enabled;
         cfg.audio.eq_preset = next.eq_preset.clone();
@@ -451,8 +505,9 @@ pub(super) async fn dsp_post_handler(
         cfg.audio.eq_bands_csv = simp_core::dsp::format_eq_bands_csv(&next.bands_db);
         cfg.audio.vocal_mode = next.vocal_mode.clone();
         cfg.audio.vocal_strength = next.vocal_strength as f64;
-        let _ = crate::config::save_settings(&cfg);
-    }
+        cfg.clone()
+    };
+    schedule_debounced_settings_save(cfg_to_save);
 
     Json(serde_json::json!({
         "ok": true,

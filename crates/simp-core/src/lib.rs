@@ -552,12 +552,51 @@ pub fn prefer_efficiency_core_for_current_thread() {
     }
 }
 
-/// Clamps the entire macOS `simp` process into `PRIO_DARWIN_BG` (`TH_BUCKET_SHARE_BG`, equivalent to
-/// `taskpolicy -b -p <pid>`) so Apple Silicon's Clutch scheduler routes `simp` (including Cocoa/AppKit/GCD
-/// main-thread UI callbacks) onto Efficiency Cores while keeping disk I/O unthrottled (`IOPOL_IMPORTANT`).
-///
-/// CoreAudio's real-time audio output thread uses Mach `THREAD_TIME_CONSTRAINT_POLICY` and is unaffected
-/// by BSD `PRIO_DARWIN_BG`. No-op on non-macOS targets.
+#[cfg(target_os = "windows")]
+unsafe fn apply_windows_efficiency_mode_to_handle(h_process: *mut std::ffi::c_void) {
+    if h_process.is_null() {
+        return;
+    }
+    #[repr(C)]
+    struct ProcessPowerThrottlingState {
+        version: u32,
+        control_mask: u32,
+        state_mask: u32,
+    }
+    const PROCESS_POWER_THROTTLING: u32 = 4;
+    const PROCESS_POWER_THROTTLING_CURRENT_VERSION: u32 = 1;
+    const PROCESS_POWER_THROTTLING_EXECUTION_SPEED: u32 = 0x1;
+    const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
+
+    extern "system" {
+        fn SetProcessInformation(
+            h_process: *mut std::ffi::c_void,
+            process_information_class: u32,
+            process_information: *const std::ffi::c_void,
+            process_information_size: u32,
+        ) -> i32;
+        fn SetPriorityClass(h_process: *mut std::ffi::c_void, dw_priority_class: u32) -> i32;
+    }
+
+    let state = ProcessPowerThrottlingState {
+        version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+        control_mask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+        state_mask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+    };
+    let _ = SetProcessInformation(
+        h_process,
+        PROCESS_POWER_THROTTLING,
+        &state as *const _ as *const std::ffi::c_void,
+        std::mem::size_of::<ProcessPowerThrottlingState>() as u32,
+    );
+    let _ = SetPriorityClass(h_process, IDLE_PRIORITY_CLASS);
+}
+
+/// Applies process-level Efficiency Mode:
+/// - **macOS**: Clamps `simp` into `PRIO_DARWIN_BG` (`TH_BUCKET_SHARE_BG`, equivalent to `taskpolicy -b -p <pid>`)
+///   so Apple Silicon schedules main/worker threads onto Efficiency Cores while keeping disk I/O unthrottled.
+/// - **Windows 11**: Sets process-wide `EcoQoS` (`ProcessPowerThrottling`) + `IDLE_PRIORITY_CLASS` so `simp.exe`
+///   and child processes appear in Windows Task Manager Efficiency Mode and default to E-cores.
 pub fn prefer_efficiency_cores_for_macos_process() {
     #[cfg(target_os = "macos")]
     unsafe {
@@ -565,6 +604,30 @@ pub fn prefer_efficiency_cores_for_macos_process() {
             macos_qos::PRIO_DARWIN_PROCESS,
             &[macos_qos::IOPOL_SCOPE_PROCESS, macos_qos::IOPOL_SCOPE_DARWIN_BG],
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    unsafe {
+        extern "system" {
+            fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        }
+        apply_windows_efficiency_mode_to_handle(GetCurrentProcess());
+    }
+}
+
+/// Explicitly enables Windows 11 Efficiency Mode (`EcoQoS` + `IDLE_PRIORITY_CLASS`) on a newly
+/// spawned child process (`simp.exe --daemon`, browser UI window, or Widevine worker). No-op elsewhere.
+pub fn apply_windows_efficiency_mode_to_child(child: &std::process::Child) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            apply_windows_efficiency_mode_to_handle(child.as_raw_handle() as *mut std::ffi::c_void);
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = child;
     }
 }
 

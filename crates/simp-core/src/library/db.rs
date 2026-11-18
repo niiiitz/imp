@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use simp_protocol::{AlbumRecord, MountStatus, PlaylistRecord, TrackMetadata};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub struct TrackPropertiesPatch {
 #[derive(Clone)]
 pub struct LibraryDatabase {
     conn: Arc<Mutex<Connection>>,
+    last_synced_lyrics_cache_count: Arc<AtomicUsize>,
 }
 
 impl LibraryDatabase {
@@ -410,6 +412,7 @@ impl LibraryDatabase {
 
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
+            last_synced_lyrics_cache_count: Arc::new(AtomicUsize::new(usize::MAX)),
         })
     }
 
@@ -1986,23 +1989,29 @@ impl LibraryDatabase {
     }
 
     /// Synchronizes retrieved entries from `lyrics.db` (`lyrics_entries`) into `library.db` (`track_properties`),
-    /// matching both direct `track_uri` and normalized `(title, artist)` across `tracks`, `play_history`, and `local_favorites`.
+    /// matching both direct `track_uri` and normalized `(title, artist)` across `tracks`.
     pub fn sync_lyrics_properties_from_cache(&self) -> Result<()> {
         let cached = crate::lyrics::list_cached_lyrics_summaries();
+        let cached_count = cached.len();
+        if cached_count == self.last_synced_lyrics_cache_count.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         if cached.is_empty() {
+            self.last_synced_lyrics_cache_count
+                .store(0, Ordering::Relaxed);
             return Ok(());
         }
 
-        let mut by_title_artist: std::collections::HashMap<(String, String), (bool, bool)> =
-            std::collections::HashMap::new();
+        let mut uri_caps: HashMap<String, (bool, bool)> = HashMap::new();
+        let mut by_title_artist: HashMap<(String, String), (bool, bool)> = HashMap::new();
         for item in &cached {
-            if !item.track_uri.is_empty() {
-                let _ = self.record_indexed_track_capabilities(
-                    &item.track_uri,
-                    false,
-                    item.has_lyrics,
-                    item.has_synced_lyrics,
-                );
+            let trimmed_uri = item.track_uri.trim();
+            if !trimmed_uri.is_empty() {
+                let entry = uri_caps
+                    .entry(trimmed_uri.to_string())
+                    .or_insert((false, false));
+                entry.0 |= item.has_lyrics;
+                entry.1 |= item.has_synced_lyrics;
             }
             if !item.title_lower.is_empty() {
                 let entry = by_title_artist
@@ -2013,13 +2022,8 @@ impl LibraryDatabase {
             }
         }
 
-        if by_title_artist.is_empty() {
-            return Ok(());
-        }
-
-        let mut matched_uris: Vec<(String, bool, bool)> = Vec::new();
-        {
-            let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        if !by_title_artist.is_empty() {
             if let Ok(mut stmt) = conn.prepare("SELECT uri, title, artists_json FROM tracks") {
                 if let Ok(rows) = stmt.query_map([], |r| {
                     Ok((
@@ -2036,19 +2040,48 @@ impl LibraryDatabase {
                             .first()
                             .map(|s| s.trim().to_lowercase())
                             .unwrap_or_default();
-                        if let Some(&(has_l, has_s)) =
-                            by_title_artist.get(&(t_low.clone(), a_low))
-                        {
-                            matched_uris.push((uri, has_l, has_s));
+                        if let Some(&(has_l, has_s)) = by_title_artist.get(&(t_low, a_low)) {
+                            let trimmed_uri = uri.trim();
+                            if !trimmed_uri.is_empty() {
+                                let entry = uri_caps
+                                    .entry(trimmed_uri.to_string())
+                                    .or_insert((false, false));
+                                entry.0 |= has_l;
+                                entry.1 |= has_s;
+                            }
                         }
                     }
                 }
-            };
+            }
         }
 
-        for (uri, has_l, has_s) in matched_uris {
-            let _ = self.record_indexed_track_capabilities(&uri, false, has_l, has_s);
+        if !uri_caps.is_empty() {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            {
+                let mut upsert_stmt = tx.prepare(
+                    "INSERT INTO track_properties (
+                        uri, has_art, has_lyrics, has_synced_lyrics, updated_at
+                     ) VALUES (?1, 0, ?2, ?3, strftime('%s', 'now'))
+                     ON CONFLICT(uri) DO UPDATE SET
+                        has_lyrics = CASE WHEN excluded.has_lyrics = 1 THEN 1 ELSE track_properties.has_lyrics END,
+                        has_synced_lyrics = CASE WHEN excluded.has_synced_lyrics = 1 THEN 1 ELSE track_properties.has_synced_lyrics END,
+                        updated_at = strftime('%s', 'now')
+                     WHERE (excluded.has_lyrics = 1 AND track_properties.has_lyrics = 0)
+                        OR (excluded.has_synced_lyrics = 1 AND track_properties.has_synced_lyrics = 0)",
+                )?;
+                for (uri, (has_l, has_s)) in uri_caps {
+                    let _ = upsert_stmt.execute(params![
+                        uri,
+                        if has_l { 1 } else { 0 },
+                        if has_s { 1 } else { 0 },
+                    ]);
+                }
+            }
+            tx.commit()?;
         }
+
+        self.last_synced_lyrics_cache_count
+            .store(cached_count, Ordering::Relaxed);
         Ok(())
     }
 

@@ -607,13 +607,6 @@ export async function fetchTrackLyrics(params: {
   if (data.found && params.uri) {
     const hasSynced = Array.isArray(data.synced_lines) && data.synced_lines.length > 0;
     markTrackLyricsStatus(params.uri, hasSynced);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('simp-track-properties-updated', {
-          detail: { uri: params.uri, hasSynced },
-        })
-      );
-    }
   }
   return data;
 }

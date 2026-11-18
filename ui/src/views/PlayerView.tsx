@@ -196,6 +196,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [vizDrawerOpen, setVizDrawerOpen] = useState<boolean>(false);
   const [equalizerOpen, setEqualizerOpen] = useState<boolean>(false);
   const [dspState, setDspState] = useState<DspConfigState>(DEFAULT_DSP_STATE);
+  const pendingDspPatchRef = useRef<Partial<DspConfigState> | null>(null);
+  const dspFlushTimerRef = useRef<number | null>(null);
+  const lastDspSendAtRef = useRef<number>(0);
+  const dspInFlightRef = useRef<boolean>(false);
+  const dspPendingWhileInFlightRef = useRef<boolean>(false);
   const [factoidBubbles, setFactoidBubbles] = useState<FactoidBubbleItem[]>([]);
   const [trackPropsState, setTrackPropsState] = useState<{
     suppress_lyrics?: boolean;
@@ -873,29 +878,83 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     return restoreVal;
   }, []);
 
+  const flushPendingDspPatch = useCallback(() => {
+    if (!pendingDspPatchRef.current) return;
+    if (dspInFlightRef.current) {
+      dspPendingWhileInFlightRef.current = true;
+      return;
+    }
+
+    const elapsed = performance.now() - lastDspSendAtRef.current;
+    const minIntervalMs = 45;
+    if (elapsed < minIntervalMs) {
+      if (dspFlushTimerRef.current === null) {
+        dspFlushTimerRef.current = window.setTimeout(() => {
+          dspFlushTimerRef.current = null;
+          flushPendingDspPatch();
+        }, Math.max(1, Math.ceil(minIntervalMs - elapsed)));
+      }
+      return;
+    }
+
+    if (dspFlushTimerRef.current !== null) {
+      window.clearTimeout(dspFlushTimerRef.current);
+      dspFlushTimerRef.current = null;
+    }
+
+    const payload = pendingDspPatchRef.current;
+    pendingDspPatchRef.current = null;
+    dspPendingWhileInFlightRef.current = false;
+    dspInFlightRef.current = true;
+    lastDspSendAtRef.current = performance.now();
+
+    fetch('http://127.0.0.1:18888/api/dsp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (
+          res?.ok &&
+          res?.data &&
+          !pendingDspPatchRef.current &&
+          !dspPendingWhileInFlightRef.current
+        ) {
+          setDspState(res.data as DspConfigState);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        dspInFlightRef.current = false;
+        if (pendingDspPatchRef.current || dspPendingWhileInFlightRef.current) {
+          const waitMs = Math.max(
+            0,
+            Math.ceil(minIntervalMs - (performance.now() - lastDspSendAtRef.current))
+          );
+          if (dspFlushTimerRef.current !== null) {
+            window.clearTimeout(dspFlushTimerRef.current);
+          }
+          dspFlushTimerRef.current = window.setTimeout(() => {
+            dspFlushTimerRef.current = null;
+            flushPendingDspPatch();
+          }, waitMs);
+        }
+      });
+  }, []);
+
   const handleUpdateDsp = useCallback(
     (patch: Partial<DspConfigState>) => {
       if (patch.vocal_mode === 'off' || patch.vocal_mode === 'vocal_isolate') {
         restoreLyricsAfterKaraoke();
       }
-      setDspState((prev) => {
-        const next: DspConfigState = { ...prev, ...patch };
-        fetch('http://127.0.0.1:18888/api/dsp', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(patch),
-        })
-          .then((r) => r.json())
-          .then((res) => {
-            if (res?.ok && res?.data) {
-              setDspState(res.data as DspConfigState);
-            }
-          })
-          .catch(() => {});
-        return next;
-      });
+      setDspState((prev) => ({ ...prev, ...patch }));
+      pendingDspPatchRef.current = pendingDspPatchRef.current
+        ? { ...pendingDspPatchRef.current, ...patch }
+        : { ...patch };
+      flushPendingDspPatch();
     },
-    [restoreLyricsAfterKaraoke]
+    [restoreLyricsAfterKaraoke, flushPendingDspPatch]
   );
 
   const handleToggleKaraokeMode = useCallback(
@@ -957,6 +1016,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     return () => {
       window.removeEventListener('simp-engage-karaoke-mode', onEngageKaraoke);
       window.removeEventListener('simp-open-equalizer', onOpenEqualizer);
+      if (dspFlushTimerRef.current !== null) {
+        window.clearTimeout(dspFlushTimerRef.current);
+        dspFlushTimerRef.current = null;
+      }
     };
   }, [handleToggleKaraokeMode]);
 
@@ -1115,6 +1178,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     const onPropsUpdated = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
       if (!detail || !track?.uri || detail.uri !== track.uri) return;
+      if (
+        detail.properties === undefined &&
+        detail.lyrics === undefined &&
+        detail.factoids === undefined
+      ) {
+        return;
+      }
       if (detail.properties) {
         setTrackPropsState(detail.properties);
       }
@@ -1123,7 +1193,13 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       }
       if (detail.properties?.suppress_factoids) {
         setFactoidBubbles([]);
-      } else {
+      } else if (detail.factoids) {
+        if (detail.factoids.found && Array.isArray(detail.factoids.bubbles)) {
+          setFactoidBubbles(detail.factoids.bubbles);
+        } else {
+          setFactoidBubbles([]);
+        }
+      } else if (detail.properties && !detail.lyrics) {
         loadFactoidsAndPropsForCurrentTrack();
       }
       if (detail.lyrics) {
@@ -1132,7 +1208,9 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         } else {
           setLyricsData(null);
         }
-      } else {
+      } else if (detail.properties?.suppress_lyrics) {
+        setLyricsData(null);
+      } else if (detail.properties && !detail.factoids) {
         loadLyricsForCurrentTrack();
       }
     };

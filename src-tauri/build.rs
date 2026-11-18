@@ -5,6 +5,18 @@ fn main() {
     println!("cargo:rerun-if-changed=../packaging/windows/simp.ico");
     println!("cargo:rerun-if-changed=../packaging/windows/simp.rc");
     println!("cargo:rerun-if-changed=../packaging/windows/simp.res");
+    println!("cargo:rerun-if-changed=../packaging/macos/Info.plist");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());
+        let plist_path = manifest_dir.join("../packaging/macos/Info.plist");
+        if plist_path.is_file() {
+            println!(
+                "cargo:rustc-link-arg-bins=-Wl,-sectcreate,__TEXT,__info_plist,{}",
+                plist_path.display()
+            );
+        }
+    }
 
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default());

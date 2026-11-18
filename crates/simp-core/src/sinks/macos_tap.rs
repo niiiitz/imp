@@ -34,12 +34,14 @@ const K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL: u32 = u32::from_be_bytes(*b"glob");
 const K_AUDIO_OBJECT_PROPERTY_SCOPE_INPUT: u32 = u32::from_be_bytes(*b"inpt");
 
 const K_AUDIO_HARDWARE_PROPERTY_PROCESS_OBJECT_LIST: u32 = u32::from_be_bytes(*b"prs#");
+const K_AUDIO_HARDWARE_PROPERTY_DEFAULT_OUTPUT_DEVICE: u32 = u32::from_be_bytes(*b"dOut");
 const K_AUDIO_PROCESS_PROPERTY_PID: u32 = u32::from_be_bytes(*b"ppid");
 const K_AUDIO_PROCESS_PROPERTY_BUNDLE_ID: u32 = u32::from_be_bytes(*b"pbid");
 const K_AUDIO_PROCESS_PROPERTY_IS_RUNNING_OUTPUT: u32 = u32::from_be_bytes(*b"piro");
 const K_AUDIO_TAP_PROPERTY_UID: u32 = u32::from_be_bytes(*b"tuid");
 const K_AUDIO_TAP_PROPERTY_DESCRIPTION: u32 = u32::from_be_bytes(*b"tdsc");
 const K_AUDIO_TAP_PROPERTY_FORMAT: u32 = u32::from_be_bytes(*b"tfmt");
+const K_AUDIO_DEVICE_PROPERTY_DEVICE_UID: u32 = u32::from_be_bytes(*b"uid ");
 const K_AUDIO_DEVICE_PROPERTY_STREAM_FORMAT: u32 = u32::from_be_bytes(*b"sfmt");
 
 const CATAP_UNMUTED: isize = 0;
@@ -179,6 +181,12 @@ extern "C" {
         buffer: *mut c_void,
         buffersize: libc::c_int,
     ) -> libc::c_int;
+
+    fn proc_pidpath(
+        pid: libc::c_int,
+        buffer: *mut c_void,
+        buffersize: u32,
+    ) -> libc::c_int;
 }
 
 /// Lock-free single-producer / single-consumer ring buffer holding interleaved stereo `f32` frames.
@@ -210,6 +218,21 @@ impl StereoTapRingBuffer {
     pub fn clear(&self) {
         let w = self.write_frames.load(Ordering::Acquire);
         self.read_frames.store(w, Ordering::Release);
+    }
+
+    pub fn retain_recent(&self, max_frames: u64) {
+        let w = self.write_frames.load(Ordering::Acquire);
+        let r = self.read_frames.load(Ordering::Relaxed);
+        let min_r = w.saturating_sub(max_frames);
+        if r < min_r || r > w {
+            self.read_frames.store(min_r, Ordering::Release);
+        }
+    }
+
+    pub fn available_frames(&self) -> u64 {
+        let w = self.write_frames.load(Ordering::Acquire);
+        let r = self.read_frames.load(Ordering::Relaxed);
+        w.saturating_sub(r)
     }
 
     #[inline]
@@ -452,6 +475,28 @@ unsafe fn query_cf_string_property(obj_id: AudioObjectID, selector: u32) -> Opti
     Some(wrapped.to_string())
 }
 
+unsafe fn query_default_output_device_uid() -> Option<String> {
+    let addr = AudioObjectPropertyAddress {
+        m_selector: K_AUDIO_HARDWARE_PROPERTY_DEFAULT_OUTPUT_DEVICE,
+        m_scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
+        m_element: K_AUDIO_OBJECT_PROPERTY_ELEMENT_MAIN,
+    };
+    let mut dev_id: AudioObjectID = K_AUDIO_OBJECT_UNKNOWN;
+    let mut size = std::mem::size_of::<AudioObjectID>() as u32;
+    let status = AudioObjectGetPropertyData(
+        K_AUDIO_OBJECT_SYSTEM_OBJECT,
+        &addr,
+        0,
+        ptr::null(),
+        &mut size,
+        &mut dev_id as *mut AudioObjectID as *mut c_void,
+    );
+    if status != 0 || dev_id == K_AUDIO_OBJECT_UNKNOWN {
+        return None;
+    }
+    query_cf_string_property(dev_id, K_AUDIO_DEVICE_PROPERTY_DEVICE_UID)
+}
+
 unsafe fn resolve_process_tap_fns() -> Option<(CreateProcessTapFn, DestroyProcessTapFn)> {
     let create_name = CString::new("AudioHardwareCreateProcessTap").ok()?;
     let destroy_name = CString::new("AudioHardwareDestroyProcessTap").ok()?;
@@ -464,6 +509,69 @@ unsafe fn resolve_process_tap_fns() -> Option<(CreateProcessTapFn, DestroyProces
         std::mem::transmute::<*mut c_void, CreateProcessTapFn>(create_ptr),
         std::mem::transmute::<*mut c_void, DestroyProcessTapFn>(destroy_ptr),
     ))
+}
+
+unsafe fn query_process_path(pid: u32) -> String {
+    let mut buf = [0u8; 4096];
+    let ret = proc_pidpath(
+        pid as libc::c_int,
+        buf.as_mut_ptr() as *mut c_void,
+        buf.len() as u32,
+    );
+    if ret > 0 {
+        let len = (ret as usize).min(buf.len());
+        String::from_utf8_lossy(&buf[..len]).into_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// Identifies WebKit XPC / browser audio output helper processes while excluding SIMP CLI
+/// binaries and editor/IDE helpers so CoreAudio Process Taps never capture IDE or self audio.
+pub fn is_browser_or_webkit_audio_process(bundle_id: &str, proc_path: &str) -> bool {
+    let b = bundle_id.trim().to_ascii_lowercase();
+    let p = proc_path.trim().to_ascii_lowercase();
+    if b.is_empty() && p.is_empty() {
+        return false;
+    }
+
+    // Explicitly exclude IDEs, editors, terminals, and SIMP CLI/daemon binaries.
+    if b.contains("antigravity")
+        || p.contains("antigravity")
+        || b.contains("vscode")
+        || p.contains("visual studio code")
+        || b.contains("cursor")
+        || p.contains("/cursor.app/")
+        || b.contains("todesktop")
+        || p.ends_with("/simp")
+    {
+        return false;
+    }
+
+    b == "com.apple.webkit.gpu"
+        || b == "com.apple.webkit.webcontent"
+        || b.starts_with("com.apple.webkit.")
+        || p.contains("com.apple.webkit.gpu")
+        || p.contains("com.apple.webkit.webcontent")
+        || b.starts_with("com.apple.safari")
+        || p.contains("/safari.app/")
+        || b.starts_with("com.brave.browser")
+        || p.contains("brave browser")
+        || b.starts_with("com.google.chrome")
+        || p.contains("google chrome")
+        || b.starts_with("org.chromium.chromium")
+        || p.contains("chromium")
+        || b.starts_with("com.microsoft.edgemac")
+        || p.contains("microsoft edge")
+        || b.starts_with("org.mozilla.firefox")
+        || p.contains("/firefox.app/")
+        || p.ends_with("/plugin-container")
+        || b.starts_with("company.thebrowser.browser")
+        || p.contains("/arc.app/")
+        || b.starts_with("com.vivaldi.vivaldi")
+        || p.contains("/vivaldi.app/")
+        || b.starts_with("com.operasoftware.opera")
+        || p.contains("/opera.app/")
 }
 
 unsafe fn find_webkit_audio_process_objects(my_pid: u32) -> Vec<AudioObjectID> {
@@ -492,7 +600,7 @@ unsafe fn find_webkit_audio_process_objects(my_pid: u32) -> Vec<AudioObjectID> {
         return Vec::new();
     }
 
-    let mut raw_entries: Vec<(AudioObjectID, u32, String, bool)> = Vec::new();
+    let mut candidates: Vec<(AudioObjectID, bool)> = Vec::new();
     let mut ppid_map: HashMap<u32, u32> = HashMap::new();
 
     for obj_id in proc_objs {
@@ -540,6 +648,12 @@ unsafe fn find_webkit_audio_process_objects(my_pid: u32) -> Vec<AudioObjectID> {
 
         let bundle_id = query_cf_string_property(obj_id, K_AUDIO_PROCESS_PROPERTY_BUNDLE_ID)
             .unwrap_or_default();
+        let proc_path = query_process_path(pid);
+        let is_descendant = is_descendant_of_pid(pid, my_pid, &ppid_map);
+        if !is_descendant && !is_browser_or_webkit_audio_process(&bundle_id, &proc_path) {
+            continue;
+        }
+
         let run_addr = AudioObjectPropertyAddress {
             m_selector: K_AUDIO_PROCESS_PROPERTY_IS_RUNNING_OUTPUT,
             m_scope: K_AUDIO_OBJECT_PROPERTY_SCOPE_GLOBAL,
@@ -555,27 +669,19 @@ unsafe fn find_webkit_audio_process_objects(my_pid: u32) -> Vec<AudioObjectID> {
             &mut run_sz,
             &mut running_out as *mut u32 as *mut c_void,
         );
-        raw_entries.push((obj_id, pid, bundle_id, running_out != 0));
+        candidates.push((obj_id, running_out != 0));
     }
 
-    let mut matched: Vec<AudioObjectID> = raw_entries
+    let mut matched: Vec<AudioObjectID> = candidates
         .iter()
-        .filter(|(_, pid, _, _)| is_descendant_of_pid(*pid, my_pid, &ppid_map))
-        .map(|(obj_id, _, _, _)| *obj_id)
+        .filter(|(_, running)| *running)
+        .map(|(obj_id, _)| *obj_id)
         .collect();
-
     if matched.is_empty() {
-        // Launchd-hosted XPC WebKit media helpers (`com.apple.WebKit.GPU` / `WebContent`) often have ppid == 1.
-        matched = raw_entries
-            .iter()
-            .filter(|(_, _, bundle, running)| {
-                *running
-                    && (bundle == "com.apple.WebKit.GPU" || bundle == "com.apple.WebKit.WebContent")
-            })
-            .map(|(obj_id, _, _, _)| *obj_id)
-            .collect();
+        matched = candidates.into_iter().map(|(obj_id, _)| obj_id).collect();
     }
-
+    matched.sort_unstable();
+    matched.dedup();
     matched
 }
 
@@ -596,6 +702,7 @@ impl ActiveTapHandle {
         if self.mute_behavior == behavior {
             return true;
         }
+        let prev = self.mute_behavior;
         let pool: Id = msg_send![class!(NSAutoreleasePool), new];
         let _: () = msg_send![self.tap_desc, setMuteBehavior: behavior];
         let addr = AudioObjectPropertyAddress {
@@ -611,13 +718,34 @@ impl ActiveTapHandle {
             std::mem::size_of::<Id>() as u32,
             &self.tap_desc as *const Id as *const c_void,
         );
-        let _: () = msg_send![pool, drain];
         if status == 0 {
-            self.mute_behavior = behavior;
-            true
+            let mut verify_ptr: Id = NIL;
+            let mut verify_sz = std::mem::size_of::<Id>() as u32;
+            let verify_status = AudioObjectGetPropertyData(
+                self.tap_id,
+                &addr,
+                0,
+                ptr::null(),
+                &mut verify_sz,
+                &mut verify_ptr as *mut Id as *mut c_void,
+            );
+            let verified = if verify_status == 0 && verify_ptr != NIL {
+                let actual: isize = msg_send![verify_ptr, isMuted];
+                let _: () = msg_send![verify_ptr, release];
+                actual == behavior
+            } else {
+                false
+            };
+            let _: () = msg_send![pool, drain];
+            if verified {
+                self.mute_behavior = behavior;
+                return true;
+            }
         } else {
-            false
+            let _: () = msg_send![self.tap_desc, setMuteBehavior: prev];
+            let _: () = msg_send![pool, drain];
         }
+        false
     }
 
     unsafe fn teardown(self) {
@@ -648,6 +776,7 @@ unsafe fn create_webkit_process_tap(
     confirmed_nonzero: Arc<AtomicBool>,
     nonzero_ticks: Arc<AtomicU64>,
     sample_rate: Arc<AtomicU32>,
+    initial_mute_behavior: isize,
 ) -> Option<ActiveTapHandle> {
     if proc_obj_ids.is_empty() {
         return None;
@@ -675,7 +804,7 @@ unsafe fn create_webkit_process_tap(
     let tap_name_ns: Id = msg_send![class!(NSString), stringWithUTF8String: tap_name_cstr.as_ptr()];
     let _: () = msg_send![tap_desc, setName: tap_name_ns];
     let _: () = msg_send![tap_desc, setPrivate: YES_BOOL];
-    let _: () = msg_send![tap_desc, setMuteBehavior: CATAP_UNMUTED];
+    let _: () = msg_send![tap_desc, setMuteBehavior: initial_mute_behavior];
 
     let mut tap_id: AudioObjectID = K_AUDIO_OBJECT_UNKNOWN;
     let tap_status = (create_tap_fn)(tap_desc, &mut tap_id);
@@ -726,7 +855,7 @@ unsafe fn create_webkit_process_tap(
     ]);
     let tap_list = CFArray::from_CFTypes(&[sub_tap.as_CFType()]);
     let agg_uid = format!("org.simp.player.webkittap.{}.{}", libc::getpid(), tap_id);
-    let agg_desc = CFDictionary::from_CFType_pairs(&[
+    let mut agg_pairs = vec![
         (
             CFString::from_static_string("uid"),
             CFString::new(&agg_uid).as_CFType(),
@@ -747,7 +876,23 @@ unsafe fn create_webkit_process_tap(
             CFString::from_static_string("taps"),
             tap_list.as_CFType(),
         ),
-    ]);
+    ];
+    if let Some(def_dev_uid) = query_default_output_device_uid() {
+        let sub_dev = CFDictionary::from_CFType_pairs(&[(
+            CFString::from_static_string("uid"),
+            CFString::new(&def_dev_uid).as_CFType(),
+        )]);
+        let sub_devs = CFArray::from_CFTypes(&[sub_dev.as_CFType()]);
+        agg_pairs.push((
+            CFString::from_static_string("master"),
+            CFString::new(&def_dev_uid).as_CFType(),
+        ));
+        agg_pairs.push((
+            CFString::from_static_string("subdevices"),
+            sub_devs.as_CFType(),
+        ));
+    }
+    let agg_desc = CFDictionary::from_CFType_pairs(&agg_pairs);
 
     let mut agg_device_id: AudioObjectID = K_AUDIO_OBJECT_UNKNOWN;
     let agg_status = AudioHardwareCreateAggregateDevice(
@@ -827,7 +972,7 @@ unsafe fn create_webkit_process_tap(
         ioproc_id,
         ctx_ptr,
         destroy_tap_fn,
-        mute_behavior: CATAP_UNMUTED,
+        mute_behavior: initial_mute_behavior,
     })
 }
 
@@ -847,7 +992,14 @@ impl TapDspOutput {
         let sink = Sink::try_new(&handle).ok()?;
         // MusicKit / WebKit already scales output amplitude by `perceptual_cubic_gain(volume)`.
         sink.set_volume(1.0);
-        ring.clear();
+        ring.retain_recent(1024);
+        let prime_frames = ((sample_rate as u64 * 20) / 1000).clamp(256, 960);
+        for _ in 0..12 {
+            if ring.available_frames() >= prime_frames {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
         let running = Arc::new(AtomicBool::new(true));
         let src = TapDspSource::new(ring, tap_buffer, sample_rate, running.clone());
         sink.append(src);
@@ -862,6 +1014,58 @@ impl TapDspOutput {
     fn stop(self) {
         self.running.store(false, Ordering::Release);
         self.sink.stop();
+    }
+}
+
+struct TapSharedState {
+    ring: Arc<StereoTapRingBuffer>,
+    tap_buffer: Arc<AudioTapBuffer>,
+    dsp_active: Arc<AtomicBool>,
+    confirmed_nonzero: Arc<AtomicBool>,
+    nonzero_ticks: Arc<AtomicU64>,
+    sample_rate: Arc<AtomicU32>,
+}
+
+/// Switches `active_tap` to `target_mute`, tearing down and recreating the CoreAudio
+/// process tap when the OS rejects live `kAudioTapPropertyDescription` updates.
+unsafe fn switch_or_recreate_tap_mute(
+    active_tap: &mut Option<ActiveTapHandle>,
+    active_proc_objs: &mut Vec<AudioObjectID>,
+    my_pid: u32,
+    shared: &TapSharedState,
+    target_mute: isize,
+) -> bool {
+    let Some(ref mut tap) = *active_tap else {
+        return false;
+    };
+    if tap.set_mute_behavior(target_mute) {
+        return true;
+    }
+    let fresh_targets = find_webkit_audio_process_objects(my_pid);
+    let targets = if fresh_targets.is_empty() {
+        active_proc_objs.clone()
+    } else {
+        fresh_targets
+    };
+    if let Some(old_tap) = active_tap.take() {
+        old_tap.teardown();
+    }
+    *active_tap = create_webkit_process_tap(
+        &targets,
+        shared.ring.clone(),
+        shared.tap_buffer.clone(),
+        shared.dsp_active.clone(),
+        shared.confirmed_nonzero.clone(),
+        shared.nonzero_ticks.clone(),
+        shared.sample_rate.clone(),
+        target_mute,
+    );
+    if active_tap.is_some() {
+        *active_proc_objs = targets;
+        true
+    } else {
+        active_proc_objs.clear();
+        false
     }
 }
 
@@ -904,14 +1108,17 @@ impl MacOsWebKitAudioTap {
             .spawn(move || {
                 crate::prefer_efficiency_core_for_current_thread();
 
-                let ring = Arc::new(StereoTapRingBuffer::new());
-                let tap_buffer = Arc::new(AudioTapBuffer::new());
-                let dsp_active = Arc::new(AtomicBool::new(false));
-                let confirmed_nonzero = Arc::new(AtomicBool::new(false));
-                let nonzero_ticks = Arc::new(AtomicU64::new(0));
-                let sample_rate = Arc::new(AtomicU32::new(48_000));
+                let shared = TapSharedState {
+                    ring: Arc::new(StereoTapRingBuffer::new()),
+                    tap_buffer: Arc::new(AudioTapBuffer::new()),
+                    dsp_active: Arc::new(AtomicBool::new(false)),
+                    confirmed_nonzero: Arc::new(AtomicBool::new(false)),
+                    nonzero_ticks: Arc::new(AtomicU64::new(0)),
+                    sample_rate: Arc::new(AtomicU32::new(48_000)),
+                };
 
                 let mut active_tap: Option<ActiveTapHandle> = None;
+                let mut active_proc_objs: Vec<AudioObjectID> = Vec::new();
                 let mut active_dsp_out: Option<TapDspOutput> = None;
                 let mut last_discovery_at = Instant::now() - Duration::from_secs(10);
                 let mut last_nonzero_seen_tick = 0u64;
@@ -920,72 +1127,126 @@ impl MacOsWebKitAudioTap {
 
                 while !stop_flag.load(Ordering::Acquire) {
                     let now = Instant::now();
-                    let cur_tick = nonzero_ticks.load(Ordering::Relaxed);
+                    let my_pid = unsafe { libc::getpid() } as u32;
+                    let cur_tick = shared.nonzero_ticks.load(Ordering::Relaxed);
                     if cur_tick != last_nonzero_seen_tick {
                         last_nonzero_seen_tick = cur_tick;
                         last_nonzero_instant = now;
                     }
 
-                    // Discover/attach CoreAudio process tap initially or if silent/missing after 1.5s.
-                    if (active_tap.is_none()
-                        || (!confirmed_nonzero.load(Ordering::Acquire)
-                            && now.duration_since(last_discovery_at) >= Duration::from_millis(1500)))
-                        && now.duration_since(last_discovery_at) >= Duration::from_millis(600)
-                    {
+                    // Discover/attach CoreAudio process tap initially, when a new browser/WebKit
+                    // audio helper appears, or when an existing tap has not yet produced non-zero PCM.
+                    let discovery_due = if active_tap.is_none() {
+                        now.duration_since(last_discovery_at) >= Duration::from_millis(600)
+                    } else {
+                        now.duration_since(last_discovery_at) >= Duration::from_millis(1500)
+                    };
+                    if discovery_due {
                         last_discovery_at = now;
-                        let my_pid = unsafe { libc::getpid() } as u32;
                         let proc_objs = unsafe { find_webkit_audio_process_objects(my_pid) };
-                        if !proc_objs.is_empty() && active_tap.is_none() {
+                        let has_nonzero_now = shared.confirmed_nonzero.load(Ordering::Acquire);
+                        let missing_candidate =
+                            proc_objs.iter().any(|id| !active_proc_objs.contains(id));
+                        let should_replace = !proc_objs.is_empty()
+                            && (active_tap.is_none()
+                                || missing_candidate
+                                || (!has_nonzero_now && proc_objs != active_proc_objs));
+                        if should_replace {
+                            let initial_mute = if active_dsp_out.is_some() {
+                                CATAP_MUTED_WHEN_TAPPED
+                            } else {
+                                CATAP_UNMUTED
+                            };
+                            if let Some(old_tap) = active_tap.take() {
+                                unsafe {
+                                    old_tap.teardown();
+                                }
+                            }
+                            if !has_nonzero_now {
+                                shared.confirmed_nonzero.store(false, Ordering::Release);
+                            }
                             active_tap = unsafe {
                                 create_webkit_process_tap(
                                     &proc_objs,
-                                    ring.clone(),
-                                    tap_buffer.clone(),
-                                    dsp_active.clone(),
-                                    confirmed_nonzero.clone(),
-                                    nonzero_ticks.clone(),
-                                    sample_rate.clone(),
+                                    shared.ring.clone(),
+                                    shared.tap_buffer.clone(),
+                                    shared.dsp_active.clone(),
+                                    shared.confirmed_nonzero.clone(),
+                                    shared.nonzero_ticks.clone(),
+                                    shared.sample_rate.clone(),
+                                    initial_mute,
                                 )
                             };
-                            if active_tap.is_some() && !logged_tap_active {
-                                logged_tap_active = true;
-                                tracing::info!(
-                                    "Attached macOS CoreAudio Process Tap to {} WebKit audio process(es)",
-                                    proc_objs.len()
-                                );
+                            if active_tap.is_some() {
+                                active_proc_objs = proc_objs;
+                                if !logged_tap_active {
+                                    logged_tap_active = true;
+                                    tracing::info!(
+                                        "Attached macOS CoreAudio Process Tap to {} WebKit/browser audio process(es)",
+                                        active_proc_objs.len()
+                                    );
+                                }
+                            } else {
+                                active_proc_objs.clear();
                             }
                         }
                     }
 
-                    let has_nonzero = confirmed_nonzero.load(Ordering::Acquire);
-                    let recently_nonzero = now.duration_since(last_nonzero_instant) < Duration::from_millis(650);
+                    let has_nonzero = shared.confirmed_nonzero.load(Ordering::Acquire);
+                    let recently_nonzero =
+                        now.duration_since(last_nonzero_instant) < Duration::from_secs(15);
                     let want_dsp = !global_dsp_state().is_bypassed() && has_nonzero && recently_nonzero;
 
-                    if want_dsp && active_dsp_out.is_none() {
-                        if let Some(ref mut tap) = active_tap {
-                            let sr = sample_rate.load(Ordering::Relaxed);
-                            if let Some(out) = TapDspOutput::open(ring.clone(), tap_buffer.clone(), sr) {
-                                unsafe {
-                                    let _ = tap.set_mute_behavior(CATAP_MUTED_WHEN_TAPPED);
-                                }
-                                dsp_active.store(true, Ordering::Release);
+                    if want_dsp && active_dsp_out.is_none() && active_tap.is_some() {
+                        let switched = unsafe {
+                            switch_or_recreate_tap_mute(
+                                &mut active_tap,
+                                &mut active_proc_objs,
+                                my_pid,
+                                &shared,
+                                CATAP_MUTED_WHEN_TAPPED,
+                            )
+                        };
+                        if switched {
+                            last_nonzero_instant = Instant::now();
+                            let sr = shared.sample_rate.load(Ordering::Relaxed);
+                            if let Some(out) = TapDspOutput::open(
+                                shared.ring.clone(),
+                                shared.tap_buffer.clone(),
+                                sr,
+                            ) {
+                                shared.dsp_active.store(true, Ordering::Release);
                                 active_dsp_out = Some(out);
+                            } else {
+                                unsafe {
+                                    let _ = switch_or_recreate_tap_mute(
+                                        &mut active_tap,
+                                        &mut active_proc_objs,
+                                        my_pid,
+                                        &shared,
+                                        CATAP_UNMUTED,
+                                    );
+                                }
                             }
                         }
                     } else if !want_dsp && active_dsp_out.is_some() {
-                        if let Some(ref mut tap) = active_tap {
-                            unsafe {
-                                let _ = tap.set_mute_behavior(CATAP_UNMUTED);
-                            }
-                        }
-                        dsp_active.store(false, Ordering::Release);
+                        shared.dsp_active.store(false, Ordering::Release);
                         if let Some(out) = active_dsp_out.take() {
                             out.stop();
+                        }
+                        unsafe {
+                            let _ = switch_or_recreate_tap_mute(
+                                &mut active_tap,
+                                &mut active_proc_objs,
+                                my_pid,
+                                &shared,
+                                CATAP_UNMUTED,
+                            );
                         }
                     }
 
                     if has_nonzero && recently_nonzero {
-                        let (rms, peak, onset, bands) = tap_buffer.compute_spectrum_tick();
+                        let (rms, peak, onset, bands) = shared.tap_buffer.compute_spectrum_tick();
                         if rms > 0.0005 || peak > 0.0005 {
                             let _ = broadcast_tx.send(PlaybackEvent::AudioSpectrumTick {
                                 rms,
@@ -999,12 +1260,7 @@ impl MacOsWebKitAudioTap {
                     std::thread::sleep(Duration::from_millis(80));
                 }
 
-                if let Some(ref mut tap) = active_tap {
-                    unsafe {
-                        let _ = tap.set_mute_behavior(CATAP_UNMUTED);
-                    }
-                }
-                dsp_active.store(false, Ordering::Release);
+                shared.dsp_active.store(false, Ordering::Release);
                 if let Some(out) = active_dsp_out.take() {
                     out.stop();
                 }
@@ -1078,5 +1334,33 @@ mod tests {
 
         running.store(false, Ordering::Release);
         assert!(src.next().is_none());
+    }
+
+    #[test]
+    fn test_is_browser_or_webkit_audio_process_matches_browsers_and_excludes_ides() {
+        assert!(is_browser_or_webkit_audio_process(
+            "com.apple.WebKit.GPU",
+            "/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.GPU.xpc/Contents/MacOS/com.apple.WebKit.GPU"
+        ));
+        assert!(is_browser_or_webkit_audio_process(
+            "com.brave.Browser.helper",
+            "/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Helpers/Brave Browser Helper (Aperitif)"
+        ));
+        assert!(is_browser_or_webkit_audio_process(
+            "com.google.Chrome.helper",
+            "/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/Helpers/Google Chrome Helper"
+        ));
+        assert!(is_browser_or_webkit_audio_process(
+            "",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+        ));
+        assert!(!is_browser_or_webkit_audio_process(
+            "com.google.antigravity-ide.helper",
+            "/Applications/Antigravity IDE.app/Contents/Frameworks/Antigravity IDE Helper.app/Contents/MacOS/Antigravity IDE Helper"
+        ));
+        assert!(!is_browser_or_webkit_audio_process(
+            "",
+            "/Users/example/workspace/simp/target/debug/simp"
+        ));
     }
 }

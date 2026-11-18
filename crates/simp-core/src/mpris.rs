@@ -134,7 +134,9 @@ pub fn launch_simp_desktop_window() {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
             crate::configure_background_command(&mut cmd);
-            let _ = cmd.spawn();
+            if let Ok(child) = cmd.spawn() {
+                crate::apply_windows_efficiency_mode_to_child(&child);
+            }
         }
         return;
     }
