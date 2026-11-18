@@ -13,6 +13,7 @@ import {
 } from '../drivers/SoundCloudDriver';
 import { BrowserTarget } from '../views/PlayerView';
 import { cleanCollectionTitle } from '../views/library/libraryHelpers';
+import { ImpIcon } from './icons/ImpIcon';
 
 export interface PendingHybridAddJob {
   uris: string[];
@@ -81,11 +82,19 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
   const [onlineChoice, setOnlineChoice] = React.useState<PendingOnlineForkChoice | null>(null);
   const [creatingCloudApple, setCreatingCloudApple] = React.useState(false);
   const [busyMsg, setBusyMsg] = React.useState<string | null>(null);
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const wasOpenRef = React.useRef(false);
 
   React.useEffect(() => {
     setOnlineChoice(null);
     setCreatingCloudApple(false);
     setBusyMsg(null);
+    if (pendingHybridAdd && !wasOpenRef.current) {
+      returnFocusRef.current =
+        (document.querySelector<HTMLElement>('[data-simp-active-focus="true"]') as HTMLElement | null) ||
+        (document.activeElement as HTMLElement | null);
+    }
+    wasOpenRef.current = Boolean(pendingHybridAdd);
   }, [pendingHybridAdd]);
 
   if (!pendingHybridAdd) return null;
@@ -135,12 +144,29 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
       )
     : [];
 
+  const restoreFocusAfterClose = () => {
+    const saved = returnFocusRef.current;
+    returnFocusRef.current = null;
+    window.setTimeout(() => {
+      const target =
+        (saved && document.body.contains(saved) ? saved : null) ||
+        document.querySelector<HTMLElement>(
+          '[data-nav-col="right"] [data-right-track="true"][data-track-playing="true"]'
+        ) ||
+        document.querySelector<HTMLElement>('[data-nav-col="right"] [data-right-track="true"]');
+      if (target) {
+        applyFocusMarker(target);
+      }
+    }, 25);
+  };
+
   const closeModal = () => {
     setPendingHybridAdd(null);
     setOskTarget(null);
     setOnlineChoice(null);
     setCreatingCloudApple(false);
     setBusyMsg(null);
+    restoreFocusAfterClose();
   };
 
   const focusFirstModalButton = () => {
@@ -475,6 +501,166 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
           </div>
         ) : (
           <>
+            {!pendingHybridAdd.creatingNew && !creatingCloudApple ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <button
+                  disabled={Boolean(busyMsg)}
+                  data-default-focus={playlists.length === 0 ? 'true' : undefined}
+                  onClick={() => {
+                    setNewPlaylistName('');
+                    setCreatingCloudApple(false);
+                    setPendingHybridAdd((prev) =>
+                      prev ? { ...prev, creatingNew: true } : null
+                    );
+                    openNameKeyboardOrInput(
+                      '[data-hybrid-picker-modal="true"] input[data-osk-input="playlist"]'
+                    );
+                  }}
+                  style={{
+                    minHeight: 42,
+                    padding: '0 14px',
+                    borderRadius: 10,
+                    background: '#121822',
+                    border: '1px dashed #2aa3c4',
+                    color: '#67e8f9',
+                    fontSize: 12,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  ★ + Create New IMP Hybrid Playlist...
+                </button>
+                {isAppleBatch && appleAuthenticated && (
+                  <button
+                    disabled={Boolean(busyMsg)}
+                    onClick={() => {
+                      setNewPlaylistName('');
+                      setPendingHybridAdd((prev) =>
+                        prev ? { ...prev, creatingNew: false } : null
+                      );
+                      setCreatingCloudApple(true);
+                      openNameKeyboardOrInput(
+                        '[data-hybrid-picker-modal="true"] input[data-osk-input="playlist"]'
+                      );
+                    }}
+                    style={{
+                      minHeight: 42,
+                      padding: '0 14px',
+                      borderRadius: 10,
+                      background: '#1c0d14',
+                      border: '1px dashed #fb7185',
+                      color: '#fda4af',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <ImpIcon name="apple" size={13} color="#fb7185" />
+                    <span>+ Create New Apple Cloud Playlist...</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  padding: 10,
+                  borderRadius: 10,
+                  background: creatingCloudApple ? '#1c0d14' : '#0c161c',
+                  border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
+                }}
+              >
+                <input
+                  type="text"
+                  data-osk-input="playlist"
+                  placeholder={
+                    creatingCloudApple
+                      ? 'New Apple Cloud Playlist name...'
+                      : 'New IMP Playlist name...'
+                  }
+                  value={newPlaylistName}
+                  onChange={(e) => setNewPlaylistName(e.target.value)}
+                  onClick={() => {
+                    if (document.documentElement.dataset.simpInput === 'gamepad') {
+                      setOskTarget('playlist');
+                      if (window.parent && window.parent !== window) {
+                        window.parent.postMessage({ type: 'SIMP_OPEN_OSK' }, '*');
+                      }
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (creatingCloudApple) {
+                        handleCreateAppleCloudPlaylist(newPlaylistName);
+                      } else {
+                        const job = pendingHybridAdd;
+                        const chosenName = newPlaylistName;
+                        closeModal();
+                        commitAddTracksToPlaylist(
+                          job.uris,
+                          job.label,
+                          job.trackMetadata,
+                          undefined,
+                          chosenName
+                        );
+                      }
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: 38,
+                    padding: '0 12px',
+                    borderRadius: 8,
+                    background: '#08080c',
+                    border: '1px solid #2e2e3c',
+                    color: '#d4d4dc',
+                    fontSize: 12,
+                  }}
+                />
+                <button
+                  disabled={Boolean(busyMsg)}
+                  data-hybrid-picker-submit="true"
+                  data-default-focus="true"
+                  onClick={() => {
+                    if (creatingCloudApple) {
+                      handleCreateAppleCloudPlaylist(newPlaylistName);
+                    } else {
+                      const job = pendingHybridAdd;
+                      const chosenName = newPlaylistName;
+                      closeModal();
+                      commitAddTracksToPlaylist(
+                        job.uris,
+                        job.label,
+                        job.trackMetadata,
+                        undefined,
+                        chosenName
+                      );
+                    }
+                  }}
+                  style={{
+                    minHeight: 38,
+                    padding: '0 14px',
+                    borderRadius: 8,
+                    background: creatingCloudApple ? '#251018' : '#0f222a',
+                    color: creatingCloudApple ? '#fda4af' : '#bfeaf5',
+                    border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
+                    fontWeight: 800,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  {creatingCloudApple ? 'Create Cloud' : 'Create & Add'}
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {[...playlists]
                 .sort((a, b) => (a.origin === 'simp_local' ? -1 : 1) - (b.origin === 'simp_local' ? -1 : 1))
@@ -614,9 +800,13 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
                     }}
                   >
-                    🍎 {cp.name}
+                    <ImpIcon name="apple" size={13} color="#fb7185" />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{cp.name}</span>
                   </span>
                   <span
                     style={{
@@ -686,162 +876,6 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                 </button>
               ))}
             </div>
-
-            {!pendingHybridAdd.creatingNew && !creatingCloudApple ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-                <button
-                  disabled={Boolean(busyMsg)}
-                  data-default-focus={playlists.length === 0 ? 'true' : undefined}
-                  onClick={() => {
-                    setNewPlaylistName('');
-                    setCreatingCloudApple(false);
-                    setPendingHybridAdd((prev) =>
-                      prev ? { ...prev, creatingNew: true } : null
-                    );
-                    openNameKeyboardOrInput(
-                      '[data-hybrid-picker-modal="true"] input[data-osk-input="playlist"]'
-                    );
-                  }}
-                  style={{
-                    minHeight: 42,
-                    padding: '0 14px',
-                    borderRadius: 10,
-                    background: '#121822',
-                    border: '1px dashed #2aa3c4',
-                    color: '#67e8f9',
-                    fontSize: 12,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                >
-                  ★ + Create New IMP Hybrid Playlist...
-                </button>
-                {isAppleBatch && appleAuthenticated && (
-                  <button
-                    disabled={Boolean(busyMsg)}
-                    onClick={() => {
-                      setNewPlaylistName('');
-                      setPendingHybridAdd((prev) =>
-                        prev ? { ...prev, creatingNew: false } : null
-                      );
-                      setCreatingCloudApple(true);
-                      openNameKeyboardOrInput(
-                        '[data-hybrid-picker-modal="true"] input[data-osk-input="playlist"]'
-                      );
-                    }}
-                    style={{
-                      minHeight: 42,
-                      padding: '0 14px',
-                      borderRadius: 10,
-                      background: '#1c0d14',
-                      border: '1px dashed #fb7185',
-                      color: '#fda4af',
-                      fontSize: 12,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                    }}
-                  >
-                    🍎 + Create New Apple Cloud Playlist...
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  padding: 10,
-                  borderRadius: 10,
-                  background: creatingCloudApple ? '#1c0d14' : '#0c161c',
-                  border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
-                }}
-              >
-                <input
-                  type="text"
-                  data-osk-input="playlist"
-                  placeholder={
-                    creatingCloudApple
-                      ? 'New Apple Cloud Playlist name...'
-                      : 'New IMP Playlist name...'
-                  }
-                  value={newPlaylistName}
-                  onChange={(e) => setNewPlaylistName(e.target.value)}
-                  onClick={() => {
-                    if (document.documentElement.dataset.simpInput === 'gamepad') {
-                      setOskTarget('playlist');
-                      if (window.parent && window.parent !== window) {
-                        window.parent.postMessage({ type: 'SIMP_OPEN_OSK' }, '*');
-                      }
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      if (creatingCloudApple) {
-                        handleCreateAppleCloudPlaylist(newPlaylistName);
-                      } else {
-                        const job = pendingHybridAdd;
-                        const chosenName = newPlaylistName;
-                        closeModal();
-                        commitAddTracksToPlaylist(
-                          job.uris,
-                          job.label,
-                          job.trackMetadata,
-                          undefined,
-                          chosenName
-                        );
-                      }
-                    }
-                  }}
-                  style={{
-                    flex: 1,
-                    minHeight: 38,
-                    padding: '0 12px',
-                    borderRadius: 8,
-                    background: '#08080c',
-                    border: '1px solid #2e2e3c',
-                    color: '#d4d4dc',
-                    fontSize: 12,
-                  }}
-                />
-                <button
-                  disabled={Boolean(busyMsg)}
-                  data-hybrid-picker-submit="true"
-                  data-default-focus="true"
-                  onClick={() => {
-                    if (creatingCloudApple) {
-                      handleCreateAppleCloudPlaylist(newPlaylistName);
-                    } else {
-                      const job = pendingHybridAdd;
-                      const chosenName = newPlaylistName;
-                      closeModal();
-                      commitAddTracksToPlaylist(
-                        job.uris,
-                        job.label,
-                        job.trackMetadata,
-                        undefined,
-                        chosenName
-                      );
-                    }
-                  }}
-                  style={{
-                    minHeight: 38,
-                    padding: '0 14px',
-                    borderRadius: 8,
-                    background: creatingCloudApple ? '#251018' : '#0f222a',
-                    color: creatingCloudApple ? '#fda4af' : '#bfeaf5',
-                    border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
-                    fontWeight: 800,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
-                >
-                  {creatingCloudApple ? 'Create Cloud' : 'Create & Add'}
-                </button>
-              </div>
-            )}
           </>
         )}
       </div>

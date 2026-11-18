@@ -140,28 +140,63 @@ export function mapAppleItemToTrack(item: any): TrackMetadata | null {
   };
 }
 
+let drmSupportPromise: Promise<boolean> | null = null;
+
 export async function checkWidevineDrm(): Promise<boolean> {
-  if (typeof navigator === 'undefined' || !navigator.requestMediaKeySystemAccess) {
-    return false;
+  if (drmSupportPromise) {
+    return drmSupportPromise;
   }
-  const configs: MediaKeySystemConfiguration[] = [
-    {
-      initDataTypes: ['cenc'],
-      audioCapabilities: [
-        { contentType: 'audio/mp4; codecs="mp4a.40.2"', robustness: 'SW_SECURE_CRYPTO' },
-        { contentType: 'audio/mp4; codecs="mp4a.40.2"' },
-      ],
-    },
-  ];
-  for (const ks of ['com.widevine.alpha', 'com.apple.fps.1_0', 'com.apple.fps']) {
+  drmSupportPromise = (async () => {
+    if (typeof navigator === 'undefined') {
+      return false;
+    }
+    const webKitMediaKeys = (window as any).WebKitMediaKeys;
+    if (
+      webKitMediaKeys?.isTypeSupported &&
+      (webKitMediaKeys.isTypeSupported('com.apple.fps.1_0', 'audio/mp4') ||
+        webKitMediaKeys.isTypeSupported('com.apple.fps', 'audio/mp4') ||
+        webKitMediaKeys.isTypeSupported('com.apple.fps.1_0', 'application/x-mpegurl'))
+    ) {
+      return true;
+    }
+    if (!navigator.requestMediaKeySystemAccess) {
+      return false;
+    }
+    const fairPlayConfigs: MediaKeySystemConfiguration[] = [
+      {
+        initDataTypes: ['sinf', 'skd', 'cenc'],
+        audioCapabilities: [
+          { contentType: 'audio/mp4; codecs="mp4a.40.2"' },
+          { contentType: 'audio/mp4' },
+          { contentType: 'application/vnd.apple.mpegurl' },
+        ],
+      },
+    ];
+    for (const ks of ['com.apple.fps.1_0', 'com.apple.fps', 'com.apple.fps.2_0']) {
+      try {
+        await navigator.requestMediaKeySystemAccess(ks, fairPlayConfigs);
+        return true;
+      } catch {
+        // Try next FairPlay key system
+      }
+    }
+    const widevineConfigs: MediaKeySystemConfiguration[] = [
+      {
+        initDataTypes: ['cenc'],
+        audioCapabilities: [
+          { contentType: 'audio/mp4; codecs="mp4a.40.2"', robustness: 'SW_SECURE_CRYPTO' },
+          { contentType: 'audio/mp4; codecs="mp4a.40.2"' },
+        ],
+      },
+    ];
     try {
-      await navigator.requestMediaKeySystemAccess(ks, configs);
+      await navigator.requestMediaKeySystemAccess('com.widevine.alpha', widevineConfigs);
       return true;
     } catch {
-      // Try next key system
+      return false;
     }
-  }
-  return false;
+  })();
+  return drmSupportPromise;
 }
 
 export async function ensureMusicKitConfigured(
@@ -742,10 +777,20 @@ export async function syncAppleMusicCatalog(
 export async function resolveReplacementCatalogSongId(rawId: string): Promise<string | null> {
   const snap = defaultSimpClient.getState();
   const cur = snap?.current_track;
+  const cleanRawId = rawId
+    .replace(/^applemusic:(song|track):/, '')
+    .replace(/^applemusic:/, '')
+    .trim();
+  const curId = (cur?.uri || '')
+    .replace(/^applemusic:(song|track):/, '')
+    .replace(/^applemusic:/, '')
+    .trim();
   try {
-    const qs = new URLSearchParams({ id: rawId });
-    if (cur?.title) qs.set('title', cur.title);
-    if (cur?.artists?.[0]) qs.set('artist', cur.artists[0]);
+    const qs = new URLSearchParams({ id: cleanRawId });
+    if (curId && curId === cleanRawId) {
+      if (cur?.title) qs.set('title', cur.title);
+      if (cur?.artists?.[0]) qs.set('artist', cur.artists[0]);
+    }
     const r = await fetch(`http://127.0.0.1:18888/api/apple/resolve-track?${qs.toString()}`);
     if (r.ok) {
       const j = await r.json();

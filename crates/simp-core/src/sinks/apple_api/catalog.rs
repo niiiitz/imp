@@ -367,15 +367,12 @@ pub(crate) fn fetch_library_album_with_tracks(
         }
     }
     if let Some(ref album_art) = summary.art_url {
+        let shared_db = shared_library_db();
         for tr in &mut tracks {
-            let needs_art = tr
-                .art_url
-                .as_deref()
-                .map(|u| u.is_empty() || (u.contains("blobstore.apple.com") && album_art.contains("mzstatic.com")))
-                .unwrap_or(true);
-            if needs_art {
-                tr.art_url = Some(album_art.clone());
-                remember_track_metadata_hint(tr);
+            tr.art_url = Some(album_art.clone());
+            remember_track_metadata_hint(tr);
+            if let Some(ref db) = shared_db {
+                let _ = db.set_track_art_url(&tr.uri, Some(album_art));
             }
         }
     }
@@ -676,6 +673,40 @@ pub fn search_catalog(settings: &SimpSettings, term: &str) -> Result<AppleCatalo
                     if seen_song_uris.insert(tr.uri.clone()) {
                         songs.push(tr);
                     }
+                }
+            }
+        }
+    }
+
+    // Also include matching uploaded/pinned Apple Music albums and tracks stored locally in `library.db`
+    // so uploaded Cloud Library releases are always searchable even if `/v1/me/library/search` omits them.
+    if let Some(db) = shared_library_db() {
+        if let Ok(db_albums) = db.get_albums(Some("apple_music"), Some(cleaned), 25, 0) {
+            for a in db_albums {
+                let clean_alb_id = a
+                    .id
+                    .strip_prefix("applemusic:album:")
+                    .unwrap_or(&a.id)
+                    .to_string();
+                if seen_album_ids.insert(clean_alb_id.clone()) {
+                    albums.push(AppleCloudAlbumSummary {
+                        id: clean_alb_id,
+                        title: a.title,
+                        artist: a.album_artist,
+                        art_url: a.art_url,
+                        track_count: a.track_count,
+                        release_year: a.release_year.map(|y| y as u32),
+                        kind: "library".to_string(),
+                        date_added: None,
+                        content_rating: a.content_rating,
+                    });
+                }
+            }
+        }
+        if let Ok(db_tracks) = db.get_tracks(Some("apple_music"), Some(cleaned), 50, 0) {
+            for tr in db_tracks {
+                if seen_song_uris.insert(tr.uri.clone()) {
+                    songs.push(tr);
                 }
             }
         }

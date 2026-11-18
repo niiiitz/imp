@@ -23,6 +23,9 @@ import { isUiVideoTrack } from "../../PlayerView";
 import {
   AlphaBucket,
   type BrowseHubTarget,
+  type LocalArtworkFilter,
+  type LocalLyricsFilter,
+  type LocalSubTab,
   tileGridStyle,
   useLibraryLyricsStatus,
 } from "../libraryHelpers";
@@ -31,24 +34,42 @@ import { AppleMusicDiscoverPane } from "./AppleMusicDiscoverPane";
 import { SoundCloudDiscoverPane } from "./SoundCloudDiscoverPane";
 import { InternetArchiveDiscoverPane } from "./InternetArchiveDiscoverPane";
 import { ImpFypPane } from "./ImpFypPane";
+import { LocalDiscoverPane, type LocalFacetsSummary } from "./LocalDiscoverPane";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { SourceVisibilityPrefs } from "../../SettingsModal";
 import {
   CollapsibleSectionHeader,
   FilterTriggerButton,
-  PinnableSectionHeader,
 } from "../PinnableSectionHeader";
 import { type SmartFacetKind } from "../../../components/LibraryFilterModal";
 import {
-  DEFAULT_STARTER_FYP_DESCRIPTORS,
   LocalDiscoverResponse,
   LocalSmartStation,
 } from "../../../api/servicesCacheApi";
 
 export interface LibraryBrowseRightPaneProps {
   activeHubLabel: string;
-  activeMountPlaceObj: { mount_root: string; label: string; track_count: number; is_online: boolean } | null | undefined;
+  activeMountRoot: string | null;
+  setActiveMountRoot: React.Dispatch<React.SetStateAction<string | null>>;
+  localSubTab: LocalSubTab;
+  setLocalSubTab: React.Dispatch<React.SetStateAction<LocalSubTab>>;
+  localFolderPath: string;
+  setLocalFolderPath: React.Dispatch<React.SetStateAction<string>>;
+  allLocalAlbums: AlbumRecord[];
+  allLocalTracks: TrackMetadata[];
+  facetsSummary: LocalFacetsSummary;
+  localGenreFilter: string;
+  setLocalGenreFilter: React.Dispatch<React.SetStateAction<string>>;
+  localYearFilter: string;
+  setLocalYearFilter: React.Dispatch<React.SetStateAction<string>>;
+  localArtworkFilter: LocalArtworkFilter;
+  setLocalArtworkFilter: React.Dispatch<React.SetStateAction<LocalArtworkFilter>>;
+  localLyricsFilter: LocalLyricsFilter;
+  setLocalLyricsFilter: React.Dispatch<React.SetStateAction<LocalLyricsFilter>>;
+  localAlpha: AlphaBucket;
+  setLocalAlpha: React.Dispatch<React.SetStateAction<AlphaBucket>>;
+  pushCurrentNavState: () => void;
   activeSmartFacet: SmartFacetKind;
   setActiveSmartFacet: React.Dispatch<React.SetStateAction<SmartFacetKind>>;
   appleAuthState: "connected" | "reauth_required" | "never_used";
@@ -108,7 +129,6 @@ export interface LibraryBrowseRightPaneProps {
   loadMoreScSearch: any;
   localVideos: TrackMetadata[];
   mediaTypeFilter: "all" | "video" | "audio";
-  mountAlbums: AlbumRecord[];
   mountTracks: TrackMetadata[];
   newFeedAlbums: AppleCloudAlbumSummary[];
   newFeedPlaylists: AppleCloudPlaylistSummary[];
@@ -197,7 +217,26 @@ export interface LibraryBrowseRightPaneProps {
 
 export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   activeHubLabel,
-  activeMountPlaceObj,
+  activeMountRoot,
+  setActiveMountRoot,
+  localSubTab,
+  setLocalSubTab,
+  localFolderPath,
+  setLocalFolderPath,
+  allLocalAlbums,
+  allLocalTracks,
+  facetsSummary,
+  localGenreFilter,
+  setLocalGenreFilter,
+  localYearFilter,
+  setLocalYearFilter,
+  localArtworkFilter,
+  setLocalArtworkFilter,
+  localLyricsFilter,
+  setLocalLyricsFilter,
+  localAlpha,
+  setLocalAlpha,
+  pushCurrentNavState,
   activeSmartFacet,
   setActiveSmartFacet,
   appleAuthState,
@@ -257,7 +296,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   loadMoreScSearch,
   localVideos,
   mediaTypeFilter,
-  mountAlbums,
   mountTracks,
   newFeedAlbums,
   newFeedPlaylists,
@@ -526,6 +564,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 loadMoreIaSearch={loadMoreIaSearch}
                 loadMoreScSearch={loadMoreScSearch}
                 mediaTypeFilter={mediaTypeFilter}
+                recentlyAddedCloudAlbums={recentlyAddedCloudAlbums}
                 renderAppleArtistCard={renderAppleArtistCard}
                 renderArchiveItemCard={renderArchiveItemCard}
                 renderCloudAlbumCard={renderCloudAlbumCard}
@@ -544,156 +583,44 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 searchPreferredSource={searchPreferredSource}
                 snap={snap}
               />
-            ) : activeMountPlaceObj ? (
-              /* ---------------------------------------------------------
-                 2A. 💾 STORAGE MOUNT PLACE (4-Col Album & Soundtrack Tile Grid)
-                 --------------------------------------------------------- */
-              <>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    paddingBottom: 10,
-                    borderBottom: '1px solid #16161c',
-                    flexWrap: 'wrap',
-                    gap: 8,
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: '#bfeaf5' }}>
-                      💾 {activeMountPlaceObj.label}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                        color: '#8e8e99',
-                        marginTop: 2,
-                      }}
-                    >
-                      {activeMountPlaceObj.mount_root} • {mountAlbums.length} albums •{' '}
-                      {activeMountPlaceObj.track_count} tracks
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    {mountTracks.length > 0 && (
-                      <>
-                        <button
-                          data-right-tile="true"
-                          onClick={() => {
-                            const audioOnly = mountTracks.filter(
-                              (t) =>
-                                t.source !== 'local_video' && !t.uri.startsWith('video://local/')
-                            );
-                            const playableMountTracks =
-                              audioOnly.length > 0 ? audioOnly : mountTracks;
-                            setPlayingContextId(`mount:${activeMountPlaceObj.mount_root}`);
-                            defaultSimpClient.loadQueue(
-                              playableMountTracks.map((t) => t.uri),
-                              0,
-                              playableMountTracks
-                            );
-                            setView('lock');
-                          }}
-                          style={{
-                            minHeight: 36,
-                            padding: '0 12px',
-                            borderRadius: 8,
-                            background: '#0f222a',
-                            border: '1px solid #2aa3c4',
-                            color: '#bfeaf5',
-                            fontSize: 11,
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ▶ Play All (
-                          {mountTracks.some(
-                            (t) =>
-                              t.source !== 'local_video' && !t.uri.startsWith('video://local/')
-                          )
-                            ? mountTracks.filter(
-                                (t) =>
-                                  t.source !== 'local_video' && !t.uri.startsWith('video://local/')
-                              ).length
-                            : mountTracks.length}
-                          )
-                        </button>
-                        <button
-                          onClick={() => {
-                            const audioOnly = mountTracks.filter(
-                              (t) =>
-                                t.source !== 'local_video' && !t.uri.startsWith('video://local/')
-                            );
-                            const targetTracks = audioOnly.length > 0 ? audioOnly : mountTracks;
-                            handleAddTracksToPlaylist(
-                              targetTracks.map((t) => t.uri),
-                              `all ${targetTracks.length} tracks from ${activeMountPlaceObj.label}`,
-                              targetTracks
-                            );
-                          }}
-                          style={{
-                            minHeight: 36,
-                            padding: '0 10px',
-                            borderRadius: 8,
-                            background: '#14141e',
-                            border: '1px solid #2a2a38',
-                            color: '#67e8f9',
-                            fontSize: 11,
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          + All to ★
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {mountAlbums.length > 0 ? (
-                  <>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                      💿 ALBUMS & SOUNDTRACKS ON {activeMountPlaceObj.label.toUpperCase()} (
-                      {mountAlbums.length})
-                    </div>
-                    <div style={tileGridStyle}>{mountAlbums.map(renderSimpAlbumCard)}</div>
-                  </>
-                ) : (
-                  mountTracks.length === 0 && (
-                    <div style={{ fontSize: 12, color: '#8e8e99', padding: '12px 4px' }}>
-                      No albums indexed on {activeMountPlaceObj.label} yet.
-                    </div>
-                  )
-                )}
-
-                {mountTracks.some(
-                  (t) => t.source === 'local_video' || t.uri.startsWith('video://local/')
-                ) && (
-                  <>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                      LOCAL VIDEOS ON {activeMountPlaceObj.label.toUpperCase()} (
-                      {
-                        mountTracks.filter(
-                          (t) => t.source === 'local_video' || t.uri.startsWith('video://local/')
-                        ).length
-                      }
-                      )
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {(() => {
-                        const mountVideos = mountTracks.filter(
-                          (t) => t.source === 'local_video' || t.uri.startsWith('video://local/')
-                        );
-                        return mountVideos.map((v) =>
-                          renderSingleSongRow(v, mountVideos, 'mount_video')
-                        );
-                      })()}
-                    </div>
-                  </>
-                )}
-              </>
+            ) : browseHubTarget === 'local_discover' || browseHubTarget === 'mount' ? (
+              <LocalDiscoverPane
+                browseHubTarget={browseHubTarget}
+                localSubTab={localSubTab}
+                setLocalSubTab={setLocalSubTab}
+                activeMountRoot={activeMountRoot}
+                setActiveMountRoot={setActiveMountRoot}
+                localFolderPath={localFolderPath}
+                setLocalFolderPath={setLocalFolderPath}
+                snap={snap}
+                allLocalAlbums={allLocalAlbums}
+                allLocalTracks={allLocalTracks}
+                mountTracks={mountTracks}
+                localVideos={localVideos}
+                localDiscover={localDiscover}
+                facetsSummary={facetsSummary}
+                localGenreFilter={localGenreFilter}
+                setLocalGenreFilter={setLocalGenreFilter}
+                localYearFilter={localYearFilter}
+                setLocalYearFilter={setLocalYearFilter}
+                localArtworkFilter={localArtworkFilter}
+                setLocalArtworkFilter={setLocalArtworkFilter}
+                localLyricsFilter={localLyricsFilter}
+                setLocalLyricsFilter={setLocalLyricsFilter}
+                localAlpha={localAlpha}
+                setLocalAlpha={setLocalAlpha}
+                mediaTypeFilter={mediaTypeFilter}
+                onOpenFilters={onOpenFilters}
+                onPlayLocalSmartStation={onPlayLocalSmartStation}
+                pushCurrentNavState={pushCurrentNavState}
+                setPlayingContextId={setPlayingContextId}
+                setView={setView}
+                handleAddTracksToPlaylist={handleAddTracksToPlaylist}
+                renderSimpAlbumCard={renderSimpAlbumCard}
+                renderLocalArtistCard={renderLocalArtistCard}
+                renderSingleSongRow={renderSingleSongRow}
+                openLibraryContextMenu={openLibraryContextMenu}
+              />
             ) : impFypActive ? (
               <ImpFypPane
                 browserSourceFilter={browserSourceFilter}
@@ -1066,210 +993,6 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                             {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
                           </div>
                         </section>
-                      )}
-
-                    {/* Local Discovery Shelves (Smart Stations, Rediscover Local Gems & Recently Added Releases) */}
-                    {simpHubFilter === 'all' &&
-                      isSourceIncluded('local') &&
-                      mediaTypeFilter !== 'video' && (
-                        <>
-                          {localDiscover.smart_stations.length > 0 && (
-                            <section
-                              data-section-anchor="local_smart_stations"
-                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
-                            >
-                              <PinnableSectionHeader
-                                title={`📻 LOCAL SMART STATIONS (${localDiscover.smart_stations.length})`}
-                                accentColor="#5eead4"
-                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[0]}
-                                liveItems={localDiscover.smart_stations}
-                              />
-                              <div style={tileGridStyle}>
-                                {localDiscover.smart_stations.map((st) => (
-                                  <div
-                                    key={st.id}
-                                    data-right-tile="true"
-                                    data-tile-key={`local_station:${st.id}`}
-                                    role="button"
-                                    tabIndex={0}
-                                    onContextMenu={(e) => {
-                                      e.preventDefault();
-                                      openLibraryContextMenu({
-                                        type: 'collection',
-                                        kind: 'local_station',
-                                        id: st.id,
-                                        title: st.title,
-                                        subtitle: `${st.track_count} tracks • ${st.subtitle}`,
-                                        art_url: st.art_url,
-                                        source: 'local',
-                                        rawItem: st,
-                                      });
-                                    }}
-                                    onClick={() => onPlayLocalSmartStation(st, false)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        onPlayLocalSmartStation(st, false);
-                                      }
-                                    }}
-                                    style={{
-                                      borderRadius: 12,
-                                      background: 'linear-gradient(155deg, #0d1d1c 0%, #090d14 100%)',
-                                      border: '1px solid #1e3a38',
-                                      padding: 12,
-                                      display: 'flex',
-                                      flexDirection: 'column',
-                                      gap: 8,
-                                      cursor: 'pointer',
-                                      minWidth: 0,
-                                    }}
-                                  >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                                      {st.art_url ? (
-                                        <img
-                                          src={st.art_url}
-                                          alt=""
-                                          loading="lazy"
-                                          style={{
-                                            width: 44,
-                                            height: 44,
-                                            borderRadius: 8,
-                                            objectFit: 'cover',
-                                            border: '1px solid #2dd4bf',
-                                            flexShrink: 0,
-                                          }}
-                                        />
-                                      ) : (
-                                        <div
-                                          style={{
-                                            width: 44,
-                                            height: 44,
-                                            borderRadius: 8,
-                                            background: '#112927',
-                                            border: '1px solid #2dd4bf',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'center',
-                                            flexShrink: 0,
-                                          }}
-                                        >
-                                          <ImpIcon name="radio" size={18} color="#5eead4" />
-                                        </div>
-                                      )}
-                                      <div style={{ minWidth: 0, flex: 1 }}>
-                                        <div
-                                          style={{
-                                            fontSize: 12.5,
-                                            fontWeight: 800,
-                                            color: '#ecfeff',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                          }}
-                                        >
-                                          {st.title}
-                                        </div>
-                                        <div
-                                          style={{
-                                            fontSize: 10.5,
-                                            color: '#94a3b8',
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap',
-                                          }}
-                                        >
-                                          {st.subtitle}
-                                        </div>
-                                        <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#5eead4' }}>
-                                          {st.track_count} tracks
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <div style={{ display: 'flex', gap: 6 }}>
-                                      <button
-                                        type="button"
-                                        data-row-aux="true"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onPlayLocalSmartStation(st, false);
-                                        }}
-                                        style={{
-                                          flex: 1,
-                                          minHeight: 28,
-                                          borderRadius: 7,
-                                          background: '#0f2926',
-                                          border: '1px solid #14b8a6',
-                                          color: '#ccfbf1',
-                                          fontSize: 10.5,
-                                          fontWeight: 800,
-                                          cursor: 'pointer',
-                                        }}
-                                      >
-                                        ▶ Play Station
-                                      </button>
-                                      <button
-                                        type="button"
-                                        data-row-aux="true"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          onPlayLocalSmartStation(st, true);
-                                        }}
-                                        title="Shuffle Station"
-                                        style={{
-                                          minHeight: 28,
-                                          padding: '0 9px',
-                                          borderRadius: 7,
-                                          background: '#111622',
-                                          border: '1px solid #263145',
-                                          color: '#cbd5e1',
-                                          fontSize: 10.5,
-                                          fontWeight: 700,
-                                          cursor: 'pointer',
-                                        }}
-                                      >
-                                        🔀
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </section>
-                          )}
-
-                          {localDiscover.rediscover_albums.length > 0 && (
-                            <section
-                              data-section-anchor="local_rediscover"
-                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
-                            >
-                              <PinnableSectionHeader
-                                title={`✨ REDISCOVER LOCAL GEMS (${localDiscover.rediscover_albums.length})`}
-                                accentColor="#67e8f9"
-                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[1]}
-                                liveItems={localDiscover.rediscover_albums}
-                              />
-                              <div style={tileGridStyle}>
-                                {localDiscover.rediscover_albums.map(renderSimpAlbumCard)}
-                              </div>
-                            </section>
-                          )}
-
-                          {localDiscover.recent_albums.length > 0 && (
-                            <section
-                              data-section-anchor="local_recent_releases"
-                              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
-                            >
-                              <PinnableSectionHeader
-                                title={`🆕 RECENTLY ADDED LOCAL RELEASES (${localDiscover.recent_albums.length})`}
-                                accentColor="#67e8f9"
-                                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[2]}
-                                liveItems={localDiscover.recent_albums}
-                              />
-                              <div style={tileGridStyle}>
-                                {localDiscover.recent_albums.map(renderSimpAlbumCard)}
-                              </div>
-                            </section>
-                          )}
-                        </>
                       )}
 
                     {/* Local & Pinned Full Albums Section */}

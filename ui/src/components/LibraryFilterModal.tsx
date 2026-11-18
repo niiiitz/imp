@@ -1,5 +1,11 @@
 import React, { useLayoutEffect, useRef } from 'react';
-import { AlphaBucket, BrowseHubTarget } from '../views/library/libraryHelpers';
+import {
+  AlphaBucket,
+  BrowseHubTarget,
+  LocalArtworkFilter,
+  LocalLyricsFilter,
+  LocalSubTab,
+} from '../views/library/libraryHelpers';
 import { ImpIcon, ImpIconName } from './icons/ImpIcon';
 
 export type SmartFacetKind =
@@ -89,6 +95,27 @@ export interface LibraryFilterModalProps {
   iaSubTab: 'pinned' | 'trending' | 'films' | 'tv' | 'audio';
   iaSubFilter: string;
   setIaSubFilter: React.Dispatch<React.SetStateAction<string>>;
+  // Local Music & Storage Discover
+  localSubTab?: LocalSubTab;
+  setLocalSubTab?: React.Dispatch<React.SetStateAction<LocalSubTab>>;
+  localGenreFilter?: string;
+  setLocalGenreFilter?: React.Dispatch<React.SetStateAction<string>>;
+  availableLocalGenres?: Array<{ genre: string; count: number }>;
+  localYearFilter?: string;
+  setLocalYearFilter?: React.Dispatch<React.SetStateAction<string>>;
+  availableLocalEras?: Array<{ id: string; label: string; count: number }>;
+  localArtworkFilter?: LocalArtworkFilter;
+  setLocalArtworkFilter?: React.Dispatch<React.SetStateAction<LocalArtworkFilter>>;
+  localArtworkCounts?: { hasArt: number; missingArt: number };
+  localLyricsFilter?: LocalLyricsFilter;
+  setLocalLyricsFilter?: React.Dispatch<React.SetStateAction<LocalLyricsFilter>>;
+  localLyricsCounts?: { synced: number; anyLyrics: number; missing: number };
+  localAlpha?: AlphaBucket;
+  setLocalAlpha?: React.Dispatch<React.SetStateAction<AlphaBucket>>;
+  localArtistsCount?: number;
+  localAlbumsCount?: number;
+  localVideosCount?: number;
+  localMountsCount?: number;
   // Tracklist
   filterHasLyricsOnly: boolean;
   setFilterHasLyricsOnly: React.Dispatch<React.SetStateAction<boolean>>;
@@ -354,6 +381,26 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
   iaSubTab,
   iaSubFilter,
   setIaSubFilter,
+  localSubTab = 'overview',
+  setLocalSubTab,
+  localGenreFilter = 'all',
+  setLocalGenreFilter,
+  availableLocalGenres = [],
+  localYearFilter = 'all',
+  setLocalYearFilter,
+  availableLocalEras = [],
+  localArtworkFilter = 'all',
+  setLocalArtworkFilter,
+  localArtworkCounts = { hasArt: 0, missingArt: 0 },
+  localLyricsFilter = 'all',
+  setLocalLyricsFilter,
+  localLyricsCounts = { synced: 0, anyLyrics: 0, missing: 0 },
+  localAlpha = 'all',
+  setLocalAlpha,
+  localArtistsCount = 0,
+  localAlbumsCount = 0,
+  localVideosCount = 0,
+  localMountsCount = 0,
   filterHasLyricsOnly,
   setFilterHasLyricsOnly,
   tracklistLyricsCount,
@@ -419,6 +466,12 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
     } else if (browseHubTarget === 'imp_library') {
       setSimpHubFilter('all');
       setActiveSmartFacet(null);
+    } else if (browseHubTarget === 'local_discover' || browseHubTarget === 'mount') {
+      setLocalGenreFilter?.('all');
+      setLocalYearFilter?.('all');
+      setLocalArtworkFilter?.('all');
+      setLocalLyricsFilter?.('all');
+      setLocalAlpha?.('all');
     } else if (browseHubTarget === 'apple_discover') {
       if (appleSubTab === 'cloud_playlists') {
         setCloudAlpha('all');
@@ -508,6 +561,193 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
         },
       ],
     });
+  } else if (
+    rightPaneMode === 'browse' &&
+    (browseHubTarget === 'local_discover' || browseHubTarget === 'mount')
+  ) {
+    if (setLocalSubTab) {
+      rows.push({
+        key: 'local_view',
+        label: 'Local View',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: (
+          [
+            { id: 'overview', label: '⚡ Overview' },
+            { id: 'artists', label: `🎤 Artists (${localArtistsCount})` },
+            { id: 'albums', label: `💿 Albums (${localAlbumsCount})` },
+            { id: 'folders', label: `📂 Folders (${localMountsCount})` },
+            ...(localVideosCount > 0 && mediaTypeFilter !== 'audio'
+              ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideosCount})` }]
+              : []),
+          ] as const
+        ).map((t) => ({
+          id: t.id,
+          label: t.label,
+          active: (browseHubTarget === 'mount' ? 'folders' : localSubTab) === t.id,
+          onSelect: () => setLocalSubTab(t.id),
+        })),
+      });
+    }
+
+    if (setLocalArtworkFilter) {
+      rows.push({
+        key: 'local_artwork',
+        label: 'Artwork',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: [
+          {
+            id: 'all',
+            label: 'All',
+            active: localArtworkFilter === 'all',
+            onSelect: () => setLocalArtworkFilter('all'),
+          },
+          {
+            id: 'has_art',
+            label: `Artwork Found (${localArtworkCounts.hasArt})`,
+            icon: 'artwork',
+            accent: '#38bdf8',
+            activeBg: '#0c202e',
+            activeText: '#7dd3fc',
+            active: localArtworkFilter === 'has_art',
+            onSelect: () =>
+              setLocalArtworkFilter((prev) => (prev === 'has_art' ? 'all' : 'has_art')),
+          },
+          {
+            id: 'missing_art',
+            label: `Missing Artwork (${localArtworkCounts.missingArt})`,
+            icon: 'artwork-missing',
+            accent: '#facc15',
+            activeBg: '#27200a',
+            activeText: '#fde047',
+            active: localArtworkFilter === 'missing_art',
+            onSelect: () =>
+              setLocalArtworkFilter((prev) => (prev === 'missing_art' ? 'all' : 'missing_art')),
+          },
+        ],
+      });
+    }
+
+    if (setLocalLyricsFilter) {
+      rows.push({
+        key: 'local_lyrics',
+        label: 'Lyrics',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: [
+          {
+            id: 'all',
+            label: 'All',
+            active: localLyricsFilter === 'all',
+            onSelect: () => setLocalLyricsFilter('all'),
+          },
+          {
+            id: 'synced',
+            label: `Synced LRC (${localLyricsCounts.synced})`,
+            icon: 'lyrics',
+            active: localLyricsFilter === 'synced',
+            onSelect: () => setLocalLyricsFilter((prev) => (prev === 'synced' ? 'all' : 'synced')),
+          },
+          {
+            id: 'has_lyrics',
+            label: `Any Lyrics (${localLyricsCounts.anyLyrics})`,
+            icon: 'lyrics',
+            active: localLyricsFilter === 'has_lyrics',
+            onSelect: () =>
+              setLocalLyricsFilter((prev) => (prev === 'has_lyrics' ? 'all' : 'has_lyrics')),
+          },
+          {
+            id: 'missing_lyrics',
+            label: `Missing Lyrics (${localLyricsCounts.missing})`,
+            active: localLyricsFilter === 'missing_lyrics',
+            onSelect: () =>
+              setLocalLyricsFilter((prev) =>
+                prev === 'missing_lyrics' ? 'all' : 'missing_lyrics'
+              ),
+          },
+        ],
+      });
+    }
+
+    if (setLocalGenreFilter && availableLocalGenres.length > 0) {
+      rows.push({
+        key: 'local_genre',
+        label: 'Genre',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: [
+          {
+            id: 'all',
+            label: 'All Genres',
+            active: localGenreFilter === 'all',
+            onSelect: () => setLocalGenreFilter('all'),
+          },
+          ...availableLocalGenres.map((g) => ({
+            id: g.genre,
+            label: `${g.genre} (${g.count})`,
+            active: localGenreFilter.toLowerCase() === g.genre.toLowerCase(),
+            onSelect: () =>
+              setLocalGenreFilter((prev) =>
+                prev.toLowerCase() === g.genre.toLowerCase() ? 'all' : g.genre
+              ),
+          })),
+        ],
+      });
+    }
+
+    if (setLocalYearFilter && availableLocalEras.length > 0) {
+      rows.push({
+        key: 'local_era',
+        label: 'Era / Year',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: [
+          {
+            id: 'all',
+            label: 'All Years',
+            active: localYearFilter === 'all',
+            onSelect: () => setLocalYearFilter('all'),
+          },
+          ...availableLocalEras.map((era) => ({
+            id: era.id,
+            label: `${era.label} (${era.count})`,
+            active: localYearFilter === era.id,
+            onSelect: () => setLocalYearFilter((prev) => (prev === era.id ? 'all' : era.id)),
+          })),
+        ],
+      });
+    }
+
+    if (setLocalAlpha && (localSubTab === 'artists' || localSubTab === 'albums')) {
+      rows.push({
+        key: 'local_alpha',
+        label: 'A–Z Bucket',
+        accentColor: '#34d399',
+        activeBg: '#0b241c',
+        activeText: '#6ee7b7',
+        items: (
+          [
+            { id: 'all', label: 'All' },
+            { id: 'a_f', label: 'A–F' },
+            { id: 'g_l', label: 'G–L' },
+            { id: 'm_r', label: 'M–R' },
+            { id: 's_z', label: 'S–Z' },
+            { id: 'num', label: '#' },
+          ] as const
+        ).map((b) => ({
+          id: b.id,
+          label: b.label,
+          active: localAlpha === b.id,
+          onSelect: () => setLocalAlpha(b.id),
+        })),
+      });
+    }
   } else if (rightPaneMode === 'browse' && browseHubTarget === 'imp_library') {
     rows.push({
       key: 'imp_library_view',

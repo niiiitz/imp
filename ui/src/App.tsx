@@ -10,6 +10,7 @@ import {
   TrackMetadata,
 } from '@simp/client';
 import { CompanionPairView } from './components/CompanionPairView';
+import type { BrowseHubTarget } from './views/library/libraryHelpers';
 import {
   addAppleItemToCloudLibrary,
   AppleCatalogSearchResults,
@@ -163,9 +164,7 @@ const ConsoleMainApp: React.FC = () => {
   const [selectedSources, setSelectedSources] = useState<
     Array<'local' | 'apple_music' | 'soundcloud' | 'internet_archive'>
   >([]);
-  const [browseHubTarget, setBrowseHubTargetState] = useState<
-    'imp_fyp' | 'imp_library' | 'apple_discover' | 'soundcloud_discover' | 'ia_discover' | 'mount'
-  >(() => {
+  const [browseHubTarget, setBrowseHubTargetState] = useState<BrowseHubTarget>(() => {
     try {
       const saved = window.localStorage.getItem('simp_imp_fyp_active');
       return saved === '0' ? 'imp_library' : 'imp_fyp';
@@ -173,11 +172,7 @@ const ConsoleMainApp: React.FC = () => {
       return 'imp_fyp';
     }
   });
-  const setBrowseHubTarget: React.Dispatch<
-    React.SetStateAction<
-      'imp_fyp' | 'imp_library' | 'apple_discover' | 'soundcloud_discover' | 'ia_discover' | 'mount'
-    >
-  > = useCallback((action) => {
+  const setBrowseHubTarget: React.Dispatch<React.SetStateAction<BrowseHubTarget>> = useCallback((action) => {
     setBrowseHubTargetState((prev) => {
       const next = typeof action === 'function' ? action(prev) : action;
       try {
@@ -1586,7 +1581,7 @@ const ConsoleMainApp: React.FC = () => {
         setBrowserTarget({
           kind: 'cloud_album',
           id: album.id,
-          title: `🍎 ${album.title}`,
+          title: album.title,
           subtitle: `${album.artist}${album.release_year ? ` • ${album.release_year}` : ''}`,
           art_url: album.art_url,
           content_rating: album.content_rating ?? null,
@@ -1602,7 +1597,7 @@ const ConsoleMainApp: React.FC = () => {
           setBrowserTarget({
             kind: 'cloud_playlist',
             id: 'active_queue',
-            title: `🍎 ${params.fallbackTitle || 'Active Playback Queue'}`,
+            title: params.fallbackTitle || 'Active Playback Queue',
             subtitle: `${snap.queue.length} tracks in queue`,
             art_url: snap.current_track?.art_url || null,
           });

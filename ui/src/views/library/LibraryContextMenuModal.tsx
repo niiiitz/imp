@@ -431,7 +431,14 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   </button>
                 )}
 
-                {(t.source === 'apple_music' || t.album_id || t.album) && (
+                {(t.source === 'apple_music' || t.album_id || t.album) &&
+                  !(
+                    (browserTarget?.kind === 'album' || browserTarget?.kind === 'cloud_album') &&
+                    ((t.album_id && browserTarget.id === t.album_id) ||
+                      (t.album &&
+                        cleanCollectionTitle(browserTarget.title || '').toLowerCase() ===
+                          cleanCollectionTitle(t.album).toLowerCase()))
+                  ) && (
                   <button
                     data-focusable="true"
                     onClick={() => {

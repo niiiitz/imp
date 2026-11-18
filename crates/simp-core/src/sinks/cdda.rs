@@ -864,6 +864,7 @@ pub fn scan_optical_disc(
                 source: "cdda".to_string(),
                 mount_root: Some(device_path.clone()),
                 content_rating: None,
+                ..Default::default()
             }
         })
         .collect();
@@ -879,6 +880,7 @@ pub fn scan_optical_disc(
         for (idx, trk) in tracks.iter_mut().enumerate() {
             trk.album = resolved_album.clone();
             trk.art_url = resolved_art.clone();
+            trk.release_year = resolved_year;
             if let Some((mb_title, mb_artists)) = mb.tracks.get(idx) {
                 if !mb_title.trim().is_empty() {
                     trk.title = mb_title.clone();

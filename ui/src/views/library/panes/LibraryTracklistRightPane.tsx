@@ -14,6 +14,7 @@ import {
 import { SoundCloudAttributionLink } from "../../../components/SoundCloudLogo";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import {
+  cleanCollectionTitle,
   extractAudioFormat,
   getTrackLyricsBadge,
   iaItemRatingCache,
@@ -230,15 +231,26 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7,
                     }}
                   >
-                    {selectedAlbumObj
-                      ? selectedAlbumObj.title
-                      : selectedPlaylistObj
-                      ? selectedPlaylistObj.name
-                      : selectedMountObj
-                      ? `💾 ${selectedMountObj.label}`
-                      : browserTarget?.title || 'Tracks'}
+                    {(selectedAlbumObj?.id.startsWith('applemusic:') ||
+                      selectedPlaylistObj?.origin === 'apple_remote' ||
+                      browserTarget?.kind === 'cloud_album' ||
+                      browserTarget?.kind === 'cloud_playlist') && (
+                      <ImpIcon name="apple" size={15} color="#fb7185" />
+                    )}
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {selectedAlbumObj
+                        ? cleanCollectionTitle(selectedAlbumObj.title)
+                        : selectedPlaylistObj
+                        ? cleanCollectionTitle(selectedPlaylistObj.name)
+                        : selectedMountObj
+                        ? `💾 ${selectedMountObj.label}`
+                        : cleanCollectionTitle(browserTarget?.title || 'Tracks')}
+                    </span>
                   </div>
                   <div style={{ fontSize: 12, color: '#8e8e99', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                     <ContentRatingBadge
@@ -267,6 +279,11 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                           }`
                         : `${browserTracks.length} tracks`}
                       {selectedAlbumObj ? ` • ${selectedAlbumObj.album_artist}` : ''}
+                      {selectedAlbumObj?.release_year ? ` • ${selectedAlbumObj.release_year}` : ''}
+                      {selectedAlbumObj?.genre ? ` • ${selectedAlbumObj.genre}` : ''}
+                      {selectedAlbumObj?.parent_folder && selectedAlbumObj.parent_folder !== '/'
+                        ? ` • 📂 ${selectedAlbumObj.parent_folder}`
+                        : ''}
                       {selectedMountObj ? ` in ${selectedMountObj.mount_root}` : ''}
                       {!selectedAlbumObj &&
                       !selectedMountObj &&

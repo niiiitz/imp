@@ -47,6 +47,12 @@ export interface SingleSongRowProps {
     songUri?: string | null;
     fallbackTitle?: string;
   }) => void;
+  selectLocalAlbum?: (
+    albumId: string,
+    albumTitle: string,
+    artistName: string,
+    artUrl?: string | null
+  ) => void;
 }
 
 export const SingleSongRow: React.FC<SingleSongRowProps> = ({
@@ -68,6 +74,7 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
   handleAddTracksToPlaylist,
   handleStartSoundCloudTrackRadio,
   selectCloudAlbum,
+  selectLocalAlbum,
 }) => {
   const isLongMix = s.source === 'soundcloud' && s.duration_ms >= 20 * 60 * 1000;
   const isScPreview =
@@ -253,6 +260,25 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
                 30s PREVIEW
               </span>
             )}
+            {(s.source === 'local' || s.source === 'steam_ost' || s.source === 'removable') &&
+              !s.art_url && (
+                <span
+                  title="Missing cover artwork"
+                  style={{
+                    fontSize: 9,
+                    fontFamily: 'monospace',
+                    fontWeight: 800,
+                    padding: '1px 5px',
+                    borderRadius: 4,
+                    background: 'rgba(250, 204, 21, 0.1)',
+                    border: '1px solid rgba(250, 204, 21, 0.4)',
+                    color: '#facc15',
+                    flexShrink: 0,
+                  }}
+                >
+                  NO ART
+                </span>
+              )}
           </div>
           <div
             style={{
@@ -320,6 +346,35 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
                     {s.album}
                   </span>
                 </>
+              ) : s.album_id &&
+                selectLocalAlbum &&
+                s.source !== 'soundcloud' &&
+                s.source !== 'internet_archive' &&
+                s.source !== 'ia_video' ? (
+                <>
+                  {!compact && ' • '}
+                  <span
+                    role="link"
+                    tabIndex={-1}
+                    title={`Open Local Album "${s.album}"`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectLocalAlbum(
+                        s.album_id!,
+                        s.album,
+                        primaryArtist || 'Unknown Artist',
+                        s.art_url
+                      );
+                    }}
+                    style={{
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textDecorationColor: 'rgba(110, 231, 183, 0.4)',
+                    }}
+                  >
+                    {s.album}
+                  </span>
+                </>
               ) : (
                 `${!compact ? ' • ' : ''}${s.album}`
               )
@@ -330,6 +385,11 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
               const fmt = extractAudioFormat(s.uri);
               return fmt ? ` • ${fmt}` : '';
             })()}
+            {!compact && s.release_year ? ` • ${s.release_year}` : ''}
+            {!compact && s.genre ? ` • ${s.genre}` : ''}
+            {!compact && s.parent_folder && s.parent_folder !== '/'
+              ? ` • 📂 ${s.parent_folder}`
+              : ''}
           </div>
         </div>
       </button>

@@ -66,6 +66,9 @@ pub struct AppleMusicSink {
     pub restored_uri: Option<String>,
     pub restored_position_ms: u32,
     pub worker_has_active_track: bool,
+    pub worker_playing_ack: bool,
+    #[cfg(target_os = "macos")]
+    pub macos_tap: Arc<crate::sinks::macos_tap::MacOsWebKitAudioTap>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -88,6 +91,21 @@ impl AppleMusicSink {
             restored_uri: None,
             restored_position_ms: 0,
             worker_has_active_track: false,
+            worker_playing_ack: false,
+            #[cfg(target_os = "macos")]
+            macos_tap: Arc::new(crate::sinks::macos_tap::MacOsWebKitAudioTap::new()),
+        }
+    }
+
+    pub fn ensure_macos_tap_started(&self, broadcast_tx: &broadcast::Sender<PlaybackEvent>) {
+        #[cfg(target_os = "macos")]
+        {
+            self.macos_tap
+                .start_or_refresh(self.volume, broadcast_tx.clone());
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = broadcast_tx;
         }
     }
 
@@ -104,6 +122,7 @@ impl AppleMusicSink {
         self.restored_uri = Some(uri.clone());
         self.restored_position_ms = position_ms;
         self.worker_has_active_track = false;
+        self.worker_playing_ack = false;
         if !uri.starts_with("applemusic:station:")
             && is_native_apple_cdm_preferred()
             && crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library().is_some()
@@ -132,6 +151,7 @@ impl AppleMusicSink {
         position_ms: u32,
     ) {
         Self::ensure_headless_widevine_worker();
+        self.ensure_macos_tap_started(broadcast_tx);
         let _ = broadcast_tx.send(PlaybackEvent::AppleSinkCommand {
             action: "load_and_play".to_string(),
             uri: Some(uri.to_string()),
@@ -142,6 +162,7 @@ impl AppleMusicSink {
 
     pub fn emit_play(&self, broadcast_tx: &broadcast::Sender<PlaybackEvent>) {
         Self::ensure_headless_widevine_worker();
+        self.ensure_macos_tap_started(broadcast_tx);
         let _ = broadcast_tx.send(PlaybackEvent::AppleSinkCommand {
             action: "play".to_string(),
             uri: None,
@@ -475,6 +496,7 @@ impl crate::sinks::AudioSink for AppleMusicSink {
     ) -> Result<()> {
         self.restored_uri = Some(uri.to_string());
         self.restored_position_ms = start_pos_ms;
+        self.worker_playing_ack = false;
 
         if !uri.starts_with("applemusic:station:") && is_native_apple_cdm_preferred() {
             if let Some(cdm_info) =
@@ -565,6 +587,8 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.pause();
             }
         }
+        #[cfg(target_os = "macos")]
+        self.macos_tap.stop();
         self.emit_pause(broadcast_tx);
     }
 
@@ -574,6 +598,8 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.release_pipewire_stream();
             }
         }
+        #[cfg(target_os = "macos")]
+        self.macos_tap.stop();
         self.emit_pause(broadcast_tx);
     }
 
@@ -597,6 +623,8 @@ impl crate::sinks::AudioSink for AppleMusicSink {
 
     fn sync_volume(&mut self, volume: f32, broadcast_tx: &broadcast::Sender<PlaybackEvent>) {
         self.set_volume(volume as f64);
+        #[cfg(target_os = "macos")]
+        self.macos_tap.set_volume(self.volume);
         self.emit_volume(broadcast_tx, volume as f64);
     }
 
@@ -617,6 +645,8 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.release_pipewire_stream();
             }
         }
+        #[cfg(target_os = "macos")]
+        self.macos_tap.stop();
         self.emit_pause(broadcast_tx);
         Self::kill_headless_widevine_worker();
     }

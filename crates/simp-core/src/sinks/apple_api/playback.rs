@@ -27,7 +27,7 @@ pub fn set_shared_library_db(db: crate::library::db::LibraryDatabase) {
     }
 }
 
-fn shared_library_db() -> Option<crate::library::db::LibraryDatabase> {
+pub(crate) fn shared_library_db() -> Option<crate::library::db::LibraryDatabase> {
     if let Ok(mut guard) = shared_db_slot().lock() {
         if let Some(ref db) = *guard {
             return Some(db.clone());
@@ -119,6 +119,27 @@ fn save_resolved_catalog_mapping(clean_id: &str, catalog_id: &str, art_url: Opti
     }
 }
 
+/// Evicts any cached catalog mapping and artwork hint for `song_uri_or_id`.
+pub fn evict_cached_track_art(song_uri_or_id: &str) {
+    let clean_id = song_uri_or_id
+        .strip_prefix("applemusic:song:")
+        .or_else(|| song_uri_or_id.strip_prefix("applemusic:track:"))
+        .or_else(|| song_uri_or_id.strip_prefix("applemusic:"))
+        .unwrap_or(song_uri_or_id)
+        .trim();
+    if clean_id.is_empty() {
+        return;
+    }
+    if let Ok(mut guard) = catalog_id_cache().lock() {
+        guard.remove(clean_id);
+    }
+    if let Ok(mut guard) = track_meta_hints().lock() {
+        if let Some(entry) = guard.get_mut(clean_id) {
+            entry.2 = None;
+        }
+    }
+}
+
 /// Returns a healed permanent `mzstatic.com` catalog artwork URL for `song_uri_or_id` if known.
 pub fn get_healed_track_art_url(song_uri_or_id: &str) -> Option<String> {
     let clean_id = song_uri_or_id
@@ -131,6 +152,12 @@ pub fn get_healed_track_art_url(song_uri_or_id: &str) -> Option<String> {
         if let Some((_, Some(art))) = guard.get(clean_id) {
             return Some(art.clone());
         }
+        if clean_id.starts_with("i.") {
+            return None;
+        }
+    }
+    if clean_id.starts_with("i.") {
+        return None;
     }
     if let Ok(guard) = track_meta_hints().lock() {
         if let Some((_, _, Some(art))) = guard.get(clean_id) {
@@ -482,18 +509,21 @@ pub fn resolve_replacement_catalog_song_id(
         }
     }
 
+    let (db_title, db_artist) = lookup_track_title_artist_in_db(clean_id);
+    let caller_mismatches_db = match (&db_title, title) {
+        (Some(dt), Some(ct)) if !ct.trim().is_empty() => {
+            dt.trim().to_lowercase() != ct.trim().to_lowercase()
+        }
+        _ => false,
+    };
+    let (effective_title, effective_artist) = if caller_mismatches_db {
+        (db_title.as_deref(), db_artist.as_deref())
+    } else {
+        (db_title.as_deref().or(title), db_artist.as_deref().or(artist))
+    };
+
     let (dev_token, user_token) = resolve_tokens(settings)?;
     let storefront = get_storefront(&dev_token, &user_token);
-
-    // If `title` + `artist` have an exact storefront catalog match, resolve to the active licensed `salableAdamId`.
-    // Because `search_storefront_catalog_song_id` requires an exact title+artist match (no fuzzy `candidates.first()`),
-    // uploaded tracks that aren't in the streaming catalog safely fall through without being overwritten!
-    if let Some((resolved, art_url)) =
-        search_storefront_catalog_song_id(&dev_token, &user_token, &storefront, clean_id, title, artist)
-    {
-        save_resolved_catalog_mapping(clean_id, &resolved, art_url);
-        return Ok(Some(resolved));
-    }
 
     if clean_id.starts_with("i.") {
         if let Ok(json) = apple_get_json(
@@ -502,16 +532,44 @@ pub fn resolve_replacement_catalog_song_id(
             &user_token,
         ) {
             if let Some(cat_id) = json.pointer("/data/0/id").and_then(|v| v.as_str()) {
-                let resolved = cat_id.to_string();
-                let art_url = format_apple_art_url(
-                    json.pointer("/data/0/attributes/artwork/url")
-                        .and_then(|v| v.as_str()),
-                    400,
-                );
-                save_resolved_catalog_mapping(clean_id, &resolved, art_url);
-                return Ok(Some(resolved));
+                let catalog_name = json
+                    .pointer("/data/0/attributes/name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_lowercase());
+                let title_matches = match (effective_title, catalog_name.as_deref()) {
+                    (Some(et), Some(cn)) if !et.trim().is_empty() && !cn.is_empty() => {
+                        let et_lower = et.trim().to_lowercase();
+                        et_lower == cn || cn.contains(&et_lower) || et_lower.contains(cn)
+                    }
+                    _ => true,
+                };
+                if title_matches {
+                    let resolved = cat_id.to_string();
+                    let art_url = format_apple_art_url(
+                        json.pointer("/data/0/attributes/artwork/url")
+                            .and_then(|v| v.as_str()),
+                        400,
+                    );
+                    save_resolved_catalog_mapping(clean_id, &resolved, art_url);
+                    return Ok(Some(resolved));
+                }
             }
         }
+    }
+
+    // If `title` + `artist` have an exact storefront catalog match, resolve to the active licensed `salableAdamId`.
+    // Because `search_storefront_catalog_song_id` requires an exact title+artist match (no fuzzy `candidates.first()`),
+    // uploaded tracks that aren't in the streaming catalog safely fall through without being overwritten!
+    if let Some((resolved, art_url)) = search_storefront_catalog_song_id(
+        &dev_token,
+        &user_token,
+        &storefront,
+        clean_id,
+        effective_title,
+        effective_artist,
+    ) {
+        save_resolved_catalog_mapping(clean_id, &resolved, art_url);
+        return Ok(Some(resolved));
     }
 
     Ok(None)

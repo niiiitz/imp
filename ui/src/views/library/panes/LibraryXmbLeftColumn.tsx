@@ -13,7 +13,11 @@ import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { OskTargetKind } from "../../../hooks/useGamepadNavigation";
 import { BrowserTarget } from "../../PlayerView";
 import { SourceVisibilityPrefs } from "../../SettingsModal";
-import { cleanCollectionTitle, type BrowseHubTarget } from "../libraryHelpers";
+import {
+  cleanCollectionTitle,
+  type BrowseHubTarget,
+  type LocalSubTab,
+} from "../libraryHelpers";
 import { ImpIcon, ImpIconName } from "../../../components/icons/ImpIcon";
 import { LocalSmartStation } from "../../../api/servicesCacheApi";
 
@@ -260,6 +264,12 @@ export interface LibraryXmbLeftColumnProps {
   snap: SimpStateSnapshot | null;
   appleAuthState: "connected" | "reauth_required" | "never_used";
   pushCurrentNavState: () => void;
+  localSubTab: LocalSubTab;
+  setLocalSubTab: React.Dispatch<React.SetStateAction<LocalSubTab>>;
+  setLocalFolderPath: React.Dispatch<React.SetStateAction<string>>;
+  localAlbumsCount: number;
+  localArtistsCount: number;
+  localVideosCount: number;
   appleSubTab: "pinned" | "for_you" | "cloud_playlists" | "new" | "radio";
   setAppleSubTab: React.Dispatch<
     React.SetStateAction<"pinned" | "for_you" | "cloud_playlists" | "new" | "radio">
@@ -319,6 +329,12 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   snap,
   appleAuthState,
   pushCurrentNavState,
+  localSubTab,
+  setLocalSubTab,
+  setLocalFolderPath,
+  localAlbumsCount,
+  localArtistsCount,
+  localVideosCount,
   appleSubTab,
   setAppleSubTab,
   soundCloudSubTab,
@@ -334,7 +350,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   togglePlacesOpen,
   filteredPlaylists,
   filteredAlbums,
-  pinnedAppleAlbumCount,
   scLikedTracks,
   scPlaylists,
   cloudPlaylists,
@@ -374,6 +389,38 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
       const next = !prev;
       try {
         window.localStorage.setItem('simp_sec_imp_nav', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+  const [localNavOpen, setLocalNavOpen] = React.useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('simp_sec_local_nav') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleLocalNavOpen = () => {
+    setLocalNavOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('simp_sec_local_nav', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+  const [localStationsSecOpen, setLocalStationsSecOpen] = React.useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('simp_sec_local_stations') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleLocalStationsSecOpen = () => {
+    setLocalStationsSecOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('simp_sec_local_stations', next ? '1' : '0');
       } catch {}
       return next;
     });
@@ -428,6 +475,8 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
       const key = (ev as CustomEvent<{ key?: string }>).detail?.key;
       if (key === 'places') togglePlacesOpen();
       else if (key === 'imp_nav') toggleImpNavOpen();
+      else if (key === 'local_nav') toggleLocalNavOpen();
+      else if (key === 'local_stations') toggleLocalStationsSecOpen();
       else if (key === 'imp_albums') toggleAlbumsSecOpen();
       else if (key === 'imp_stations') toggleStationsSecOpen();
       else if (key === 'apple_nav') setAppleNavOpen((v) => !v);
@@ -443,7 +492,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
     (p) => p.origin === 'soundcloud_remote' || p.origin === 'archive_remote'
   );
   const railSmartStations = isSourceIncluded('local') ? localSmartStations : [];
-  const totalStationsAndSets = railSmartStations.length + savedStationsAndSets.length;
+  const totalStationsAndSets = savedStationsAndSets.length;
   return (
     <>
       {/* =====================================================================
@@ -678,7 +727,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                           color={impLibIsActive ? '#bfeaf5' : '#67e8f9'}
                         />
                         <span>
-                          Imp Library ({filteredPlaylists.length + pinnedAppleAlbumCount})
+                          Imp Library ({filteredPlaylists.length + filteredAlbums.length})
                         </span>
                       </span>
                       <span
@@ -873,65 +922,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
 
                     {stationsSecOpen && (
                       <>
-                        {railSmartStations.map((st) => (
-                          <button
-                            key={st.id}
-                            onClick={() => onPlayLocalSmartStation(st, false)}
-                            title={`${st.title} — ${st.subtitle}`}
-                            style={{
-                              minHeight: 32,
-                              padding: '0 10px',
-                              borderRadius: 8,
-                              background: '#0a0f12',
-                              border: '1px solid #17282b',
-                              color: '#ccfbf1',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              gap: 8,
-                              textAlign: 'left',
-                              cursor: 'pointer',
-                              width: '100%',
-                              boxSizing: 'border-box',
-                            }}
-                          >
-                            <span
-                              style={{
-                                fontSize: 11.5,
-                                fontWeight: 700,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                minWidth: 0,
-                                flex: 1,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: 6,
-                              }}
-                            >
-                              <ImpIcon name="radio" size={11} color="#5eead4" />
-                              <span
-                                style={{
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                }}
-                              >
-                                {st.title}
-                              </span>
-                            </span>
-                            <span
-                              style={{
-                                fontSize: 10.5,
-                                fontFamily: 'monospace',
-                                color: '#5eead4',
-                                flexShrink: 0,
-                              }}
-                            >
-                              ▶ {st.track_count}
-                            </span>
-                          </button>
-                        ))}
                         {savedStationsAndSets.map((pl) => {
                           const isSelected =
                             rightPaneMode === 'tracks' &&
@@ -1009,6 +999,472 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                           );
                         })}
                       </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Inline Local Music & Storage Accordion (Canonical Emerald Green) */}
+            {isSourceIncluded('local') && (
+              <div
+                data-rail-collapse-key="local_nav"
+                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+              >
+                {(() => {
+                  const isLocalHubActive =
+                    (browseHubTarget === 'local_discover' || browseHubTarget === 'mount') &&
+                    rightPaneMode === 'browse';
+                  return (
+                    <button
+                      data-xmb-drill-right="true"
+                      data-rail-collapse-key="local_nav"
+                      data-left-active={isLocalHubActive ? 'true' : undefined}
+                      onClick={() => {
+                        if (!isLocalHubActive) {
+                          pushCurrentNavState();
+                          setActiveMountRoot(null);
+                          setLocalFolderPath('');
+                          setLocalNavOpen(true);
+                          try {
+                            window.localStorage.setItem('simp_sec_local_nav', '1');
+                          } catch {}
+                          setBrowseHubTarget('local_discover');
+                          setRightPaneMode('browse');
+                        } else {
+                          toggleLocalNavOpen();
+                        }
+                      }}
+                      style={{
+                        minHeight: 34,
+                        padding: '0 10px',
+                        borderRadius: 8,
+                        background: isLocalHubActive ? '#0b241c' : '#0a0a0e',
+                        border: isLocalHubActive
+                          ? '1px solid #34d399'
+                          : '1px solid #181820',
+                        color: '#6ee7b7',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <span>💾</span>
+                        <span>Local</span>
+                      </span>
+                      <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#34d399' }}>
+                        {localNavOpen ? '▾' : '▸'}
+                      </span>
+                    </button>
+                  );
+                })()}
+
+                {localNavOpen && (
+                  <div
+                    data-rail-collapse-key="local_nav"
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      paddingLeft: 10,
+                      marginLeft: 6,
+                      borderLeft: '2px solid #143328',
+                    }}
+                  >
+                    {(
+                      [
+                        { id: 'overview', label: '⚡ Overview' },
+                        { id: 'artists', label: `🎤 Artists (${localArtistsCount})` },
+                        { id: 'albums', label: `💿 Albums (${localAlbumsCount})` },
+                        {
+                          id: 'folders',
+                          label: `📂 Mounts & Folders (${snap?.mounts.length || 0})`,
+                        },
+                        ...(localVideosCount > 0
+                          ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideosCount})` }]
+                          : []),
+                      ] as const
+                    ).map((hub) => {
+                      const active =
+                        browseHubTarget === 'local_discover' &&
+                        localSubTab === hub.id &&
+                        rightPaneMode === 'browse';
+                      return (
+                        <button
+                          key={hub.id}
+                          data-left-active={active ? 'true' : undefined}
+                          data-xmb-preview="true"
+                          onClick={() => {
+                            const isPreview = xmbPreviewTriggerRef.current;
+                            if (
+                              !isPreview &&
+                              (browseHubTarget !== 'local_discover' ||
+                                localSubTab !== hub.id ||
+                                rightPaneMode !== 'browse')
+                            ) {
+                              pushCurrentNavState();
+                            }
+                            if (hub.id !== 'folders') {
+                              setActiveMountRoot(null);
+                              setLocalFolderPath('');
+                            }
+                            setLocalSubTab(hub.id);
+                            setBrowseHubTarget('local_discover');
+                            setRightPaneMode('browse');
+                            if (!isPreview) focusRightPaneFirstTile();
+                          }}
+                          style={{
+                            minHeight: 30,
+                            padding: '0 10px',
+                            borderRadius: 7,
+                            background: active ? '#0b241c' : '#08120e',
+                            border: active ? '1px solid #34d399' : '1px solid #142820',
+                            color: active ? '#a7f3d0' : '#d1fae5',
+                            fontSize: 11.5,
+                            fontWeight: active ? 800 : 600,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                        >
+                          {hub.label}
+                        </button>
+                      );
+                    })}
+
+                    {/* Local Smart Stations */}
+                    {railSmartStations.length > 0 && (
+                      <div
+                        data-rail-collapse-key="local_stations"
+                        style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}
+                      >
+                        <button
+                          data-xmb-drill-right="true"
+                          data-rail-collapse-key="local_stations"
+                          onClick={toggleLocalStationsSecOpen}
+                          style={{
+                            background: '#081510',
+                            border: '1px solid #143328',
+                            borderRadius: 7,
+                            padding: '4px 9px',
+                            color: '#6ee7b7',
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            fontWeight: 800,
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span>
+                            {localStationsSecOpen ? '▾' : '▸'} LOCAL SMART STATIONS (
+                            {railSmartStations.length})
+                          </span>
+                        </button>
+                        {localStationsSecOpen &&
+                          railSmartStations.map((st) => (
+                            <button
+                              key={st.id}
+                              onClick={() => onPlayLocalSmartStation(st, false)}
+                              title={`${st.title} — ${st.subtitle}`}
+                              style={{
+                                minHeight: 30,
+                                padding: '0 10px',
+                                borderRadius: 7,
+                                background: '#081510',
+                                border: '1px solid #143328',
+                                color: '#ccfbf1',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 8,
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                width: '100%',
+                                boxSizing: 'border-box',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 700,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  minWidth: 0,
+                                  flex: 1,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                }}
+                              >
+                                <ImpIcon name="radio" size={11} color="#34d399" />
+                                <span
+                                  style={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {st.title}
+                                </span>
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
+                                  color: '#6ee7b7',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                ▶ {st.track_count}
+                              </span>
+                            </button>
+                          ))}
+                      </div>
+                    )}
+
+                    {/* Storage Mounts inside Local */}
+                    {snap?.mounts.map((m) => {
+                      const isMountActive =
+                        (browseHubTarget === 'mount' ||
+                          (browseHubTarget === 'local_discover' && localSubTab === 'folders')) &&
+                        activeMountRoot === m.mount_root &&
+                        rightPaneMode === 'browse';
+                      return (
+                        <button
+                          key={m.mount_root}
+                          data-left-active={isMountActive ? 'true' : undefined}
+                          data-left-context-kind="mount"
+                          data-left-context-id={m.mount_root}
+                          data-xmb-preview="true"
+                          onClick={() => {
+                            const isPreview = xmbPreviewTriggerRef.current;
+                            if (
+                              !isPreview &&
+                              (browseHubTarget !== 'mount' ||
+                                activeMountRoot !== m.mount_root ||
+                                rightPaneMode !== 'browse')
+                            ) {
+                              pushCurrentNavState();
+                            }
+                            setActiveMountRoot(m.mount_root);
+                            setLocalFolderPath('');
+                            setLocalSubTab('folders');
+                            setBrowseHubTarget('mount');
+                            setRightPaneMode('browse');
+                            if (!isPreview) {
+                              focusRightPaneFirstTile();
+                            }
+                          }}
+                          title={m.mount_root}
+                          style={{
+                            minHeight: 32,
+                            padding: '0 10px',
+                            borderRadius: 7,
+                            background: isMountActive ? '#0b241c' : '#08120e',
+                            border: isMountActive ? '1px solid #34d399' : '1px solid #143328',
+                            color: isMountActive ? '#6ee7b7' : '#34d399',
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: 8,
+                            opacity: m.is_online ? 1 : 0.65,
+                          }}
+                        >
+                          <span
+                            style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              minWidth: 0,
+                              flex: 1,
+                            }}
+                          >
+                            💾 {m.label}
+                            {!m.is_online ? ' (Offline)' : ''} ({m.track_count})
+                          </span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontFamily: 'monospace',
+                              color: isMountActive ? '#6ee7b7' : '#34d399',
+                              flexShrink: 0,
+                            }}
+                          >
+                            ⊞
+                          </span>
+                        </button>
+                      );
+                    })}
+
+                    {/* Optical Disc Drive (cdda:// or dvd://) inside Local */}
+                    {sourceVisibility.optical_drive && (
+                      <div
+                        style={{
+                          padding: '6px 9px',
+                          borderRadius: 8,
+                          background:
+                            rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
+                              ? '#1f160d'
+                              : opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
+                              ? '#12100e'
+                              : '#0a0a0e',
+                          border:
+                            rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
+                              ? '1px solid #f59e0b'
+                              : opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
+                              ? '1px solid #78350f'
+                              : '1px solid #181820',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <button
+                          data-left-active={
+                            rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
+                              ? 'true'
+                              : undefined
+                          }
+                          data-xmb-preview={
+                            opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
+                              ? 'true'
+                              : undefined
+                          }
+                          onClick={() => {
+                            if (opticalDisc?.is_audio_cd) {
+                              selectLocalCollection({
+                                kind: 'cdda',
+                                id:
+                                  opticalDisc.disc_id ||
+                                  opticalDisc.device_path ||
+                                  '/dev/sr0',
+                                title: `💿 ${opticalDisc.album_title || 'Audio CD'}`,
+                                subtitle: `${opticalDisc.artist_name || 'Unknown Artist'}${
+                                  opticalDisc.release_year
+                                    ? ` • ${opticalDisc.release_year}`
+                                    : ''
+                                }${
+                                  opticalDisc.disc_id
+                                    ? ` • DiscID ${opticalDisc.disc_id.slice(0, 8)}…`
+                                    : ''
+                                }`,
+                                art_url: opticalDisc.art_url,
+                              });
+                              setBrowserTracks(opticalDisc.tracks);
+                            } else if (opticalDisc?.is_dvd_video) {
+                              selectLocalCollection({
+                                kind: 'cdda',
+                                id:
+                                  opticalDisc.disc_id ||
+                                  opticalDisc.device_path ||
+                                  '/dev/sr0',
+                                title: `📀 ${opticalDisc.album_title || 'DVD Video'}`,
+                                subtitle: `${opticalDisc.artist_name || 'DVD-Video'}${
+                                  opticalDisc.release_year
+                                    ? ` • ${opticalDisc.release_year}`
+                                    : ''
+                                }`,
+                                art_url: opticalDisc.art_url,
+                              });
+                              setBrowserTracks([]);
+                            } else if (!xmbPreviewTriggerRef.current) {
+                              handleScanOpticalDisc(false, false);
+                            }
+                          }}
+                          style={{
+                            minWidth: 0,
+                            flex: 1,
+                            background: 'transparent',
+                            border: 'none',
+                            color:
+                              opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
+                                ? '#fcd34d'
+                                : '#c8c8d2',
+                            textAlign: 'left',
+                            cursor: 'pointer',
+                            padding: 0,
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {cdScanning
+                            ? '⏳ 💿 Scanning Disc...'
+                            : opticalDisc?.is_audio_cd
+                            ? `💿 ${opticalDisc.album_title || 'Audio CD'} (${opticalDisc.tracks.length})`
+                            : opticalDisc?.is_dvd_video
+                            ? `📀 ${opticalDisc.album_title || 'DVD Video'} (${
+                                opticalDisc.dvd_titles?.length || 0
+                              })`
+                            : '💿 Optical Disc Drive'}
+                        </button>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            flexShrink: 0,
+                          }}
+                        >
+                          <button
+                            data-row-aux="true"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleScanOpticalDisc(true, false);
+                            }}
+                            disabled={cdScanning}
+                            style={{
+                              padding: '3px 7px',
+                              borderRadius: 6,
+                              background: '#161622',
+                              border: '1px solid #2e2e3e',
+                              color: '#fcd34d',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {cdScanning ? '⏳' : '🔄'}
+                          </button>
+                          {opticalDisc?.drive_present && (
+                            <button
+                              data-row-aux="true"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEjectOpticalDisc();
+                              }}
+                              title="Eject Optical Disc"
+                              style={{
+                                padding: '3px 6px',
+                                borderRadius: 6,
+                                background: '#1f1216',
+                                border: '1px solid #4c2228',
+                                color: '#fca5a5',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ⏏
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1418,220 +1874,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               </div>
             )}
 
-            {/* Local Storage Mounts (Canonical Emerald Green, no "Local: " prefix) */}
-            {isSourceIncluded('local') &&
-              snap?.mounts.map((m) => {
-                const isMountActive =
-                  browseHubTarget === 'mount' &&
-                  activeMountRoot === m.mount_root &&
-                  rightPaneMode === 'browse';
-                return (
-                  <button
-                    key={m.mount_root}
-                    data-left-active={isMountActive ? 'true' : undefined}
-                    data-left-context-kind="mount"
-                    data-left-context-id={m.mount_root}
-                    data-xmb-preview="true"
-                    onClick={() => {
-                      const isPreview = xmbPreviewTriggerRef.current;
-                      if (
-                        !isPreview &&
-                        (browseHubTarget !== 'mount' ||
-                          activeMountRoot !== m.mount_root ||
-                          rightPaneMode !== 'browse')
-                      ) {
-                        pushCurrentNavState();
-                      }
-                      setActiveMountRoot(m.mount_root);
-                      setBrowseHubTarget('mount');
-                      setRightPaneMode('browse');
-                      if (!isPreview) {
-                        focusRightPaneFirstTile();
-                      }
-                    }}
-                    title={m.mount_root}
-                    style={{
-                      minHeight: 34,
-                      padding: '0 10px',
-                      borderRadius: 8,
-                      background: isMountActive ? '#0b241c' : '#08120e',
-                      border: isMountActive ? '1px solid #34d399' : '1px solid #143328',
-                      color: isMountActive ? '#6ee7b7' : '#34d399',
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      gap: 8,
-                      opacity: m.is_online ? 1 : 0.65,
-                    }}
-                  >
-                    <span
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        minWidth: 0,
-                        flex: 1,
-                      }}
-                    >
-                      💾 {m.label}{!m.is_online ? ' (Offline)' : ''} ({m.track_count})
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        color: isMountActive ? '#6ee7b7' : '#34d399',
-                        flexShrink: 0,
-                      }}
-                    >
-                      ⊞
-                    </span>
-                  </button>
-                );
-              })}
-
-            {/* Loaded Audio CD or DVD-Video (`cdda://` or `dvd://`) — only shown when Optical Drive is enabled and Local is included */}
-            {sourceVisibility.optical_drive && isSourceIncluded('local') && (
-              <div
-                style={{
-                  padding: '6px 10px',
-                  borderRadius: 9,
-                  background:
-                    rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
-                      ? '#1f160d'
-                      : opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
-                      ? '#12100e'
-                      : '#0a0a0e',
-                  border:
-                    rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
-                      ? '1px solid #f59e0b'
-                      : opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
-                      ? '1px solid #78350f'
-                      : '1px solid #181820',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: 6,
-                }}
-              >
-                <button
-                  data-left-active={
-                    rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
-                      ? 'true'
-                      : undefined
-                  }
-                  data-xmb-preview={
-                    opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video ? 'true' : undefined
-                  }
-                  onClick={() => {
-                    if (opticalDisc?.is_audio_cd) {
-                      selectLocalCollection({
-                        kind: 'cdda',
-                        id: opticalDisc.disc_id || opticalDisc.device_path || '/dev/sr0',
-                        title: `💿 ${opticalDisc.album_title || 'Audio CD'}`,
-                        subtitle: `${opticalDisc.artist_name || 'Unknown Artist'}${
-                          opticalDisc.release_year ? ` • ${opticalDisc.release_year}` : ''
-                        }${
-                          opticalDisc.disc_id
-                            ? ` • DiscID ${opticalDisc.disc_id.slice(0, 8)}…`
-                            : ''
-                        }`,
-                        art_url: opticalDisc.art_url,
-                      });
-                      setBrowserTracks(opticalDisc.tracks);
-                    } else if (opticalDisc?.is_dvd_video) {
-                      selectLocalCollection({
-                        kind: 'cdda',
-                        id: opticalDisc.disc_id || opticalDisc.device_path || '/dev/sr0',
-                        title: `📀 ${opticalDisc.album_title || 'DVD Video'}`,
-                        subtitle: `${opticalDisc.artist_name || 'DVD-Video'}${
-                          opticalDisc.release_year ? ` • ${opticalDisc.release_year}` : ''
-                        }`,
-                        art_url: opticalDisc.art_url,
-                      });
-                      setBrowserTracks([]);
-                    } else if (!xmbPreviewTriggerRef.current) {
-                      handleScanOpticalDisc(false, false);
-                    }
-                  }}
-                  style={{
-                    minWidth: 0,
-                    flex: 1,
-                    background: 'transparent',
-                    border: 'none',
-                    color:
-                      opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
-                        ? '#fcd34d'
-                        : '#c8c8d2',
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    padding: 0,
-                    fontSize: 12,
-                    fontWeight: 700,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {cdScanning
-                    ? '⏳ 💿 Scanning Disc...'
-                    : opticalDisc?.is_audio_cd
-                    ? `💿 ${opticalDisc.album_title || 'Audio CD'} (${opticalDisc.tracks.length})`
-                    : opticalDisc?.is_dvd_video
-                    ? `📀 ${opticalDisc.album_title || 'DVD Video'} (${
-                        opticalDisc.dvd_titles?.length || 0
-                      })`
-                    : '💿 Optical Disc Drive'}
-                </button>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-                  <button
-                    data-row-aux="true"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleScanOpticalDisc(true, false);
-                    }}
-                    disabled={cdScanning}
-                    style={{
-                      padding: '3px 7px',
-                      borderRadius: 6,
-                      background: '#161622',
-                      border: '1px solid #2e2e3e',
-                      color: '#fcd34d',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {cdScanning ? '⏳' : '🔄'}
-                  </button>
-                  {opticalDisc?.drive_present && (
-                    <button
-                      data-row-aux="true"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEjectOpticalDisc();
-                      }}
-                      title="Eject Optical Disc"
-                      style={{
-                        padding: '3px 6px',
-                        borderRadius: 6,
-                        background: '#1f1216',
-                        border: '1px solid #4c2228',
-                        color: '#fca5a5',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ⏏
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
 

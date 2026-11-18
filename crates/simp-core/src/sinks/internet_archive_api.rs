@@ -1359,6 +1359,7 @@ pub fn parse_ia_metadata_json(identifier: &str, root: &Value) -> Result<ArchiveI
                 source: "internet_archive".to_string(),
                 mount_root: None,
                 content_rating: content_rating.clone(),
+                ..Default::default()
             },
         });
     }
@@ -1418,6 +1419,7 @@ pub fn parse_ia_metadata_json(identifier: &str, root: &Value) -> Result<ArchiveI
                 source: "ia_video".to_string(),
                 mount_root: None,
                 content_rating: content_rating.clone(),
+                ..Default::default()
             })
             .collect();
     }

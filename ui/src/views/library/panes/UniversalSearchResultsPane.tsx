@@ -8,6 +8,7 @@ import {
 } from "@simp/client";
 import {
   AppleCatalogSearchResults,
+  AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,
 } from "../../../drivers/AppleMusicDriver";
 import {
@@ -37,6 +38,7 @@ export interface UniversalSearchResultsPaneProps {
   loadMoreIaSearch: any;
   loadMoreScSearch: any;
   mediaTypeFilter: "all" | "video" | "audio";
+  recentlyAddedCloudAlbums?: AppleCloudAlbumSummary[];
   renderAppleArtistCard: any;
   renderArchiveItemCard: any;
   renderCloudAlbumCard: any;
@@ -72,6 +74,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
   loadMoreIaSearch,
   loadMoreScSearch,
   mediaTypeFilter,
+  recentlyAddedCloudAlbums = [],
   renderAppleArtistCard,
   renderArchiveItemCard,
   renderCloudAlbumCard,
@@ -165,7 +168,15 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           }
                         }
                         for (const tr of filteredLocalSearchTracks) {
-                          if (isUiVideoTrack(tr)) continue;
+                          if (
+                            isUiVideoTrack(tr) ||
+                            tr.source === 'apple_music' ||
+                            tr.source === 'soundcloud' ||
+                            tr.source === 'internet_archive' ||
+                            tr.source === 'ia_video'
+                          ) {
+                            continue;
+                          }
                           for (const artName of tr.artists) {
                             const cleanArtName = artName.trim();
                             if (
@@ -183,6 +194,13 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           }
                         }
                       }
+                      const localOnlySearchTracks = filteredLocalSearchTracks.filter(
+                        (tr) =>
+                          tr.source !== 'apple_music' &&
+                          tr.source !== 'soundcloud' &&
+                          tr.source !== 'internet_archive' &&
+                          tr.source !== 'ia_video'
+                      );
                       const matchedLocalArtists = Array.from(localArtistsMap.values()).slice(0, 8);
 
                       return (
@@ -219,20 +237,20 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
 
                           {/* 1C-2. Matching Local Tracks & Local Videos */}
                           {isSourceIncluded('local') &&
-                            filteredLocalSearchTracks.length > 0 && (
+                            localOnlySearchTracks.length > 0 && (
                               <>
                                 <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                                  LOCAL TRACKS & VIDEOS ({filteredLocalSearchTracks.length})
+                                  LOCAL TRACKS & VIDEOS ({localOnlySearchTracks.length})
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                  {filteredLocalSearchTracks.map((s) =>
+                                  {localOnlySearchTracks.map((s) =>
                                     renderSingleSongRow(
                                       s,
                                       isUiVideoTrack(s)
-                                        ? filteredLocalSearchTracks.filter((tr) =>
+                                        ? localOnlySearchTracks.filter((tr) =>
                                             isUiVideoTrack(tr)
                                           )
-                                        : filteredLocalSearchTracks.filter(
+                                        : localOnlySearchTracks.filter(
                                             (tr) => !isUiVideoTrack(tr)
                                           ),
                                       'local_search'
@@ -246,6 +264,29 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                     }
 
                     if (sourceGroup === 'apple_music') {
+                      const apiLibAlbums = catalogSearchResults.albums.filter((a) => a.kind === 'library');
+                      const seenLibIds = new Set(apiLibAlbums.map((a) => a.id));
+                      const matchingCloudLibraryAlbums = [...apiLibAlbums];
+                      for (const alb of recentlyAddedCloudAlbums) {
+                        if (
+                          !seenLibIds.has(alb.id) &&
+                          (alb.title.toLowerCase().includes(searchLower) ||
+                            alb.artist.toLowerCase().includes(searchLower))
+                        ) {
+                          seenLibIds.add(alb.id);
+                          matchingCloudLibraryAlbums.push(alb);
+                        }
+                      }
+
+                      const mergedAppleSearchSongs = [...catalogSearchResults.songs];
+                      const seenAppleSongUris = new Set(mergedAppleSearchSongs.map((s) => s.uri));
+                      for (const tr of filteredLocalSearchTracks) {
+                        if (tr.source === 'apple_music' && !seenAppleSongUris.has(tr.uri)) {
+                          seenAppleSongUris.add(tr.uri);
+                          mergedAppleSearchSongs.push(tr);
+                        }
+                      }
+
                       return (
                         <React.Fragment key="search-group-apple">
                           {/* 1B. Matching Unpinned Apple Library Playlists */}
@@ -280,23 +321,17 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                                     </>
                                   )}
 
-                                {catalogSearchResults.albums.some((a) => a.kind === 'library') && (
+                                {matchingCloudLibraryAlbums.length > 0 && (
                                   <>
                                     <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                                       <AppleMusicLogo size={11} />
                                       <span>
                                         IN YOUR APPLE CLOUD LIBRARY — ALBUMS (
-                                        {
-                                          catalogSearchResults.albums.filter((a) => a.kind === 'library')
-                                            .length
-                                        }
-                                        )
+                                        {matchingCloudLibraryAlbums.length})
                                       </span>
                                     </div>
                                     <div style={tileGridStyle}>
-                                      {catalogSearchResults.albums
-                                        .filter((a) => a.kind === 'library')
-                                        .map(renderCloudAlbumCard)}
+                                      {matchingCloudLibraryAlbums.map(renderCloudAlbumCard)}
                                     </div>
                                   </>
                                 )}
@@ -344,14 +379,14 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                                   </>
                                 )}
 
-                                {catalogSearchResults.songs.length > 0 && (
+                                {mergedAppleSearchSongs.length > 0 && (
                                   <>
                                     <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fda4af' }}>
-                                      🎵 SONGS / SINGLES ({catalogSearchResults.songs.length})
+                                      🎵 SONGS / SINGLES ({mergedAppleSearchSongs.length})
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                      {catalogSearchResults.songs.map((s) =>
-                                        renderSingleSongRow(s, catalogSearchResults.songs, 'search')
+                                      {mergedAppleSearchSongs.map((s) =>
+                                        renderSingleSongRow(s, mergedAppleSearchSongs, 'search')
                                       )}
                                     </div>
                                   </>
@@ -520,6 +555,16 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                   filteredAlbums.length === 0 &&
                   filteredLocalSearchTracks.length === 0 &&
                   catalogSearchResults.albums.length === 0 &&
+                  !(
+                    isSourceIncluded('apple_music') &&
+                    mediaTypeFilter !== 'video' &&
+                    snap?.apple_authenticated &&
+                    recentlyAddedCloudAlbums.some(
+                      (alb) =>
+                        alb.title.toLowerCase().includes(searchLower) ||
+                        alb.artist.toLowerCase().includes(searchLower)
+                    )
+                  ) &&
                   catalogSearchResults.playlists.length === 0 &&
                   catalogSearchResults.stations.length === 0 &&
                   catalogSearchResults.songs.length === 0 &&

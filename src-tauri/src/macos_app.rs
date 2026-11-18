@@ -589,10 +589,24 @@ pub fn run_macos_native_app(ui_url: &str) {
             window.setBackgroundColor_(bg_color);
         }
 
-        // Configure WKWebView with zero-gesture media playback enabled
+        // Configure WKWebView with zero-gesture media playback enabled & background timer continuity
         let wk_config: id = msg_send![class!(WKWebViewConfiguration), new];
         // WKAudiovisualMediaTypeNone = 0 (allow autoplay without requiring user gesture)
         let _: () = msg_send![wk_config, setMediaTypesRequiringUserActionForPlayback: 0usize];
+        let wk_prefs: id = msg_send![wk_config, preferences];
+        if wk_prefs != nil {
+            let page_supp_sel = sel!(_setPageVisibilityBasedProcessSuppressionEnabled:);
+            let page_supp_ok: BOOL = msg_send![wk_prefs, respondsToSelector: page_supp_sel];
+            if page_supp_ok == YES {
+                let _: () =
+                    msg_send![wk_prefs, _setPageVisibilityBasedProcessSuppressionEnabled: NO];
+            }
+            let dom_throttle_sel = sel!(_setDOMTimerThrottlingEnabled:);
+            let dom_throttle_ok: BOOL = msg_send![wk_prefs, respondsToSelector: dom_throttle_sel];
+            if dom_throttle_ok == YES {
+                let _: () = msg_send![wk_prefs, _setDOMTimerThrottlingEnabled: NO];
+            }
+        }
 
         let webview: id = msg_send![class!(WKWebView), alloc];
         let webview: id = msg_send![webview, initWithFrame: frame configuration: wk_config];

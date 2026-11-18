@@ -281,6 +281,19 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
         .or(Some(1));
 
     let content_rating = extract_apple_content_rating(item);
+    let genre = attrs
+        .get("genreNames")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let release_year = attrs
+        .get("releaseDate")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.get(0..4))
+        .and_then(|y| y.parse::<i32>().ok())
+        .filter(|y| (1900..=2100).contains(y));
 
     let meta = TrackMetadata {
         uri: format!("applemusic:song:{track_id}"),
@@ -295,6 +308,9 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
         source: "apple_music".to_string(),
         mount_root: None,
         content_rating,
+        genre,
+        release_year,
+        parent_folder: None,
     };
     remember_track_metadata_hint(&meta);
     if let Some(raw_item_id) = item_id {

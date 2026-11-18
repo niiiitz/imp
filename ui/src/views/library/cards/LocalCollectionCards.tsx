@@ -518,8 +518,27 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
           }}
         >
           <ContentRatingBadge rating={alb.content_rating} style={{ marginRight: 5 }} />
-          {alb.album_artist} • {alb.track_count} tracks
+          {alb.album_artist}
+          {!isAppleAlbum && alb.release_year ? ` • ${alb.release_year}` : ''}
+          {!isAppleAlbum && alb.genre ? ` • ${alb.genre}` : ''} • {alb.track_count} tracks
         </div>
+        {!isAppleAlbum && alb.parent_folder && alb.parent_folder !== '/' && (
+          <div
+            title={`Folder: ${alb.parent_folder}`}
+            style={{
+              fontSize: 9.5,
+              fontFamily: 'monospace',
+              color: '#6ee7b7',
+              opacity: 0.78,
+              marginTop: 2,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            📂 {alb.parent_folder}
+          </div>
+        )}
       </div>
     </button>
   );

@@ -7,6 +7,9 @@ pub mod dvd;
 pub mod internet_archive;
 pub mod internet_archive_api;
 pub mod local;
+#[cfg(target_os = "macos")]
+#[allow(unexpected_cfgs)]
+pub mod macos_tap;
 pub mod soundcloud;
 pub mod soundcloud_api;
 

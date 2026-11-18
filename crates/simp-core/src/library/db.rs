@@ -225,6 +225,72 @@ impl LibraryDatabase {
 
         let _ = conn.execute("ALTER TABLE tracks ADD COLUMN content_rating TEXT", []);
         let _ = conn.execute("ALTER TABLE playlists ADD COLUMN remote_updated_at TEXT", []);
+        let _ = conn.execute("ALTER TABLE tracks ADD COLUMN genre TEXT", []);
+        let _ = conn.execute("ALTER TABLE tracks ADD COLUMN release_year INTEGER", []);
+        let _ = conn.execute("ALTER TABLE tracks ADD COLUMN parent_folder TEXT", []);
+        let _ = conn.execute("ALTER TABLE albums ADD COLUMN genre TEXT", []);
+        let _ = conn.execute("ALTER TABLE albums ADD COLUMN parent_folder TEXT", []);
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tracks_mount_folder ON tracks(mount_root, parent_folder)",
+            [],
+        );
+
+        let _ = conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS simp_migrations (name TEXT PRIMARY KEY);",
+        );
+        if conn
+            .execute(
+                "INSERT OR IGNORE INTO simp_migrations (name) VALUES ('reset_apple_catalog_map_20261117')",
+                [],
+            )
+            .is_ok()
+            && conn.changes() > 0
+        {
+            let _ = conn.execute("DELETE FROM apple_catalog_map", []);
+        }
+        if conn
+            .execute(
+                "INSERT OR IGNORE INTO simp_migrations (name) VALUES ('heal_grafted_apple_track_art_20261117_v2')",
+                [],
+            )
+            .is_ok()
+            && conn.changes() > 0
+        {
+            let _ = conn.execute_batch(
+                "
+                DELETE FROM apple_catalog_map;
+                UPDATE tracks
+                SET art_url = NULL
+                WHERE (uri LIKE 'applemusic:song:i.%' OR uri LIKE 'applemusic:track:i.%')
+                  AND art_url LIKE '%mzstatic.com%';
+                UPDATE tracks
+                SET art_url = NULL
+                WHERE source = 'apple_music'
+                  AND art_url IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM tracks t2
+                    WHERE t2.art_url = tracks.art_url
+                      AND LOWER(TRIM(t2.album_title)) != LOWER(TRIM(tracks.album_title))
+                      AND t2.artists_json != tracks.artists_json
+                  );
+                UPDATE tracks
+                SET art_url = (
+                  SELECT a.art_cache_path FROM albums a
+                  WHERE a.id = tracks.album_id
+                    AND a.art_cache_path IS NOT NULL
+                    AND a.art_cache_path != ''
+                )
+                WHERE album_id IS NOT NULL
+                  AND (art_url IS NULL OR art_url = '')
+                  AND EXISTS (
+                    SELECT 1 FROM albums a
+                    WHERE a.id = tracks.album_id
+                      AND a.art_cache_path IS NOT NULL
+                      AND a.art_cache_path != ''
+                  );
+                ",
+            );
+        }
 
         // Self-heal temporary 24-hour iCloud Music Library `blobstore.apple.com` presigned artwork URLs
         // whenever another track from the same album already has a permanent `mzstatic.com` catalog URL!
@@ -249,14 +315,17 @@ impl LibraryDatabase {
                 SELECT t2.art_url FROM tracks t2
                 WHERE t2.album_title = tracks.album_title
                   AND t2.album_title != ''
+                  AND t2.artists_json = tracks.artists_json
                   AND t2.art_url LIKE '%mzstatic.com%'
                 LIMIT 1
             )
             WHERE (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')
+              AND tracks.uri NOT LIKE 'applemusic:%:i.%'
               AND EXISTS (
                 SELECT 1 FROM tracks t2
                 WHERE t2.album_title = tracks.album_title
                   AND t2.album_title != ''
+                  AND t2.artists_json = tracks.artists_json
                   AND t2.art_url LIKE '%mzstatic.com%'
               );
 
@@ -434,6 +503,57 @@ impl LibraryDatabase {
         Ok(map)
     }
 
+    /// Returns the set of URIs under `mount_root` that lack `parent_folder` metadata
+    /// (used on startup to quickly backfill `genre`, `release_year`, and `parent_folder`
+    /// from tags/paths without re-extracting artwork).
+    pub fn get_tracks_missing_folder_metadata(
+        &self,
+        mount_root: &str,
+    ) -> Result<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT uri FROM tracks
+             WHERE mount_root = ?1
+               AND (parent_folder IS NULL OR TRIM(parent_folder) = '')",
+        )?;
+        let mut set = std::collections::HashSet::new();
+        let rows = stmt.query_map(params![mount_root], |row| row.get::<_, String>(0))?;
+        for uri in rows.flatten() {
+            set.insert(uri);
+        }
+        Ok(set)
+    }
+
+    /// Backfills `genre`, `release_year`, and normalized `parent_folder` on an existing track row
+    /// and propagates missing values onto its parent album row.
+    pub fn backfill_track_and_album_tag_metadata(
+        &self,
+        uri: &str,
+        genre: Option<&str>,
+        release_year: Option<i32>,
+        parent_folder: &str,
+    ) -> Result<()> {
+        let clean_genre = genre.map(str::trim).filter(|s| !s.is_empty());
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE tracks
+             SET parent_folder = ?2,
+                 genre = COALESCE(NULLIF(TRIM(genre), ''), ?3),
+                 release_year = COALESCE(release_year, ?4)
+             WHERE uri = ?1",
+            params![uri, parent_folder, clean_genre, release_year],
+        )?;
+        conn.execute(
+            "UPDATE albums
+             SET parent_folder = COALESCE(NULLIF(TRIM(parent_folder), ''), ?2),
+                 genre = COALESCE(NULLIF(TRIM(genre), ''), ?3),
+                 release_year = COALESCE(release_year, ?4)
+             WHERE id = (SELECT album_id FROM tracks WHERE uri = ?1)",
+            params![uri, parent_folder, clean_genre, release_year],
+        )?;
+        Ok(())
+    }
+
     pub fn upsert_album(
         &self,
         id: &str,
@@ -443,18 +563,47 @@ impl LibraryDatabase {
         steam_app_id: Option<u32>,
         art_cache_path: Option<&str>,
     ) -> Result<()> {
+        self.upsert_album_with_metadata(
+            id,
+            title,
+            album_artist,
+            release_year,
+            steam_app_id,
+            art_cache_path,
+            None,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn upsert_album_with_metadata(
+        &self,
+        id: &str,
+        title: &str,
+        album_artist: &str,
+        release_year: Option<i32>,
+        steam_app_id: Option<u32>,
+        art_cache_path: Option<&str>,
+        genre: Option<&str>,
+        parent_folder: Option<&str>,
+    ) -> Result<()> {
+        let clean_genre = genre.map(str::trim).filter(|s| !s.is_empty());
+        let clean_folder = parent_folder.map(str::trim).filter(|s| !s.is_empty());
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO albums (id, title, album_artist, release_year, steam_app_id, art_cache_path, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, strftime('%s', 'now'))
+            "INSERT INTO albums (id, title, album_artist, release_year, steam_app_id, art_cache_path, genre, parent_folder, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, strftime('%s', 'now'))
              ON CONFLICT(id) DO UPDATE SET
+               release_year = COALESCE(excluded.release_year, albums.release_year),
                art_cache_path = CASE
                  WHEN excluded.art_cache_path IS NOT NULL THEN excluded.art_cache_path
                  WHEN albums.art_cache_path LIKE '%/mb_%' OR albums.art_cache_path LIKE '%mzstatic.com%' THEN albums.art_cache_path
                  ELSE NULL
                END,
-               steam_app_id = COALESCE(excluded.steam_app_id, albums.steam_app_id)",
-            params![id, title, album_artist, release_year, steam_app_id, art_cache_path],
+               steam_app_id = COALESCE(excluded.steam_app_id, albums.steam_app_id),
+               genre = COALESCE(NULLIF(TRIM(excluded.genre), ''), albums.genre),
+               parent_folder = COALESCE(NULLIF(TRIM(excluded.parent_folder), ''), albums.parent_folder)",
+            params![id, title, album_artist, release_year, steam_app_id, art_cache_path, clean_genre, clean_folder],
         )?;
         Ok(())
     }
@@ -467,27 +616,45 @@ impl LibraryDatabase {
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let artists_json = serde_json::to_string(&meta.artists).unwrap_or_else(|_| "[]".to_string());
+        let clean_genre = meta.genre.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let clean_folder = meta.parent_folder.as_deref().map(str::trim).filter(|s| !s.is_empty());
         conn.execute(
             "INSERT INTO tracks (
                 uri, source, mount_root, album_id, title, artists_json,
-                album_title, track_number, disc_number, duration_ms, art_url, file_mtime, file_size, content_rating
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                album_title, track_number, disc_number, duration_ms, art_url, file_mtime, file_size, content_rating,
+                genre, release_year, parent_folder
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(uri) DO UPDATE SET
                 album_id = COALESCE(excluded.album_id, tracks.album_id),
-                title = excluded.title,
-                artists_json = excluded.artists_json,
-                album_title = excluded.album_title,
-                track_number = excluded.track_number,
-                disc_number = excluded.disc_number,
-                duration_ms = excluded.duration_ms,
-                art_url = CASE
-                  WHEN excluded.art_url IS NOT NULL THEN excluded.art_url
-                  WHEN tracks.art_url LIKE '%/mb_%' OR tracks.art_url LIKE '%mzstatic.com%' THEN tracks.art_url
-                  ELSE NULL
+                title = CASE
+                  WHEN excluded.title != '' AND excluded.title != 'Apple Music Track' THEN excluded.title
+                  ELSE tracks.title
                 END,
-                file_mtime = excluded.file_mtime,
-                file_size = excluded.file_size,
-                content_rating = COALESCE(excluded.content_rating, tracks.content_rating)",
+                artists_json = CASE
+                  WHEN excluded.artists_json != '[]' AND excluded.artists_json != '[\"\"]' THEN excluded.artists_json
+                  ELSE tracks.artists_json
+                END,
+                album_title = CASE
+                  WHEN excluded.album_title != '' THEN excluded.album_title
+                  ELSE tracks.album_title
+                END,
+                track_number = COALESCE(excluded.track_number, tracks.track_number),
+                disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
+                duration_ms = CASE
+                  WHEN excluded.duration_ms > 0 THEN excluded.duration_ms
+                  ELSE tracks.duration_ms
+                END,
+                art_url = CASE
+                  WHEN excluded.art_url IS NOT NULL AND excluded.art_url NOT LIKE '%blobstore.apple.com%' THEN excluded.art_url
+                  WHEN tracks.art_url LIKE '%/mb_%' OR tracks.art_url LIKE '%mzstatic.com%' THEN tracks.art_url
+                  ELSE COALESCE(excluded.art_url, tracks.art_url)
+                END,
+                file_mtime = COALESCE(excluded.file_mtime, tracks.file_mtime),
+                file_size = COALESCE(excluded.file_size, tracks.file_size),
+                content_rating = COALESCE(excluded.content_rating, tracks.content_rating),
+                genre = COALESCE(NULLIF(TRIM(excluded.genre), ''), tracks.genre),
+                release_year = COALESCE(excluded.release_year, tracks.release_year),
+                parent_folder = COALESCE(NULLIF(TRIM(excluded.parent_folder), ''), tracks.parent_folder)",
             params![
                 meta.uri,
                 meta.source,
@@ -502,7 +669,10 @@ impl LibraryDatabase {
                 meta.art_url,
                 file_mtime,
                 file_size,
-                meta.content_rating
+                meta.content_rating,
+                clean_genre,
+                meta.release_year,
+                clean_folder
             ],
         )?;
         Ok(())
@@ -512,7 +682,8 @@ impl LibraryDatabase {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT uri, title, artists_json, album_title, album_id, track_number,
-                    disc_number, art_url, duration_ms, source, mount_root, content_rating
+                    disc_number, art_url, duration_ms, source, mount_root, content_rating,
+                    genre, release_year, parent_folder
              FROM tracks WHERE uri = ?1",
         )?;
         let res = stmt
@@ -532,6 +703,9 @@ impl LibraryDatabase {
                     source: row.get(9)?,
                     mount_root: row.get(10)?,
                     content_rating: row.get(11)?,
+                    genre: row.get(12).unwrap_or(None),
+                    release_year: row.get(13).unwrap_or(None),
+                    parent_folder: row.get(14).unwrap_or(None),
                 })
             })
             .optional()?;
@@ -559,10 +733,14 @@ impl LibraryDatabase {
         let conn = self.conn.lock().unwrap();
         let search_pattern = search.map(|s| format!("%{}%", s)).unwrap_or_else(|| "%".to_string());
         let mut stmt = conn.prepare(
-            "SELECT a.id, a.title, a.album_artist, a.release_year, a.steam_app_id, a.art_cache_path,
+            "SELECT a.id, a.title, a.album_artist,
+                    COALESCE(a.release_year, MAX(t.release_year)) as release_year,
+                    a.steam_app_id, a.art_cache_path,
                     COUNT(t.uri) as track_count,
                     GROUP_CONCAT(t.uri, '|') as uri_list,
-                    MAX(CASE WHEN LOWER(t.content_rating) IN ('explicit', 'e') THEN 'explicit' WHEN LOWER(t.content_rating) = 'clean' THEN 'clean' ELSE t.content_rating END) as content_rating
+                    MAX(CASE WHEN LOWER(t.content_rating) IN ('explicit', 'e') THEN 'explicit' WHEN LOWER(t.content_rating) = 'clean' THEN 'clean' ELSE t.content_rating END) as content_rating,
+                    COALESCE(NULLIF(TRIM(a.genre), ''), NULLIF(TRIM(MAX(t.genre)), '')) as genre,
+                    COALESCE(NULLIF(TRIM(a.parent_folder), ''), NULLIF(TRIM(MAX(t.parent_folder)), '')) as parent_folder
              FROM albums a
              JOIN tracks t ON t.album_id = a.id
              LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
@@ -583,6 +761,8 @@ impl LibraryDatabase {
                 let mut album_artist: String = row.get(2)?;
                 let uri_list: Option<String> = row.get(7).ok();
                 let content_rating: Option<String> = row.get(8).unwrap_or(None);
+                let genre: Option<String> = row.get(9).unwrap_or(None);
+                let parent_folder: Option<String> = row.get(10).unwrap_or(None);
                 if let Some(uris) = uri_list {
                     let mut exts: Vec<&'static str> = Vec::new();
                     for u in uris.split('|') {
@@ -624,6 +804,8 @@ impl LibraryDatabase {
                     art_url: row.get(5)?,
                     track_count: row.get::<_, i64>(6)? as usize,
                     content_rating,
+                    genre,
+                    parent_folder,
                 })
             },
         )?;
@@ -633,11 +815,15 @@ impl LibraryDatabase {
     pub fn get_album_tracks(&self, album_id: &str) -> Result<Vec<TrackMetadata>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT uri, title, artists_json, album_title, album_id, track_number,
-                    disc_number, art_url, duration_ms, source, mount_root, content_rating
-             FROM tracks
-             WHERE album_id = ?1
-             ORDER BY COALESCE(disc_number, 1) ASC, COALESCE(track_number, 999) ASC, title ASC",
+            "SELECT t.uri, t.title, t.artists_json, t.album_title, t.album_id, t.track_number,
+                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating,
+                    COALESCE(NULLIF(TRIM(t.genre), ''), NULLIF(TRIM(a.genre), '')) as genre,
+                    COALESCE(t.release_year, a.release_year) as release_year,
+                    COALESCE(NULLIF(TRIM(t.parent_folder), ''), NULLIF(TRIM(a.parent_folder), '')) as parent_folder
+             FROM tracks t
+             LEFT JOIN albums a ON t.album_id = a.id
+             WHERE t.album_id = ?1
+             ORDER BY COALESCE(t.disc_number, 1) ASC, COALESCE(t.track_number, 999) ASC, t.title ASC",
         )?;
         let rows = stmt.query_map(params![album_id], |row| {
             let artists_str: String = row.get(2)?;
@@ -655,6 +841,9 @@ impl LibraryDatabase {
                 source: row.get(9)?,
                 mount_root: row.get(10)?,
                 content_rating: row.get(11)?,
+                genre: row.get(12).unwrap_or(None),
+                release_year: row.get(13).unwrap_or(None),
+                parent_folder: row.get(14).unwrap_or(None),
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -682,9 +871,13 @@ impl LibraryDatabase {
         let search_pattern = search.map(|s| format!("%{}%", s)).unwrap_or_else(|| "%".to_string());
         let mut stmt = conn.prepare(
             "SELECT t.uri, t.title, t.artists_json, t.album_title, t.album_id, t.track_number,
-                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating
+                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating,
+                    COALESCE(NULLIF(TRIM(t.genre), ''), NULLIF(TRIM(a.genre), '')) as genre,
+                    COALESCE(t.release_year, a.release_year) as release_year,
+                    COALESCE(NULLIF(TRIM(t.parent_folder), ''), NULLIF(TRIM(a.parent_folder), '')) as parent_folder
              FROM tracks t
              LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
+             LEFT JOIN albums a ON t.album_id = a.id
              WHERE (t.mount_root IS NULL OR m.is_online = 1)
                AND (?1 IS NULL
                     OR (?1 = 'local' AND t.source != 'apple_music' AND t.source != 'soundcloud' AND t.source != 'internet_archive' AND t.source != 'ia_video')
@@ -713,6 +906,9 @@ impl LibraryDatabase {
                     source: row.get(9)?,
                     mount_root: row.get(10)?,
                     content_rating: row.get(11)?,
+                    genre: row.get(12).unwrap_or(None),
+                    release_year: row.get(13).unwrap_or(None),
+                    parent_folder: row.get(14).unwrap_or(None),
                 })
             },
         )?;
@@ -765,9 +961,13 @@ impl LibraryDatabase {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT t.uri, t.title, t.artists_json, t.album_title, t.album_id, t.track_number,
-                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating
+                    t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating,
+                    COALESCE(NULLIF(TRIM(t.genre), ''), NULLIF(TRIM(a.genre), '')) as genre,
+                    COALESCE(t.release_year, a.release_year) as release_year,
+                    COALESCE(NULLIF(TRIM(t.parent_folder), ''), NULLIF(TRIM(a.parent_folder), '')) as parent_folder
              FROM playlist_items pi
              JOIN tracks t ON t.uri = pi.track_uri
+             LEFT JOIN albums a ON t.album_id = a.id
              WHERE pi.playlist_id = ?1
              ORDER BY pi.position ASC
              LIMIT ?2 OFFSET ?3",
@@ -788,6 +988,9 @@ impl LibraryDatabase {
                 source: row.get(9)?,
                 mount_root: row.get(10)?,
                 content_rating: row.get(11)?,
+                genre: row.get(12).unwrap_or(None),
+                release_year: row.get(13).unwrap_or(None),
+                parent_folder: row.get(14).unwrap_or(None),
             })
         })?;
         Ok(rows.filter_map(Result::ok).collect())
@@ -948,13 +1151,15 @@ impl LibraryDatabase {
         tracks: &[TrackMetadata],
     ) -> Result<()> {
         if let Some(alb) = album {
-            self.upsert_album(
+            self.upsert_album_with_metadata(
                 &alb.id,
                 &alb.title,
                 &alb.album_artist,
                 alb.release_year,
                 alb.steam_app_id,
                 alb.art_url.as_deref(),
+                alb.genre.as_deref(),
+                alb.parent_folder.as_deref(),
             )?;
         }
 
@@ -977,13 +1182,15 @@ impl LibraryDatabase {
 
             if let Some(alb) = album {
                 t.album_id = Some(alb.id.clone());
-                self.upsert_album(
+                self.upsert_album_with_metadata(
                     &alb.id,
                     &alb.title,
                     &alb.album_artist,
                     alb.release_year,
                     alb.steam_app_id,
                     alb.art_url.as_deref().or(t.art_url.as_deref()),
+                    alb.genre.as_deref().or(t.genre.as_deref()),
+                    alb.parent_folder.as_deref().or(t.parent_folder.as_deref()),
                 )?;
             } else if playlist.is_none()
                 && t.source != "apple_music"
@@ -1003,24 +1210,28 @@ impl LibraryDatabase {
                     blake3::hash(hash_key.as_bytes()).to_hex()[..16].to_string()
                 });
                 t.album_id = Some(alb_id.clone());
-                self.upsert_album(
+                self.upsert_album_with_metadata(
                     &alb_id,
                     &album_title,
                     &artist_primary,
-                    None,
+                    t.release_year,
                     None,
                     t.art_url.as_deref(),
+                    t.genre.as_deref(),
+                    t.parent_folder.as_deref(),
                 )?;
             } else if t.source == "local" || t.source == "steam_ost" || t.source == "removable" {
                 // Local indexed tracks keep their existing album_id intact when pinned into a collection
                 if let Some(ref alb_id) = t.album_id {
-                    self.upsert_album(
+                    self.upsert_album_with_metadata(
                         alb_id,
                         &album_title,
                         &artist_primary,
-                        None,
+                        t.release_year,
                         None,
                         t.art_url.as_deref(),
+                        t.genre.as_deref(),
+                        t.parent_folder.as_deref(),
                     )?;
                 }
             } else {
@@ -1153,6 +1364,70 @@ impl LibraryDatabase {
                  WHERE (uri = ?2 OR uri = ?3)
                    AND (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')",
                 params![perm_art, song_uri, track_uri],
+            );
+        }
+        Ok(())
+    }
+
+    pub fn set_track_art_url(&self, uri: &str, art_url: Option<&str>) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let cleaned_art = art_url.map(str::trim).filter(|u| !u.is_empty());
+        conn.execute(
+            "UPDATE tracks SET art_url = ?1 WHERE uri = ?2",
+            params![cleaned_art, uri],
+        )?;
+        let has_art_int = if cleaned_art.is_some() { 1 } else { 0 };
+        let _ = conn.execute(
+            "INSERT INTO track_properties (uri, has_art, updated_at)
+             VALUES (?1, ?2, strftime('%s', 'now'))
+             ON CONFLICT(uri) DO UPDATE SET
+               has_art = excluded.has_art,
+               updated_at = excluded.updated_at",
+            params![uri, has_art_int],
+        );
+        Ok(())
+    }
+
+    pub fn clear_track_and_album_grafted_art(&self, uri: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let existing: Option<(Option<String>, String)> = conn
+            .query_row(
+                "SELECT art_url, album_title FROM tracks WHERE uri = ?1",
+                params![uri],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+
+        conn.execute("UPDATE tracks SET art_url = NULL WHERE uri = ?1", params![uri])?;
+        let _ = conn.execute(
+            "INSERT INTO track_properties (uri, has_art, custom_art_url, updated_at)
+             VALUES (?1, 0, NULL, strftime('%s', 'now'))
+             ON CONFLICT(uri) DO UPDATE SET
+               has_art = 0,
+               custom_art_url = NULL,
+               updated_at = excluded.updated_at",
+            params![uri],
+        );
+
+        if let Some((Some(old_art), album_title)) = existing {
+            if !old_art.trim().is_empty() && !album_title.trim().is_empty() {
+                let _ = conn.execute(
+                    "UPDATE tracks SET art_url = NULL WHERE album_title = ?1 AND art_url = ?2",
+                    params![album_title, old_art],
+                );
+            }
+        }
+
+        let clean_id = uri
+            .strip_prefix("applemusic:song:")
+            .or_else(|| uri.strip_prefix("applemusic:track:"))
+            .or_else(|| uri.strip_prefix("applemusic:"))
+            .unwrap_or(uri)
+            .trim();
+        if !clean_id.is_empty() {
+            let _ = conn.execute(
+                "DELETE FROM apple_catalog_map WHERE raw_id = ?1",
+                params![clean_id],
             );
         }
         Ok(())
@@ -2133,13 +2408,17 @@ impl LibraryDatabase {
         let conn = self.conn.lock().unwrap();
 
         let mut album_stmt = conn.prepare(
-            "SELECT a.id, a.title, a.album_artist, a.release_year, a.steam_app_id, a.art_cache_path,
+            "SELECT a.id, a.title, a.album_artist,
+                    COALESCE(a.release_year, MAX(t.release_year)) as release_year,
+                    a.steam_app_id, a.art_cache_path,
                     COUNT(DISTINCT t.uri) as track_count,
                     MAX(CASE WHEN LOWER(t.content_rating) IN ('explicit', 'e') THEN 'explicit'
                              WHEN LOWER(t.content_rating) = 'clean' THEN 'clean'
                              ELSE t.content_rating END) as content_rating,
                     a.created_at,
-                    COALESCE(MAX(h.played_at), 0) as last_played_at
+                    COALESCE(MAX(h.played_at), 0) as last_played_at,
+                    COALESCE(NULLIF(TRIM(a.genre), ''), NULLIF(TRIM(MAX(t.genre)), '')) as genre,
+                    COALESCE(NULLIF(TRIM(a.parent_folder), ''), NULLIF(TRIM(MAX(t.parent_folder)), '')) as parent_folder
              FROM albums a
              JOIN tracks t ON t.album_id = a.id
              LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
@@ -2167,6 +2446,8 @@ impl LibraryDatabase {
                     art_url: row.get(5)?,
                     track_count: row.get::<_, i64>(6)? as usize,
                     content_rating: row.get(7).unwrap_or(None),
+                    genre: row.get(10).unwrap_or(None),
+                    parent_folder: row.get(11).unwrap_or(None),
                 },
                 created_at: row.get::<_, i64>(8).unwrap_or(0),
                 last_played_at: row.get::<_, i64>(9).unwrap_or(0),
@@ -2206,7 +2487,10 @@ impl LibraryDatabase {
                     t.disc_number, t.art_url, t.duration_ms, t.source, t.mount_root, t.content_rating,
                     COALESCE(tp.has_synced_lyrics, 0) as has_synced_lyrics,
                     COALESCE(tp.suppress_lyrics, 0) as suppress_lyrics,
-                    a.steam_app_id as steam_app_id
+                    a.steam_app_id as steam_app_id,
+                    COALESCE(NULLIF(TRIM(t.genre), ''), NULLIF(TRIM(a.genre), '')) as genre,
+                    COALESCE(t.release_year, a.release_year) as release_year,
+                    COALESCE(NULLIF(TRIM(t.parent_folder), ''), NULLIF(TRIM(a.parent_folder), '')) as parent_folder
              FROM tracks t
              LEFT JOIN storage_mounts m ON t.mount_root = m.mount_root
              LEFT JOIN track_properties tp ON tp.uri = t.uri
@@ -2239,6 +2523,9 @@ impl LibraryDatabase {
                     source: row.get(9)?,
                     mount_root: row.get(10)?,
                     content_rating: row.get(11)?,
+                    genre: row.get(15).unwrap_or(None),
+                    release_year: row.get(16).unwrap_or(None),
+                    parent_folder: row.get(17).unwrap_or(None),
                 },
                 has_synced_lyrics: row.get::<_, i64>(12).unwrap_or(0) != 0,
                 suppress_lyrics: row.get::<_, i64>(13).unwrap_or(0) != 0,
@@ -2359,6 +2646,7 @@ mod tests {
                 source: "soundcloud".to_string(),
                 mount_root: None,
                 content_rating: None,
+                ..Default::default()
             };
             db.record_play_history(&track).unwrap();
             let conn = db.conn.lock().unwrap();
@@ -2410,6 +2698,7 @@ mod tests {
             art_url: Some("http://127.0.0.1:18888/art/alb1.jpg".to_string()),
             track_count: 1,
             content_rating: None,
+            ..Default::default()
         };
         let alb2 = AlbumRecord {
             id: "local_alb_2".to_string(),
@@ -2420,6 +2709,7 @@ mod tests {
             art_url: None,
             track_count: 1,
             content_rating: None,
+            ..Default::default()
         };
         db.upsert_album(
             &alb1.id,
@@ -2453,6 +2743,7 @@ mod tests {
             source: "local".to_string(),
             mount_root: None,
             content_rating: None,
+            ..Default::default()
         };
         let tr2 = TrackMetadata {
             uri: "file:///path/to/Media/SampleOst/theme.mp3".to_string(),
@@ -2467,6 +2758,7 @@ mod tests {
             source: "local".to_string(),
             mount_root: None,
             content_rating: None,
+            ..Default::default()
         };
         db.upsert_track(&tr1, None, None).unwrap();
         db.upsert_track(&tr2, None, None).unwrap();
@@ -2529,6 +2821,7 @@ mod tests {
             source: "apple_music".to_string(),
             mount_root: None,
             content_rating: None,
+            ..Default::default()
         };
         db.import_catalog_bundle("apple_music", None, Some(&pl), &[tr]).unwrap();
         db.set_playlist_remote_updated_at(&pl.id, Some("2026-11-17T10:00:00Z"))
@@ -2538,6 +2831,155 @@ mod tests {
         assert_eq!(
             sync_map.get(&pl.id),
             Some(&(Some("2026-11-17T10:00:00Z".to_string()), 1))
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_upsert_track_preserves_existing_metadata_against_partial_worker_report() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "simp_test_upsert_preserve_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db = LibraryDatabase::open(&temp_dir).unwrap();
+        db.upsert_album(
+            "applemusic:album:100",
+            "Sample Album",
+            "Example Artist",
+            Some(2026),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let initial = TrackMetadata {
+            uri: "applemusic:song:999001".to_string(),
+            title: "Track 04".to_string(),
+            artists: vec!["Example Artist".to_string()],
+            album: "Sample Album".to_string(),
+            album_id: Some("applemusic:album:100".to_string()),
+            track_number: Some(4),
+            disc_number: Some(1),
+            art_url: Some("https://is1-ssl.mzstatic.com/image/thumb/example/600x600bb.jpg".to_string()),
+            duration_ms: 215_000,
+            source: "apple_music".to_string(),
+            mount_root: None,
+            content_rating: Some("explicit".to_string()),
+            ..Default::default()
+        };
+        db.upsert_track(&initial, Some(1_700_000_000), Some(4_096)).unwrap();
+
+        let partial_worker = TrackMetadata {
+            uri: "applemusic:song:999001".to_string(),
+            title: "Apple Music Track".to_string(),
+            artists: vec![],
+            album: "".to_string(),
+            album_id: None,
+            track_number: None,
+            disc_number: Some(1),
+            art_url: Some("https://aod.blobstore.apple.com/temp/cover.jpg".to_string()),
+            duration_ms: 0,
+            source: "apple_music".to_string(),
+            mount_root: None,
+            content_rating: None,
+            ..Default::default()
+        };
+        db.upsert_track(&partial_worker, None, None).unwrap();
+
+        let loaded = db.get_track_by_uri("applemusic:song:999001").unwrap().unwrap();
+        assert_eq!(loaded.duration_ms, 215_000);
+        assert_eq!(loaded.track_number, Some(4));
+        assert_eq!(loaded.album_id.as_deref(), Some("applemusic:album:100"));
+        assert_eq!(
+            loaded.art_url.as_deref(),
+            Some("https://is1-ssl.mzstatic.com/image/thumb/example/600x600bb.jpg")
+        );
+        assert_eq!(loaded.title, "Track 04");
+        assert_eq!(loaded.album, "Sample Album");
+        assert_eq!(loaded.artists, vec!["Example Artist".to_string()]);
+        assert_eq!(loaded.content_rating.as_deref(), Some("explicit"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_backfill_track_and_album_tag_metadata_and_rich_fields() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "simp_test_backfill_rich_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db = LibraryDatabase::open(&temp_dir).unwrap();
+        let mount_root = "/mnt/example_music";
+        db.upsert_mount(mount_root, "Music", "custom", true).unwrap();
+
+        // Seed an album and track without genre, release_year, or parent_folder
+        db.upsert_album(
+            "alb_rich_01",
+            "Sample Album",
+            "Example Artist",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let tr = TrackMetadata {
+            uri: "file:///mnt/example_music/Electronic/Example Artist/Sample Album/01.flac".to_string(),
+            title: "Track 01".to_string(),
+            artists: vec!["Example Artist".to_string()],
+            album: "Sample Album".to_string(),
+            album_id: Some("alb_rich_01".to_string()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            art_url: None,
+            duration_ms: 205_000,
+            source: "local".to_string(),
+            mount_root: Some(mount_root.to_string()),
+            content_rating: None,
+            ..Default::default()
+        };
+        db.upsert_track(&tr, Some(1_700_000_000), Some(12_345)).unwrap();
+
+        let missing = db.get_tracks_missing_folder_metadata(mount_root).unwrap();
+        assert!(missing.contains(&tr.uri));
+
+        db.backfill_track_and_album_tag_metadata(
+            &tr.uri,
+            Some("Electronic"),
+            Some(2019),
+            "Electronic/Example Artist/Sample Album",
+        )
+        .unwrap();
+
+        let missing_after = db.get_tracks_missing_folder_metadata(mount_root).unwrap();
+        assert!(!missing_after.contains(&tr.uri));
+
+        let loaded_track = db.get_track_by_uri(&tr.uri).unwrap().unwrap();
+        assert_eq!(loaded_track.genre.as_deref(), Some("Electronic"));
+        assert_eq!(loaded_track.release_year, Some(2019));
+        assert_eq!(
+            loaded_track.parent_folder.as_deref(),
+            Some("Electronic/Example Artist/Sample Album")
+        );
+
+        let albums = db.get_albums(Some("local"), None, 20, 0).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].genre.as_deref(), Some("Electronic"));
+        assert_eq!(albums[0].release_year, Some(2019));
+        assert_eq!(
+            albums[0].parent_folder.as_deref(),
+            Some("Electronic/Example Artist/Sample Album")
+        );
+
+        let tracks = db.get_tracks(Some("local"), None, 20, 0).unwrap();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].genre.as_deref(), Some("Electronic"));
+        assert_eq!(tracks[0].release_year, Some(2019));
+        assert_eq!(
+            tracks[0].parent_folder.as_deref(),
+            Some("Electronic/Example Artist/Sample Album")
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);

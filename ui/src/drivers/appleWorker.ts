@@ -94,6 +94,7 @@ export function useAppleMusicWorker(): void {
       });
 
       mk.addEventListener(Events.nowPlayingItemDidChange, () => {
+        if (isLoadingRef.current) return;
         if (mk.nowPlayingItem) {
           reportCurrentItemIfAny('playing');
         }
@@ -105,7 +106,7 @@ export function useAppleMusicWorker(): void {
       (new URLSearchParams(window.location.search).get('worker') === 'apple' ||
         window.location.pathname.startsWith('/apple-worker'));
 
-    const ensureInstance = async (fromCommand = false): Promise<any | null> => {
+    const ensureInstance = async (): Promise<any | null> => {
       if (mkRef.current) return mkRef.current;
       if (configuringPromiseRef.current) {
         return configuringPromiseRef.current;
@@ -130,10 +131,10 @@ export function useAppleMusicWorker(): void {
 
           if (mkRef.current) return mkRef.current;
 
-          const hasWidevine = await checkWidevineDrm();
-          if (!hasWidevine && !isDedicatedWorker && cfg.headless_worker_active) {
+          const hasDrm = await checkWidevineDrm();
+          if (!hasDrm && !isDedicatedWorker && cfg.headless_worker_active) {
             console.info(
-              '[SIMP AppleMusicDriver] Browser lacks Widevine CDM (steamwebhelper); delegating audio to headless Widevine worker.'
+              '[SIMP AppleMusicDriver] Browser lacks EME CDM; delegating audio to headless worker.'
             );
             return null;
           }
@@ -141,9 +142,7 @@ export function useAppleMusicWorker(): void {
           const mk = await ensureMusicKitConfigured(cfg.developer_token, cfg.music_user_token);
           mkRef.current = mk;
           bindMusicKitEvents(mk);
-          if (!fromCommand) {
-            defaultSimpClient.reportAppleWorkerEvent('worker_ready', 0, null, null);
-          }
+          defaultSimpClient.reportAppleWorkerEvent('worker_ready', 0, null, null);
           return mk;
         } finally {
           configuringPromiseRef.current = null;
@@ -158,14 +157,14 @@ export function useAppleMusicWorker(): void {
       .getAppleMusicAuthConfig()
       .then(async (cfg) => {
         if (cfg.configured && cfg.apple_authenticated && cfg.developer_token) {
-          await ensureInstance(false).catch(() => {});
+          await ensureInstance().catch(() => {});
         }
       })
       .catch(() => {});
 
     const unsubState = defaultSimpClient.subscribeState((snap) => {
       if (snap.apple_authenticated && !mkRef.current) {
-        ensureInstance(false).catch(() => {});
+        ensureInstance().catch(() => {});
       }
     });
 
@@ -184,7 +183,7 @@ export function useAppleMusicWorker(): void {
           return;
         }
 
-        const mk = await ensureInstance(true);
+        const mk = await ensureInstance();
         if (!mk) return;
 
         if (cmd.volume != null) {
@@ -200,14 +199,6 @@ export function useAppleMusicWorker(): void {
             lastLoadedPosMsRef.current = cmd.position_ms || 0;
             const mySeq = ++loadSeqRef.current;
             isLoadingRef.current = true;
-
-            try {
-              if (mk.playbackState && mk.playbackState !== (States?.none ?? 0)) {
-                await mk.stop();
-              }
-            } catch {
-              // Ignore stop errors on idle player
-            }
 
             if (mySeq !== loadSeqRef.current) return;
 
@@ -239,6 +230,7 @@ export function useAppleMusicWorker(): void {
             if (rawId.startsWith('i.')) {
               const resolved = await resolveReplacementCatalogSongId(rawId);
               if (resolved) rawId = resolved;
+              if (mySeq !== loadSeqRef.current) return;
             }
 
             const attemptQueueAndWait = async (songId: string) => {
@@ -247,15 +239,16 @@ export function useAppleMusicWorker(): void {
                 : { song: songId, startPlaying: true };
               await mk.setQueue(queueArg);
               if (mySeq !== loadSeqRef.current) return;
-              for (let attempt = 0; attempt < 10; attempt++) {
+              for (let attempt = 0; attempt < 18; attempt++) {
                 if (mySeq !== loadSeqRef.current) return;
-                if (mk.playbackState === States?.playing) break;
-                const isHandshakeInFlight =
-                  mk.playbackState === States?.loading ||
-                  mk.playbackState === States?.waiting ||
-                  mk.playbackState === States?.stalled;
-                if (!isHandshakeInFlight && attempt >= 2) break;
-                await new Promise((r) => setTimeout(r, 150));
+                const audioElNow = document.getElementById('apple-music-player') as HTMLAudioElement | null;
+                if (
+                  mk.playbackState === States?.playing ||
+                  Boolean(audioElNow && !audioElNow.paused && audioElNow.currentTime > 0)
+                ) {
+                  break;
+                }
+                await new Promise((r) => setTimeout(r, 125));
               }
               if (mySeq !== loadSeqRef.current) return;
               if (cmd.position_ms && cmd.position_ms > 0) {
@@ -294,8 +287,7 @@ export function useAppleMusicWorker(): void {
                 mk.playbackState !== States?.waiting
               ) {
                 const replacementId = await resolveReplacementCatalogSongId(rawId);
-                if (replacementId && mySeq === loadSeqRef.current) {
-                  await mk.stop().catch(() => {});
+                if (replacementId && replacementId !== rawId && mySeq === loadSeqRef.current) {
                   await attemptQueueAndWait(replacementId);
                 }
               }
@@ -320,7 +312,6 @@ export function useAppleMusicWorker(): void {
               const replacementId = await resolveReplacementCatalogSongId(rawId);
               const retryId = replacementId || rawId;
               if (mySeq !== loadSeqRef.current) return;
-              await mk.stop().catch(() => {});
               await mk.setQueue({ song: retryId, startPlaying: false });
               if (mySeq !== loadSeqRef.current) return;
               await mk.play().catch((e: any) => {
@@ -339,6 +330,8 @@ export function useAppleMusicWorker(): void {
                 }
               });
             }
+
+            if (mySeq !== loadSeqRef.current) return;
 
             const audioEl = document.getElementById('apple-music-player') as HTMLAudioElement | null;
             if (audioEl) {

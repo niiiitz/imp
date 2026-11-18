@@ -87,6 +87,11 @@ pub enum AudioCommand {
         position_ms: u32,
         duration_ms: Option<u32>,
     },
+    RefreshTrackArtwork {
+        uri: String,
+        album_title: Option<String>,
+        art_url: Option<String>,
+    },
     SuspendForSleep,
     RestartDaemon,
     ResetDatabaseCache,

@@ -85,7 +85,7 @@ impl AudioOrchestrator {
             (apple_ok, sc_ok, ia_ok)
         };
         apple_sink.is_authenticated = initial_apple_auth;
-        if initial_apple_auth {
+        if initial_apple_auth && crate::sinks::apple::is_native_apple_cdm_preferred() {
             if let Some(cdm) =
                 crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library()
             {
@@ -138,6 +138,42 @@ impl AudioOrchestrator {
         };
 
         orchestrator.restore_session_from_vdf();
+        {
+            let mut st = orchestrator.state.lock().unwrap();
+            let mut refreshed_cur_art: Option<Option<String>> = None;
+            let mut cur_uri_for_sync: Option<String> = None;
+            if let Some(ref mut cur) = st.current_track {
+                if cur.uri.starts_with("applemusic:song:i.")
+                    || cur.uri.starts_with("applemusic:track:i.")
+                {
+                    if let Ok(Some(db_meta)) = orchestrator.db.get_track_by_uri(&cur.uri) {
+                        if db_meta.art_url != cur.art_url {
+                            cur.art_url = db_meta.art_url.clone();
+                            refreshed_cur_art = Some(db_meta.art_url);
+                            cur_uri_for_sync = Some(cur.uri.clone());
+                        }
+                    }
+                }
+            }
+            for q in st.queue.iter_mut() {
+                if q.uri.starts_with("applemusic:song:i.") || q.uri.starts_with("applemusic:track:i.")
+                {
+                    if let Some(ref cur_u) = cur_uri_for_sync {
+                        if &q.uri == cur_u {
+                            if let Some(ref a) = refreshed_cur_art {
+                                q.art_url = a.clone();
+                                continue;
+                            }
+                        }
+                    }
+                    if let Ok(Some(db_meta)) = orchestrator.db.get_track_by_uri(&q.uri) {
+                        if db_meta.art_url != q.art_url {
+                            q.art_url = db_meta.art_url;
+                        }
+                    }
+                }
+            }
+        }
         orchestrator.spawn_boot_and_idle_prewarmer();
         orchestrator
     }
@@ -707,7 +743,7 @@ impl AudioOrchestrator {
                 }
                 self.apple_sink.is_authenticated = is_auth;
                 self.state.lock().unwrap().apple_authenticated = is_auth;
-                if is_auth {
+                if is_auth && crate::sinks::apple::is_native_apple_cdm_preferred() {
                     if let Some(cdm) =
                         crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library()
                     {
@@ -941,22 +977,124 @@ impl AudioOrchestrator {
                 }
 
                 if let Some(meta) = track {
-                    {
+                    enum AppleReportAction {
+                        UpdateStationTrack {
+                            emit_meta: TrackMetadata,
+                            db_meta: TrackMetadata,
+                        },
+                        MergeActiveTrack {
+                            merged: TrackMetadata,
+                        },
+                        ApplyOther {
+                            emit_meta: TrackMetadata,
+                            db_meta: TrackMetadata,
+                        },
+                        IgnoreStale,
+                    }
+
+                    let action = {
                         let mut st = self.state.lock().unwrap();
-                        st.current_track = Some(meta.clone());
                         let q_idx = st.queue_index;
-                        if q_idx < st.queue.len() {
-                            st.queue[q_idx] = meta.clone();
+                        let queue_is_station = st
+                            .queue
+                            .get(q_idx)
+                            .map(|t| t.uri.starts_with("applemusic:station:"))
+                            .unwrap_or(false);
+                        match st.current_track {
+                            Some(ref mut cur)
+                                if cur.uri.starts_with("applemusic:station:")
+                                    || queue_is_station =>
+                            {
+                                *cur = meta.clone();
+                                let mut clean = meta.clone();
+                                clean.album_id = None;
+                                AppleReportAction::UpdateStationTrack {
+                                    emit_meta: meta,
+                                    db_meta: clean,
+                                }
+                            }
+                            Some(ref mut cur) if cur.uri.starts_with("applemusic:") => {
+                                if !cur.uri.contains(":i.") && cur.uri != meta.uri {
+                                    AppleReportAction::IgnoreStale
+                                } else {
+                                    if cur.duration_ms == 0 && meta.duration_ms > 0 {
+                                        cur.duration_ms = meta.duration_ms;
+                                    }
+                                    if let Some(ref art) = meta.art_url {
+                                        if !art.is_empty() && !art.contains("blobstore.apple.com") {
+                                            let cur_needs_art = cur
+                                                .art_url
+                                                .as_deref()
+                                                .map(|a| {
+                                                    a.is_empty()
+                                                        || a.contains("blobstore.apple.com")
+                                                })
+                                                .unwrap_or(true);
+                                            if cur_needs_art {
+                                                cur.art_url = Some(art.clone());
+                                            }
+                                        }
+                                    }
+                                    if (cur.title.is_empty() || cur.title == "Apple Music Track")
+                                        && !meta.title.is_empty()
+                                    {
+                                        cur.title = meta.title;
+                                    }
+                                    if cur.album.is_empty() && !meta.album.is_empty() {
+                                        cur.album = meta.album;
+                                    }
+                                    if cur.artists.is_empty() && !meta.artists.is_empty() {
+                                        cur.artists = meta.artists;
+                                    }
+                                    if cur.content_rating.is_none()
+                                        && meta.content_rating.is_some()
+                                    {
+                                        cur.content_rating = meta.content_rating;
+                                    }
+                                    let merged = cur.clone();
+                                    if let Some(q_item) = st.queue.get_mut(q_idx) {
+                                        if q_item.uri == merged.uri {
+                                            *q_item = merged.clone();
+                                        }
+                                    }
+                                    AppleReportAction::MergeActiveTrack { merged }
+                                }
+                            }
+                            _ => {
+                                st.current_track = Some(meta.clone());
+                                if q_idx < st.queue.len() {
+                                    st.queue[q_idx] = meta.clone();
+                                }
+                                let mut clean = meta.clone();
+                                clean.album_id = None;
+                                AppleReportAction::ApplyOther {
+                                    emit_meta: meta,
+                                    db_meta: clean,
+                                }
+                            }
+                        }
+                    };
+
+                    match action {
+                        AppleReportAction::IgnoreStale => return,
+                        AppleReportAction::UpdateStationTrack { emit_meta, db_meta }
+                        | AppleReportAction::ApplyOther { emit_meta, db_meta } => {
+                            let _ = self.db.upsert_track(&db_meta, None, None);
+                            update_mpris_metadata(&mut self.mpris_controls, &emit_meta);
+                            let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
+                                metadata: emit_meta,
+                                position_ms,
+                            });
+                        }
+                        AppleReportAction::MergeActiveTrack { merged } => {
+                            let _ = self.db.upsert_track(&merged, None, None);
+                            update_mpris_metadata(&mut self.mpris_controls, &merged);
+                            let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
+                                metadata: merged,
+                                position_ms,
+                            });
                         }
                     }
-                    let mut clean = meta.clone();
-                    clean.album_id = None;
-                    let _ = self.db.upsert_track(&clean, None, None);
-                    update_mpris_metadata(&mut self.mpris_controls, &meta);
-                    let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
-                        metadata: meta,
-                        position_ms,
-                    });
                 } else if let Some(dur) = duration_ms {
                     if dur > 0 {
                         let mut updated_meta = None;
@@ -981,6 +1119,8 @@ impl AudioOrchestrator {
 
                 match state.as_str() {
                     "playing" => {
+                        self.apple_sink.worker_playing_ack = true;
+                        self.apple_sink.ensure_macos_tap_started(&self.broadcast_tx);
                         self.set_playing_state(true, position_ms);
                     }
                     "paused" => {
@@ -999,7 +1139,9 @@ impl AudioOrchestrator {
                         let (should_replay, cur_uri, cur_pos) = {
                             let st = self.state.lock().unwrap();
                             (
-                                st.active_engine == ActiveEngine::AppleMusic && st.is_playing,
+                                st.active_engine == ActiveEngine::AppleMusic
+                                    && st.is_playing
+                                    && !self.apple_sink.worker_playing_ack,
                                 st.current_track.as_ref().map(|t| t.uri.clone()),
                                 st.position_ms,
                             )
@@ -1012,6 +1154,50 @@ impl AudioOrchestrator {
                         }
                     }
                     _ => {}
+                }
+            }
+            AudioCommand::RefreshTrackArtwork {
+                uri,
+                album_title,
+                art_url,
+            } => {
+                let updated_cur = {
+                    let mut st = self.state.lock().unwrap();
+                    let norm_album = album_title
+                        .as_deref()
+                        .map(|s| s.trim().to_lowercase())
+                        .filter(|s| !s.is_empty());
+                    let matches_target = |t: &TrackMetadata| -> bool {
+                        t.uri == uri
+                            || norm_album
+                                .as_deref()
+                                .map(|na| t.album.trim().to_lowercase() == na)
+                                .unwrap_or(false)
+                    };
+                    for q in st.queue.iter_mut() {
+                        if matches_target(q) {
+                            q.art_url = art_url.clone();
+                        }
+                    }
+                    if let Some(ref mut cur) = st.current_track {
+                        if matches_target(cur) {
+                            cur.art_url = art_url.clone();
+                            Some(cur.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                };
+                self.persist_session_to_vdf();
+                self.emit_queue_updated();
+                if let Some(meta) = updated_cur {
+                    update_mpris_metadata(&mut self.mpris_controls, &meta);
+                    let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
+                        metadata: meta,
+                        position_ms: self.get_live_position_ms(),
+                    });
                 }
             }
             AudioCommand::SuspendForSleep => {
@@ -1528,7 +1714,21 @@ impl AudioOrchestrator {
             }
         }
 
-        // 3. Dispatch to target AudioSink with Anti-Runaway-Skip Circuit Breaker
+        // 3. Commit active engine + current_track & emit TrackChanged BEFORE dispatching to sink
+        // so browser/worker consumers never associate the incoming load command with the previous track.
+        {
+            let mut st = self.state.lock().unwrap();
+            st.active_engine = target_engine;
+            st.current_track = Some(track.clone());
+            st.is_playing = true;
+            st.position_ms = 0;
+        }
+        let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
+            metadata: track.clone(),
+            position_ms: 0,
+        });
+
+        // 4. Dispatch to target AudioSink with Anti-Runaway-Skip Circuit Breaker
         let load_res = if let Some((sink, internal_tx, broadcast_tx, epoch)) =
             self.sink_and_channels_mut(target_engine)
         {
@@ -1554,23 +1754,11 @@ impl AudioOrchestrator {
             }
         }
 
-        // 4. Update state, MPRIS2, and broadcast TrackChanged
-        {
-            let mut st = self.state.lock().unwrap();
-            st.active_engine = target_engine;
-            st.current_track = Some(track.clone());
-            st.is_playing = true;
-            st.position_ms = 0;
-        }
-
+        // 5. Update MPRIS2, history, and broadcast playback state
         update_mpris_metadata(&mut self.mpris_controls, &track);
         update_mpris_playback(&mut self.mpris_controls, true, 0);
         let _ = self.db.record_play_history(&track);
 
-        let _ = self.broadcast_tx.send(PlaybackEvent::TrackChanged {
-            metadata: track,
-            position_ms: 0,
-        });
         let _ = self.broadcast_tx.send(PlaybackEvent::PlaybackStateChanged {
             is_playing: true,
             position_ms: 0,
@@ -1732,6 +1920,7 @@ impl AudioOrchestrator {
             },
             mount_root: None,
             content_rating: None,
+            ..Default::default()
         }
     }
 
@@ -1812,21 +2001,24 @@ impl AudioOrchestrator {
             .name("simp-auth-prewarm".to_string())
             .spawn(move || {
                 if apple_authed {
-                    if let Some(cdm) =
-                        crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library()
-                    {
-                        crate::sinks::apple_native::cdm_host::prewarm_standby_cdm_session(
-                            &cdm.library_path,
-                        );
-                    }
                     crate::sinks::apple_api::prewarm_apple_auth_and_storefront(&cfg);
-                    for uri in &candidate_uris {
-                        if uri.starts_with("applemusic:") && !uri.starts_with("applemusic:station:")
+                    if crate::sinks::apple::is_native_apple_cdm_preferred() {
+                        if let Some(cdm) =
+                            crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library()
                         {
-                            crate::sinks::apple_native::source::prefetch_apple_music_track(
-                                cfg.clone(),
-                                uri.clone(),
+                            crate::sinks::apple_native::cdm_host::prewarm_standby_cdm_session(
+                                &cdm.library_path,
                             );
+                        }
+                        for uri in &candidate_uris {
+                            if uri.starts_with("applemusic:")
+                                && !uri.starts_with("applemusic:station:")
+                            {
+                                crate::sinks::apple_native::source::prefetch_apple_music_track(
+                                    cfg.clone(),
+                                    uri.clone(),
+                                );
+                            }
                         }
                     }
                 }

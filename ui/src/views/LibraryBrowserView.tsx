@@ -72,11 +72,16 @@ import {
   iaItemCountCache,
   iaItemCountPending,
   iaItemRatingCache,
+  type LocalArtworkFilter,
+  type LocalLyricsFilter,
+  type LocalSubTab,
   matchesAlphaBucket,
+  normalizeParentFolderPath,
   tileGridStyle,
   toggleSectionCollapsed,
   useLibraryLyricsStatus,
 } from './library/libraryHelpers';
+import { computeLocalFacetsSummary } from './library/panes/LocalDiscoverPane';
 import {
   failedPlaylistCoverLookupIds,
   resolvedPlaylistCoverMemoryCache,
@@ -552,6 +557,14 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [iaResolvedCounts, setIaResolvedCounts] = useState<Record<string, number>>({});
   const [iaResolvedRatings, setIaResolvedRatings] = useState<Record<string, string>>({});
   const [activeMountRoot, setActiveMountRoot] = useState<string | null>(null);
+  const [localSubTab, setLocalSubTab] = useState<LocalSubTab>('overview');
+  const [localFolderPath, setLocalFolderPath] = useState<string>('');
+  const [localGenreFilter, setLocalGenreFilter] = useState<string>('all');
+  const [localYearFilter, setLocalYearFilter] = useState<string>('all');
+  const [localArtworkFilter, setLocalArtworkFilter] = useState<LocalArtworkFilter>('all');
+  const [localLyricsFilter, setLocalLyricsFilter] = useState<LocalLyricsFilter>('all');
+  const [localAlpha, setLocalAlpha] = useState<AlphaBucket>('all');
+  const [allLocalTracks, setAllLocalTracks] = useState<TrackMetadata[]>([]);
   const [mountAlbums, setMountAlbums] = useState<AlbumRecord[]>([]);
   const [mountTracks, setMountTracks] = useState<TrackMetadata[]>([]);
   const [localVideos, setLocalVideos] = useState<TrackMetadata[]>([]);
@@ -619,10 +632,52 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [libraryContextTarget, setLibraryContextTarget] = useState<LibraryContextTarget | null>(
     null
   );
-  const { allLyricsUris } = useLibraryLyricsStatus();
+  const { syncedUris, allLyricsUris } = useLibraryLyricsStatus();
+  const [allLocalTracksVersion, setAllLocalTracksVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setAllLocalTracksVersion((v) => v + 1);
+    window.addEventListener('simp-track-properties-updated', bump);
+    return () => window.removeEventListener('simp-track-properties-updated', bump);
+  }, []);
+  useEffect(() => {
+    defaultSimpClient
+      .query<TrackMetadata[]>('get_tracks', {
+        source: 'local',
+        mount_root: null,
+        search: null,
+        limit: 10000,
+        offset: 0,
+      })
+      .then((res) => {
+        if (Array.isArray(res)) setAllLocalTracks(res);
+      })
+      .catch(() => {});
+  }, [albums.length, snap?.mounts?.length, allLocalTracksVersion]);
+  const allLocalAlbums = useMemo(
+    () => albums.filter((alb) => !alb.id.startsWith('applemusic:album:')),
+    [albums]
+  );
+  const localFacetsSummary = useMemo(
+    () => computeLocalFacetsSummary(allLocalAlbums, allLocalTracks, syncedUris, allLyricsUris),
+    [allLocalAlbums, allLocalTracks, syncedUris, allLyricsUris]
+  );
   const [filterModalOpen, setFilterModalOpen] = useState<boolean>(false);
   const [activeSmartFacet, setActiveSmartFacet] = useState<SmartFacetKind>(null);
   const [filterHasLyricsOnly, setFilterHasLyricsOnly] = useState<boolean>(false);
+  const handleSelectLocalSubTab = useCallback(
+    (next: React.SetStateAction<LocalSubTab>) => {
+      setLocalSubTab((prev) => {
+        const resolved = typeof next === 'function' ? next(prev) : next;
+        if (resolved !== 'folders') {
+          setActiveMountRoot(null);
+          setLocalFolderPath('');
+          setBrowseHubTarget('local_discover');
+        }
+        return resolved;
+      });
+    },
+    [setBrowseHubTarget]
+  );
   useEffect(() => {
     setFilterHasLyricsOnly(false);
   }, [browserTarget?.kind, browserTarget?.id]);
@@ -1336,10 +1391,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       .catch(() => {});
   }, [albums, snap?.mounts]);
 
-  // Query matching Local tracks & videos when searching in `all` or `local`
+  // Query matching Local & cached library tracks/videos whenever searching
   useEffect(() => {
     const q = browserSearch.trim();
-    if (!q || !isSourceIncluded('local')) {
+    if (!q) {
       setLocalSearchTracks([]);
       return;
     }
@@ -1355,7 +1410,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (Array.isArray(res)) setLocalSearchTracks(res);
       })
       .catch(() => {});
-  }, [browserSearch, isSourceIncluded]);
+  }, [browserSearch]);
 
   // Auto-focus Right Pane when selecting a Place ('tile') or Collection ('track')
   const pendingRightFocusRef = useRef<'track' | 'tile' | null>(null);
@@ -1510,6 +1565,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       pendingDroppedMountPathRef.current = null;
       setBrowserSearch('');
       setActiveMountRoot(matched.mount_root);
+      setLocalFolderPath('');
+      setLocalSubTab('folders');
       setBrowseHubTarget('mount');
       setRightPaneMode('browse');
       focusRightPaneFirstTile();
@@ -1632,8 +1689,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const searchLower = browserSearch.trim().toLowerCase();
 
   // Source-aware & media-type-aware SIMP Album filtering
-  // In `📌 My SIMP Library` (when not in `💾 Local` source mode and not searching), only show pinned albums.
-  // In `💾 Local` source mode or when searching, show all matching local albums so they can be browsed & pinned.
+  // Keep `Imp` strictly curated: Apple pinned albums + explicitly pinned Local albums
+  // (all unpinned Local albums live under the dedicated `💾 Local` destination).
   const filteredAlbums = useMemo(
     () =>
       albums.filter((alb) => {
@@ -1647,12 +1704,12 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           if (!matchTitle && !matchArtist) return false;
           return true;
         }
-        if (!isApple && browserSourceFilter !== 'local') {
+        if (!isApple) {
           return playlists.some((p) => p.id === `local:album:${alb.id}`);
         }
         return true;
       }),
-    [albums, mediaTypeFilter, isSourceIncluded, searchLower, browserSourceFilter, playlists]
+    [albums, mediaTypeFilter, isSourceIncluded, searchLower, playlists]
   );
 
   // Source-aware & media-type-aware Recently Played filtering
@@ -1696,9 +1753,14 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         const isVid = isUiVideoTrack(tr);
         if (mediaTypeFilter === 'video' && !isVid) return false;
         if (mediaTypeFilter === 'audio' && isVid) return false;
-        return true;
+        if (tr.source === 'apple_music') return isSourceIncluded('apple_music');
+        if (tr.source === 'soundcloud') return isSourceIncluded('soundcloud');
+        if (tr.source === 'internet_archive' || tr.source === 'ia_video') {
+          return isSourceIncluded('internet_archive');
+        }
+        return isSourceIncluded('local');
       }),
-    [localSearchTracks, mediaTypeFilter]
+    [localSearchTracks, mediaTypeFilter, isSourceIncluded]
   );
 
   const filteredIaItems = useMemo(
@@ -1899,6 +1961,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     soundCloudSubTab: 'pinned' | 'likes_sets' | 'stream_radio' | 'trending';
     iaSubTab: 'pinned' | 'trending' | 'films' | 'tv' | 'audio';
     activeMountRoot: string | null;
+    localSubTab: LocalSubTab;
+    localFolderPath: string;
     browserSearch: string;
     impFypActive?: boolean;
     activeArtistProfile?: typeof activeArtistProfile;
@@ -1908,8 +1972,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [navHistory, setNavHistory] = useState<RightNavEntry[]>([]);
 
   const pushCurrentNavState = useCallback(
-    (opts?: { returnTileKey?: string | null; scrollTop?: number }) => {
-      if (xmbPreviewTriggerRef.current) return;
+    (opts?: { returnTileKey?: string | null; scrollTop?: number; forceEvenOnPreview?: boolean }) => {
+      if (xmbPreviewTriggerRef.current && !opts?.forceEvenOnPreview) return;
       const capturedScrollTop =
         opts?.scrollTop ??
         document.querySelector<HTMLElement>('[data-nav-col="right"]')?.scrollTop ??
@@ -1933,6 +1997,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           soundCloudSubTab,
           iaSubTab,
           activeMountRoot,
+          localSubTab,
+          localFolderPath,
           browserSearch,
           impFypActive,
           activeArtistProfile,
@@ -1949,6 +2015,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           last.soundCloudSubTab === next.soundCloudSubTab &&
           last.iaSubTab === next.iaSubTab &&
           last.activeMountRoot === next.activeMountRoot &&
+          last.localSubTab === next.localSubTab &&
+          last.localFolderPath === next.localFolderPath &&
           last.browserSearch === next.browserSearch &&
           last.impFypActive === next.impFypActive &&
           last.activeArtistProfile?.idOrName === next.activeArtistProfile?.idOrName &&
@@ -1976,6 +2044,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       soundCloudSubTab,
       iaSubTab,
       activeMountRoot,
+      localSubTab,
+      localFolderPath,
       browserSearch,
       impFypActive,
       activeArtistProfile,
@@ -1990,28 +2060,52 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         ? `${browserTarget.kind}:${browserTarget.id}`
         : null;
     if (navHistory.length > 0) {
-      const prev = navHistory[navHistory.length - 1];
-      setNavHistory((h) => h.slice(0, -1));
-      setBrowserSourceFilter(prev.browserSourceFilter);
-      setAppleSubTab(prev.appleSubTab);
-      setSoundCloudSubTab(prev.soundCloudSubTab);
-      setIaSubTab(prev.iaSubTab);
-      setActiveMountRoot(prev.activeMountRoot);
-      setBrowserSearch(prev.browserSearch);
-      setBrowseHubTarget(prev.browseHubTarget);
-      setBrowserTarget(prev.browserTarget);
-      setBrowserTracks(prev.browserTracks);
-      setActiveArtistProfile(prev.activeArtistProfile || null);
-      setRightPaneMode(prev.rightPaneMode);
-      if (prev.rightPaneMode === 'browse') {
-        focusRightPaneFirstTile({
-          tileKey: prev.returnTileKey || exitedTileKey,
-          scrollTop: prev.scrollTop,
-        });
-      } else {
-        focusRightPaneFirstTrack();
+      let targetIdx = -1;
+      for (let i = navHistory.length - 1; i >= 0; i--) {
+        const entry = navHistory[i];
+        const differs =
+          entry.rightPaneMode !== rightPaneMode ||
+          entry.browserTarget?.kind !== browserTarget?.kind ||
+          entry.browserTarget?.id !== browserTarget?.id ||
+          cleanCollectionTitle(entry.browserTarget?.title || '') !==
+            cleanCollectionTitle(browserTarget?.title || '') ||
+          entry.activeArtistProfile?.idOrName !== activeArtistProfile?.idOrName ||
+          entry.browseHubTarget !== browseHubTarget ||
+          entry.activeMountRoot !== activeMountRoot ||
+          entry.localSubTab !== localSubTab ||
+          entry.localFolderPath !== localFolderPath;
+        if (differs) {
+          targetIdx = i;
+          break;
+        }
       }
-      return;
+      if (targetIdx >= 0) {
+        const prev = navHistory[targetIdx];
+        setNavHistory((h) => h.slice(0, targetIdx));
+        setBrowserSourceFilter(prev.browserSourceFilter);
+        setAppleSubTab(prev.appleSubTab);
+        setSoundCloudSubTab(prev.soundCloudSubTab);
+        setIaSubTab(prev.iaSubTab);
+        setActiveMountRoot(prev.activeMountRoot);
+        setLocalSubTab(prev.localSubTab);
+        setLocalFolderPath(prev.localFolderPath);
+        setBrowserSearch(prev.browserSearch);
+        setBrowseHubTarget(prev.browseHubTarget);
+        setBrowserTarget(prev.browserTarget);
+        setBrowserTracks(prev.browserTracks);
+        setActiveArtistProfile(prev.activeArtistProfile || null);
+        setRightPaneMode(prev.rightPaneMode);
+        if (prev.rightPaneMode === 'browse') {
+          focusRightPaneFirstTile({
+            tileKey: prev.returnTileKey || exitedTileKey,
+            scrollTop: prev.scrollTop,
+          });
+        } else {
+          focusRightPaneFirstTrack();
+        }
+        return;
+      }
+      setNavHistory([]);
     }
     if (rightPaneMode === 'tracks' || rightPaneMode === 'artist') {
       setRightPaneMode('browse');
@@ -2022,9 +2116,18 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       setBrowserSearch('');
       return;
     }
+    const normFolder = normalizeParentFolderPath(localFolderPath);
+    if ((browseHubTarget === 'local_discover' || browseHubTarget === 'mount') && normFolder) {
+      const parts = normFolder.split('/').filter(Boolean);
+      parts.pop();
+      setLocalFolderPath(parts.join('/'));
+      return;
+    }
     if (activeMountRoot) {
       setActiveMountRoot(null);
-      setBrowseHubTarget('imp_library');
+      setLocalFolderPath('');
+      setBrowseHubTarget('local_discover');
+      setLocalSubTab('folders');
       return;
     }
     if (browseHubTarget !== 'imp_fyp' && browseHubTarget !== 'imp_library') {
@@ -2038,6 +2141,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     browserTarget,
     browserSearch,
     activeMountRoot,
+    localSubTab,
+    localFolderPath,
     browseHubTarget,
     setBrowseHubTarget,
     setBrowserSourceFilter,
@@ -2056,6 +2161,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const canWalkBackInBrowse =
     navHistory.length > 0 ||
     Boolean(browserSearch.trim()) ||
+    Boolean(normalizeParentFolderPath(localFolderPath)) ||
     Boolean(activeMountRoot) ||
     (browseHubTarget !== 'imp_fyp' && browseHubTarget !== 'imp_library');
 
@@ -2173,6 +2279,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           ? 'soundcloud_discover'
           : route.sourceFilter === 'internet_archive'
           ? 'ia_discover'
+          : route.sourceFilter === 'local' || route.localSubTab
+          ? 'local_discover'
           : 'imp_library';
       setBrowseHubTarget(mappedHub);
       if (route.artistProfile) {
@@ -2181,6 +2289,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         pushCurrentNavState();
         setActiveArtistProfile(null);
         setRightPaneMode('browse');
+        if (route.localSubTab) setLocalSubTab(route.localSubTab);
         if (route.appleSubTab) setAppleSubTab(route.appleSubTab);
         if (route.soundCloudSubTab) setSoundCloudSubTab(route.soundCloudSubTab);
         if (route.iaSubTab) setIaSubTab(route.iaSubTab);
@@ -2293,8 +2402,17 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   // Open a collection, switch the Right Pane to Tracklist view, and focus the first track
   const selectLocalCollection = (target: BrowserTarget) => {
+    if (
+      rightPaneMode === 'tracks' &&
+      browserTarget?.kind === target.kind &&
+      browserTarget?.id === target.id
+    ) {
+      focusRightPaneFirstTrack();
+      return;
+    }
     pushCurrentNavState({
       returnTileKey: `${target.kind}:${target.id}`,
+      forceEvenOnPreview: xmbPreviewTriggerRef.current && rightPaneMode === 'browse',
     });
     setBrowserTarget(target);
     setRightPaneMode('tracks');
@@ -2588,10 +2706,18 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     ? `💾 ${activeMountPlaceObj.label}`
     : browseHubTarget === 'imp_fyp'
     ? 'Imp FYP'
+    : browseHubTarget === 'local_discover'
+    ? localSubTab === 'artists'
+      ? 'Local Artists'
+      : localSubTab === 'albums'
+      ? 'Local Albums'
+      : localSubTab === 'folders'
+      ? 'Mounts & Folders'
+      : localSubTab === 'videos'
+      ? 'Local Videos'
+      : 'Local Overview'
     : browseHubTarget === 'imp_library'
-    ? selectedSources.length === 1 && selectedSources[0] === 'local'
-      ? 'Local Imp Library'
-      : 'Imp Library'
+    ? 'Imp Library'
     : browseHubTarget === 'ia_discover'
     ? iaSubTab === 'trending'
       ? 'Internet Archive Trending'
@@ -2834,8 +2960,13 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     []
   );
 
+  const contextMenuReturnElRef = useRef<HTMLElement | null>(null);
+
   const openLibraryContextMenu = useCallback(
     (target: LibraryContextTarget) => {
+      contextMenuReturnElRef.current =
+        (document.querySelector<HTMLElement>('[data-simp-active-focus="true"]') as HTMLElement | null) ||
+        (document.activeElement as HTMLElement | null);
       let enriched = target;
       if (target.type !== 'shelf' && !target.shelfActions?.length) {
         const focusedEl = document.querySelector<HTMLElement>('[data-simp-active-focus="true"]');
@@ -2854,6 +2985,25 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     },
     [applyFocusMarker, collectShelfActionsFromDom]
   );
+
+  const closeLibraryContextMenu = useCallback(() => {
+    const returnEl = contextMenuReturnElRef.current;
+    contextMenuReturnElRef.current = null;
+    setLibraryContextTarget(null);
+    window.setTimeout(() => {
+      const target =
+        (returnEl && document.body.contains(returnEl) ? returnEl : null) ||
+        (rightPaneMode === 'tracks'
+          ? document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] [data-right-track="true"][data-track-playing="true"]'
+            ) ||
+            document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] [data-right-track="true"]'
+            )
+          : null);
+      if (target) applyFocusMarker(target);
+    }, 25);
+  }, [applyFocusMarker, rightPaneMode]);
 
   // Inserts one or more tracks into the active playback queue immediately after the current track
   // (`snap.queue_index + 1`) without wiping or restarting the rest of the playing album/playlist.
@@ -3019,16 +3169,32 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           return;
         }
         if (libraryContextTarget) {
-          setLibraryContextTarget(null);
+          closeLibraryContextMenu();
           return;
         }
         // 1. Focused on (or inside) a single track row -> trigger contextmenu (or fallback to `[data-track-select="true"]`)
-        const trackRow = focused?.closest<HTMLElement>(
+        let trackRow = focused?.closest<HTMLElement>(
           '[data-right-track="true"], [data-single-song-row="true"]'
         );
+        if (!trackRow && rightPaneMode === 'tracks' && !focused?.dataset.leftContextKind) {
+          const fallbackRow =
+            document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] [data-right-track="true"][data-track-playing="true"]'
+            ) ||
+            document.querySelector<HTMLElement>(
+              '[data-nav-col="right"] [data-right-track="true"]'
+            );
+          if (fallbackRow) {
+            applyFocusMarker(fallbackRow);
+            trackRow = fallbackRow;
+          }
+        }
         if (trackRow) {
+          const sameFocusedRow =
+            focused?.closest<HTMLElement>('[data-right-track="true"], [data-single-song-row="true"]') ===
+            trackRow;
           const trackCtxBtn =
-            focused?.querySelector<HTMLElement>('[data-context-select="true"]') ||
+            (sameFocusedRow ? focused?.querySelector<HTMLElement>('[data-context-select="true"]') : null) ||
             trackRow.querySelector<HTMLElement>('[data-context-select="true"]');
           if (trackCtxBtn) {
             trackCtxBtn.click();
@@ -3041,7 +3207,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             return;
           }
           const trackFallback =
-            focused?.querySelector<HTMLElement>('[data-track-select="true"]') ||
+            (sameFocusedRow ? focused?.querySelector<HTMLElement>('[data-track-select="true"]') : null) ||
             trackRow.querySelector<HTMLElement>('[data-track-select="true"]');
           if (trackFallback) {
             trackFallback.click();
@@ -3171,17 +3337,6 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           }
         }
 
-        // 4. In Tracklist view (`rightPaneMode === 'tracks'`) -> trigger collection-level `[data-collection-select="true"]`
-        if (rightPaneMode === 'tracks') {
-          const collSelectBtn = document.querySelector<HTMLElement>(
-            '[data-collection-select="true"]'
-          );
-          if (collSelectBtn) {
-            collSelectBtn.click();
-            return;
-          }
-        }
-
         // 5. Fallback: cycle active ★ SIMP Hybrid Playlist target
         cycleTargetHybridPlaylist();
       }
@@ -3201,6 +3356,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     libraryContextTarget,
     collectShelfActionsFromDom,
     openLibraryContextMenu,
+    closeLibraryContextMenu,
     activeHubLabel,
     activeArtistProfile,
   ]);
@@ -3446,6 +3602,15 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       handleStartSoundCloudTrackRadio={handleStartSoundCloudTrackRadio}
       handleAddAppleToCloudLibrary={handleAddAppleToCloudLibrary}
       selectCloudAlbum={selectCloudAlbum}
+      selectLocalAlbum={(albumId, albumTitle, artistName, artUrl) =>
+        selectLocalCollection({
+          kind: 'album',
+          id: albumId,
+          title: albumTitle,
+          subtitle: artistName,
+          art_url: artUrl,
+        })
+      }
     />
   );
 
@@ -3533,7 +3698,13 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
                 : 'Search SIMP Library, Apple Music, SoundCloud & Archive...'
             }
             value={browserSearch}
-            onChange={(e) => setBrowserSearch(e.target.value)}
+            onChange={(e) => {
+              const nextVal = e.target.value;
+              setBrowserSearch(nextVal);
+              if (nextVal.trim() && rightPaneMode !== 'browse') {
+                setRightPaneMode('browse');
+              }
+            }}
             onClick={(e) => {
               if (e.detail === 0 || document.documentElement.dataset.simpInput === 'gamepad') {
                 setOskTarget('search');
@@ -3646,6 +3817,12 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         snap={snap}
         appleAuthState={appleAuthState}
         pushCurrentNavState={pushCurrentNavState}
+        localSubTab={localSubTab}
+        setLocalSubTab={setLocalSubTab}
+        setLocalFolderPath={setLocalFolderPath}
+        localAlbumsCount={allLocalAlbums.length}
+        localArtistsCount={localFacetsSummary.artists.length}
+        localVideosCount={isSourceIncluded('local') && mediaTypeFilter !== 'audio' ? localVideos.length : 0}
         appleSubTab={appleSubTab}
         setAppleSubTab={setAppleSubTab}
         soundCloudSubTab={soundCloudSubTab}
@@ -3797,7 +3974,26 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         {rightPaneMode === 'browse' ? (
           <LibraryBrowseRightPane
             activeHubLabel={activeHubLabel}
-            activeMountPlaceObj={activeMountPlaceObj}
+            activeMountRoot={activeMountRoot}
+            setActiveMountRoot={setActiveMountRoot}
+            localSubTab={localSubTab}
+            setLocalSubTab={setLocalSubTab}
+            localFolderPath={localFolderPath}
+            setLocalFolderPath={setLocalFolderPath}
+            allLocalAlbums={allLocalAlbums}
+            allLocalTracks={allLocalTracks}
+            facetsSummary={localFacetsSummary}
+            localGenreFilter={localGenreFilter}
+            setLocalGenreFilter={setLocalGenreFilter}
+            localYearFilter={localYearFilter}
+            setLocalYearFilter={setLocalYearFilter}
+            localArtworkFilter={localArtworkFilter}
+            setLocalArtworkFilter={setLocalArtworkFilter}
+            localLyricsFilter={localLyricsFilter}
+            setLocalLyricsFilter={setLocalLyricsFilter}
+            localAlpha={localAlpha}
+            setLocalAlpha={setLocalAlpha}
+            pushCurrentNavState={pushCurrentNavState}
             activeSmartFacet={activeSmartFacet}
             setActiveSmartFacet={setActiveSmartFacet}
             appleAuthState={appleAuthState}
@@ -3856,7 +4052,6 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             loadMoreScSearch={loadMoreScSearch}
             localVideos={localVideos}
             mediaTypeFilter={mediaTypeFilter}
-            mountAlbums={mountAlbums}
             mountTracks={mountTracks}
             newFeedAlbums={newFeedAlbums}
             newFeedPlaylists={newFeedPlaylists}
@@ -4039,7 +4234,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       {libraryContextTarget && (
         <LibraryContextMenuModal
           target={libraryContextTarget}
-          onClose={() => setLibraryContextTarget(null)}
+          onClose={closeLibraryContextMenu}
           favoritedUris={favoritedUris}
           writablePlaylists={writablePlaylists}
           activePlaylistId={activePlaylistId}
@@ -4123,6 +4318,26 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         iaSubTab={iaSubTab}
         iaSubFilter={iaSubFilter}
         setIaSubFilter={setIaSubFilter}
+        localSubTab={localSubTab}
+        setLocalSubTab={handleSelectLocalSubTab}
+        localGenreFilter={localGenreFilter}
+        setLocalGenreFilter={setLocalGenreFilter}
+        availableLocalGenres={localFacetsSummary.genres}
+        localYearFilter={localYearFilter}
+        setLocalYearFilter={setLocalYearFilter}
+        availableLocalEras={localFacetsSummary.eras}
+        localArtworkFilter={localArtworkFilter}
+        setLocalArtworkFilter={setLocalArtworkFilter}
+        localArtworkCounts={localFacetsSummary.artworkCounts}
+        localLyricsFilter={localLyricsFilter}
+        setLocalLyricsFilter={setLocalLyricsFilter}
+        localLyricsCounts={localFacetsSummary.lyricsCounts}
+        localAlpha={localAlpha}
+        setLocalAlpha={setLocalAlpha}
+        localArtistsCount={localFacetsSummary.artists.length}
+        localAlbumsCount={allLocalAlbums.length}
+        localVideosCount={isSourceIncluded('local') && mediaTypeFilter !== 'audio' ? localVideos.length : 0}
+        localMountsCount={snap?.mounts?.length || 0}
         filterHasLyricsOnly={filterHasLyricsOnly}
         setFilterHasLyricsOnly={setFilterHasLyricsOnly}
         tracklistLyricsCount={browserTracks.filter((tr) => allLyricsUris.has(tr.uri)).length}

@@ -14,6 +14,9 @@ export interface TrackMetadata {
   source: string;
   mount_root?: string | null;
   content_rating?: string | null;
+  genre?: string | null;
+  release_year?: number | null;
+  parent_folder?: string | null;
 }
 
 export interface AlbumRecord {
@@ -25,6 +28,8 @@ export interface AlbumRecord {
   art_url?: string | null;
   track_count: number;
   content_rating?: string | null;
+  genre?: string | null;
+  parent_folder?: string | null;
 }
 
 export interface PlaylistRecord {

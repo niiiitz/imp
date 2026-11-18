@@ -720,6 +720,8 @@ pub fn map_soundcloud_item_to_track(item: &Value) -> Option<TrackMetadata> {
         } else {
             None
         },
+        genre: genre.map(|g| g.to_string()),
+        ..Default::default()
     };
 
     if let Ok(mut guard) = track_hints().lock() {

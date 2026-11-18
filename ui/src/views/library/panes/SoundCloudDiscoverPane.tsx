@@ -13,13 +13,14 @@ import {
   SoundCloudUserSummary,
 } from "../../../drivers/SoundCloudDriver";
 import {
+  type BrowseHubTarget,
   tileGridStyle,
 } from "../libraryHelpers";
 import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import { TTL_CATALOG_FEED_SEC, TTL_FAST_FEED_SEC } from "../../../api/servicesCacheApi";
 
 export interface SoundCloudDiscoverPaneProps {
-  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
+  browseHubTarget: BrowseHubTarget;
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   cloudLoading: boolean;
   handleStartSoundCloudTrackRadio: any;

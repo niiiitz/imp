@@ -6,10 +6,27 @@ export const CLOUD_PAGE_SIZE = 50;
 export type BrowseHubTarget =
   | 'imp_fyp'
   | 'imp_library'
+  | 'local_discover'
   | 'apple_discover'
   | 'soundcloud_discover'
   | 'ia_discover'
   | 'mount';
+
+export type LocalSubTab = 'overview' | 'artists' | 'albums' | 'folders' | 'videos';
+export type LocalArtworkFilter = 'all' | 'has_art' | 'missing_art';
+export type LocalLyricsFilter = 'all' | 'synced' | 'has_lyrics' | 'missing_lyrics';
+
+export function normalizeParentFolderPath(raw?: string | null): string {
+  if (!raw) return '';
+  const norm = raw.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim();
+  return norm === '/' ? '' : norm;
+}
+
+export function decadeFromYear(year?: number | null): string | null {
+  if (!year || year < 1000 || year > 2100) return null;
+  const dec = Math.floor(year / 10) * 10;
+  return `${dec}s`;
+}
 
 export type AlphaBucket = 'all' | 'num' | 'a_f' | 'g_l' | 'm_r' | 's_z';
 

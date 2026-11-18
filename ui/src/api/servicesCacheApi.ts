@@ -48,6 +48,7 @@ export interface LocalDiscoverResponse {
 
 export interface FypOriginRoute {
   sourceFilter: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
+  localSubTab?: 'overview' | 'artists' | 'albums' | 'folders' | 'videos';
   appleSubTab?: 'pinned' | 'for_you' | 'cloud_playlists' | 'new' | 'radio';
   soundCloudSubTab?: 'pinned' | 'likes_sets' | 'stream_radio' | 'trending';
   iaSubTab?: 'pinned' | 'trending' | 'films' | 'tv' | 'audio';
@@ -187,7 +188,7 @@ export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
     title: 'Local • Smart Stations',
     itemKind: 'stations',
     fetchSpec: { kind: 'local_discover', section: 'smart_stations' },
-    originRoute: { sourceFilter: 'local', sectionAnchor: 'local_smart_stations' },
+    originRoute: { sourceFilter: 'local', localSubTab: 'overview', sectionAnchor: 'local_smart_stations' },
     ttlSec: TTL_CATALOG_FEED_SEC,
   },
   {
@@ -197,7 +198,7 @@ export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
     title: 'Local • Rediscover Local Gems',
     itemKind: 'albums',
     fetchSpec: { kind: 'local_discover', section: 'rediscover_albums' },
-    originRoute: { sourceFilter: 'local', sectionAnchor: 'local_rediscover' },
+    originRoute: { sourceFilter: 'local', localSubTab: 'overview', sectionAnchor: 'local_rediscover' },
     ttlSec: TTL_CATALOG_FEED_SEC,
   },
   {
@@ -207,7 +208,7 @@ export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
     title: 'Local • Recently Added Releases',
     itemKind: 'albums',
     fetchSpec: { kind: 'local_discover', section: 'recent_albums' },
-    originRoute: { sourceFilter: 'local', sectionAnchor: 'local_recent_releases' },
+    originRoute: { sourceFilter: 'local', localSubTab: 'overview', sectionAnchor: 'local_recent_releases' },
     ttlSec: TTL_CATALOG_FEED_SEC,
   },
   {

@@ -277,8 +277,65 @@ pub(super) async fn track_properties_post_handler(
     if body.uri.trim().is_empty() {
         return Json(serde_json::json!({ "ok": false, "error": "Missing uri" }));
     }
-    match state.db.upsert_track_properties_patch(&body.uri, &body.patch) {
-        Ok(props) => Json(serde_json::json!({ "ok": true, "data": props })),
+
+    let uri = body.uri.clone();
+    let patch = body.patch.clone();
+    let db = state.db.clone();
+    let cfg = state.settings.lock().unwrap().clone();
+    let cmd_tx = state.cmd_tx.clone();
+
+    let res = tokio::task::spawn_blocking(move || {
+        let mut updated = db.upsert_track_properties_patch(&uri, &patch)?;
+
+        if patch.has_art == Some(false) {
+            let album_title = db.get_track_by_uri(&uri).ok().flatten().map(|t| t.album);
+            let _ = db.clear_track_and_album_grafted_art(&uri);
+            simp_core::sinks::apple_api::evict_cached_track_art(&uri);
+            let _ = cmd_tx.send(simp_protocol::AudioCommand::RefreshTrackArtwork {
+                uri: uri.clone(),
+                album_title,
+                art_url: None,
+            });
+            updated = db.get_track_properties(&uri).unwrap_or(updated);
+        } else if patch.custom_art_url.as_deref() == Some("") && patch.has_art == Some(true) {
+            let fallback_album = db.get_track_by_uri(&uri).ok().flatten().map(|t| t.album);
+            let _ = db.clear_track_and_album_grafted_art(&uri);
+            simp_core::sinks::apple_api::evict_cached_track_art(&uri);
+
+            if uri.starts_with("applemusic:") {
+                if let Ok(alb_res) =
+                    simp_core::sinks::apple_api::fetch_full_album(&cfg, None, Some(&uri))
+                {
+                    if let Some(ref alb_art) = alb_res.album.art_url {
+                        for tr in &alb_res.tracks {
+                            let tr_art = tr.art_url.as_deref().unwrap_or(alb_art.as_str());
+                            let _ = db.set_track_art_url(&tr.uri, Some(tr_art));
+                        }
+                        let _ = db.set_track_art_url(&uri, Some(alb_art.as_str()));
+                    }
+                    let _ = cmd_tx.send(simp_protocol::AudioCommand::RefreshTrackArtwork {
+                        uri: uri.clone(),
+                        album_title: Some(alb_res.album.title),
+                        art_url: alb_res.album.art_url,
+                    });
+                } else {
+                    let _ = cmd_tx.send(simp_protocol::AudioCommand::RefreshTrackArtwork {
+                        uri: uri.clone(),
+                        album_title: fallback_album,
+                        art_url: None,
+                    });
+                }
+                updated = db.get_track_properties(&uri).unwrap_or(updated);
+            }
+        }
+
+        Ok::<_, anyhow::Error>(updated)
+    })
+    .await;
+
+    match res {
+        Ok(Ok(props)) => Json(serde_json::json!({ "ok": true, "data": props })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }

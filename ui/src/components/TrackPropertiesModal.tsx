@@ -552,7 +552,7 @@ export const TrackPropertiesModal: React.FC<TrackPropertiesModalProps> = ({
                   type="button"
                   onClick={() =>
                     applyPatch(
-                      { has_art: Boolean(track.art_url), custom_art_url: '' },
+                      { has_art: true, custom_art_url: '' },
                       'Refreshed cover artwork state for track',
                     )
                   }

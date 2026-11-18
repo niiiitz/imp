@@ -235,8 +235,82 @@ fn is_ignored_walk_entry(entry: &walkdir::DirEntry) -> bool {
     false
 }
 
+/// Computes the clean `/` or `Artist/Album`-style relative subfolder path of `file_path`
+/// inside `mount_root`, normalizing Windows backslashes to forward slashes.
+pub fn compute_relative_parent_folder(mount_root: &str, file_path: &Path) -> String {
+    let norm_file = file_path.to_string_lossy().replace('\\', "/");
+    let Some((raw_parent, _)) = norm_file.rsplit_once('/') else {
+        return "/".to_string();
+    };
+    let norm_mount = mount_root
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string();
+    let norm_parent = if raw_parent.is_empty() {
+        "/"
+    } else {
+        raw_parent.trim_end_matches('/')
+    };
+    if norm_parent == norm_mount {
+        return "/".to_string();
+    }
+    let mount_prefix = if norm_mount.is_empty() {
+        "/".to_string()
+    } else {
+        format!("{norm_mount}/")
+    };
+    if let Some(rel) = norm_parent.strip_prefix(&mount_prefix) {
+        let clean = rel.trim_matches('/');
+        if clean.is_empty() {
+            return "/".to_string();
+        }
+        return clean.to_string();
+    }
+    norm_parent
+        .rsplit('/')
+        .next()
+        .map(|n| n.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "/".to_string())
+}
+
+fn clean_tag_genre(raw: Option<&str>) -> Option<String> {
+    raw.map(str::trim)
+        .filter(|s| {
+            !s.is_empty()
+                && !s.eq_ignore_ascii_case("unknown")
+                && !s.eq_ignore_ascii_case("none")
+                && !s.eq_ignore_ascii_case("other")
+        })
+        .map(|s| s.to_string())
+}
+
+fn probe_audio_genre_and_year(path: &Path) -> (Option<String>, Option<i32>) {
+    let parse_opts = lofty::config::ParseOptions::new()
+        .read_properties(false)
+        .read_cover_art(false);
+    let Ok(probe) = Probe::open(path) else {
+        return (None, None);
+    };
+    let Ok(tagged) = probe.options(parse_opts).read() else {
+        return (None, None);
+    };
+    if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
+        let genre = tag.genre().as_deref().and_then(|g| clean_tag_genre(Some(g)));
+        let year = tag
+            .year()
+            .map(|y| y as i32)
+            .filter(|y| (1000..=2100).contains(y));
+        return (genre, year);
+    }
+    (None, None)
+}
+
 fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, source: &str) {
     let fingerprints = db.get_mount_file_fingerprints(mount_root).unwrap_or_default();
+    let needs_backfill = db
+        .get_tracks_missing_folder_metadata(mount_root)
+        .unwrap_or_default();
 
     // Collect candidate files and deduplicate dual-format Steam OSTs (e.g., identical `.mp3` and `.wav` stems in the same folder)
     let mut audio_files: Vec<PathBuf> = WalkDir::new(dir)
@@ -323,6 +397,16 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
                             has_local_lrc,
                         );
                     }
+                    if needs_backfill.contains(&uri) {
+                        let parent_folder = compute_relative_parent_folder(mount_root, &path);
+                        let (bf_genre, bf_year) = probe_audio_genre_and_year(&path);
+                        let _ = db.backfill_track_and_album_tag_metadata(
+                            &uri,
+                            bf_genre.as_deref(),
+                            bf_year,
+                            &parent_folder,
+                        );
+                    }
                     continue;
                 }
             }
@@ -380,6 +464,15 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
 
             if let Some((cached_mtime, cached_size, _)) = fingerprints.get(&uri) {
                 if *cached_mtime == file_mtime && *cached_size == file_size {
+                    if needs_backfill.contains(&uri) {
+                        let parent_folder = compute_relative_parent_folder(mount_root, &path);
+                        let _ = db.backfill_track_and_album_tag_metadata(
+                            &uri,
+                            None,
+                            None,
+                            &parent_folder,
+                        );
+                    }
                     continue;
                 }
             }
@@ -414,6 +507,7 @@ fn parse_local_video_file(
         .parent()
         .map(|p| p.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    let parent_folder = compute_relative_parent_folder(mount_root, path);
     let album_id_input = format!(
         "{}::{}::local_video",
         folder_album.to_lowercase(),
@@ -422,13 +516,15 @@ fn parse_local_video_file(
     let album_id = blake3::hash(album_id_input.as_bytes()).to_hex()[..16].to_string();
     let artist_label = parsed_artist.unwrap_or_else(|| "Local Video".to_string());
 
-    let _ = db.upsert_album(
+    let _ = db.upsert_album_with_metadata(
         &album_id,
         &folder_album,
         "Local Video",
         None,
         None,
         art_http.as_deref(),
+        None,
+        Some(&parent_folder),
     );
 
     Some(TrackMetadata {
@@ -444,6 +540,9 @@ fn parse_local_video_file(
         source: "local_video".to_string(),
         mount_root: Some(mount_root.to_string()),
         content_rating: None,
+        genre: None,
+        release_year: None,
+        parent_folder: Some(parent_folder),
     })
 }
 
@@ -482,6 +581,7 @@ fn parse_audio_file(
     let mut track_number = parsed_track_no;
     let mut disc_number = Some(1);
     let mut year = None;
+    let mut genre: Option<String> = None;
     let mut duration_ms = 0u32;
     let mut content_rating: Option<String> = None;
 
@@ -513,7 +613,11 @@ fn parse_audio_file(
                     track_number = tag.track();
                 }
                 disc_number = tag.disk().or(Some(1));
-                year = tag.year().map(|y| y as i32);
+                year = tag
+                    .year()
+                    .map(|y| y as i32)
+                    .filter(|y| (1000..=2100).contains(y));
+                genre = tag.genre().as_deref().and_then(|g| clean_tag_genre(Some(g)));
                 if let Some(adv) = tag.get_string(&lofty::tag::ItemKey::ParentalAdvisory) {
                     let norm = adv.trim().to_ascii_lowercase();
                     if matches!(norm.as_str(), "1" | "4" | "explicit" | "yes" | "true") {
@@ -535,6 +639,7 @@ fn parse_audio_file(
         .parent()
         .map(|p| p.to_string_lossy().to_lowercase())
         .unwrap_or_default();
+    let parent_folder = compute_relative_parent_folder(mount_root, path);
     let album_id_input = format!("{}::{}::{}", album.to_lowercase(), parent_folder_key, source);
     let album_id = blake3::hash(album_id_input.as_bytes()).to_hex()[..16].to_string();
 
@@ -548,13 +653,15 @@ fn parse_audio_file(
         artist.clone()
     };
 
-    let _ = db.upsert_album(
+    let _ = db.upsert_album_with_metadata(
         &album_id,
         &album,
         &album_artist_owned,
         year,
         None,
         art_http.as_deref(),
+        genre.as_deref(),
+        Some(&parent_folder),
     );
 
     Some(TrackMetadata {
@@ -570,6 +677,9 @@ fn parse_audio_file(
         source: source.to_string(),
         mount_root: Some(mount_root.to_string()),
         content_rating,
+        genre,
+        release_year: year,
+        parent_folder: Some(parent_folder),
     })
 }
 
@@ -617,5 +727,27 @@ mod tests {
         assert_eq!(no, Some(11));
         assert_eq!(artist.as_deref(), Some("Hideki Naganuma"));
         assert_eq!(title, "JACK DA FUNK");
+    }
+
+    #[test]
+    fn test_compute_relative_parent_folder() {
+        assert_eq!(
+            compute_relative_parent_folder("/mnt/music", Path::new("/mnt/music/01.flac")),
+            "/"
+        );
+        assert_eq!(
+            compute_relative_parent_folder(
+                "/mnt/music/",
+                Path::new("/mnt/music/Example Artist/Sample Album/01.flac")
+            ),
+            "Example Artist/Sample Album"
+        );
+        assert_eq!(
+            compute_relative_parent_folder(
+                "D:\\Music",
+                Path::new("D:\\Music\\Synth\\Album\\02.mp3")
+            ),
+            "Synth/Album"
+        );
     }
 }

@@ -15,6 +15,7 @@ import {
 } from "../../../drivers/AppleMusicDriver";
 import {
   AlphaBucket,
+  type BrowseHubTarget,
   tileGridStyle,
 } from "../libraryHelpers";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
@@ -33,7 +34,7 @@ export interface AppleMusicDiscoverPaneProps {
   appleRecentlyPlayedTracks: TrackMetadata[];
   appleSubTab: "pinned" | "for_you" | "cloud_playlists" | "new" | "radio";
   artistRadioShows: AppleCloudPlaylistSummary[];
-  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
+  browseHubTarget: BrowseHubTarget;
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   cloudAlpha: AlphaBucket;
   cloudLoading: boolean;

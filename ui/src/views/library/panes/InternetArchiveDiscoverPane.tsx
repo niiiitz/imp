@@ -4,6 +4,7 @@ import {
   PlaylistRecord,
 } from "@simp/client";
 import {
+  type BrowseHubTarget,
   tileGridStyle,
 } from "../libraryHelpers";
 import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
@@ -11,7 +12,7 @@ import { TTL_ARCHIVE_SEC } from "../../../api/servicesCacheApi";
 
 export interface InternetArchiveDiscoverPaneProps {
   activeHubLabel: string;
-  browseHubTarget: "imp_fyp" | "imp_library" | "apple_discover" | "soundcloud_discover" | "ia_discover" | "mount";
+  browseHubTarget: BrowseHubTarget;
   browserSearch: string;
   browserSourceFilter: "all" | "local" | "apple_music" | "soundcloud" | "internet_archive";
   filteredIaItems: ArchiveItemSummary[];

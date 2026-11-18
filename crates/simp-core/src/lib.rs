@@ -1,3 +1,5 @@
+#![allow(unexpected_cfgs)]
+
 pub mod dsp;
 pub mod factoids;
 pub mod gamepad;
@@ -961,6 +963,7 @@ mod tests {
             source: "local".to_string(),
             mount_root: Some(usb_root.to_string()),
             content_rating: None,
+            ..Default::default()
         };
 
         db.upsert_track(&track, Some(1700000000), Some(42_000_000))

@@ -1,0 +1,1531 @@
+import React, { useMemo } from 'react';
+import {
+  AlbumRecord,
+  defaultSimpClient,
+  SimpStateSnapshot,
+  TrackMetadata,
+} from '@simp/client';
+import {
+  DEFAULT_STARTER_FYP_DESCRIPTORS,
+  LocalDiscoverResponse,
+  LocalSmartStation,
+} from '../../../api/servicesCacheApi';
+import { ImpIcon } from '../../../components/icons/ImpIcon';
+import { isUiVideoTrack } from '../../PlayerView';
+import {
+  type AlphaBucket,
+  type BrowseHubTarget,
+  decadeFromYear,
+  type LocalArtworkFilter,
+  type LocalLyricsFilter,
+  type LocalSubTab,
+  matchesAlphaBucket,
+  normalizeParentFolderPath,
+  tileGridStyle,
+  useLibraryLyricsStatus,
+} from '../libraryHelpers';
+import {
+  CollapsibleSectionHeader,
+  FilterTriggerButton,
+  PinnableSectionHeader,
+} from '../PinnableSectionHeader';
+
+export interface LocalFacetsSummary {
+  genres: Array<{ genre: string; count: number }>;
+  eras: Array<{ id: string; label: string; count: number }>;
+  artworkCounts: { hasArt: number; missingArt: number };
+  lyricsCounts: { synced: number; anyLyrics: number; missing: number };
+  artists: Array<{ name: string; albumCount: number; trackCount: number; artUrl: string | null }>;
+}
+
+export function cleanAlbumArtistDisplay(raw: string): string {
+  return raw
+    .replace(/\s*•\s*(FLAC(?:\s*\+\s*(?:MP3|WAV|AAC|M4A|ALAC|OGG|OPUS|AIFF))*|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i, '')
+    .trim();
+}
+
+export function computeLocalFacetsSummary(
+  localAlbums: AlbumRecord[],
+  localTracks: TrackMetadata[],
+  syncedUris: Set<string>,
+  allLyricsUris: Set<string>
+): LocalFacetsSummary {
+  const audioTracks = localTracks.filter((t) => !isUiVideoTrack(t));
+  const genreMap = new Map<string, { display: string; count: number }>();
+  const decadeMap = new Map<string, number>();
+  let unknownYearCount = 0;
+  let hasArt = 0;
+  let missingArt = 0;
+  let synced = 0;
+  let anyLyrics = 0;
+  let missingLyrics = 0;
+
+  const artistMap = new Map<
+    string,
+    { display: string; albums: Set<string>; tracks: Set<string>; artUrl: string | null }
+  >();
+
+  for (const alb of localAlbums) {
+    const cleanArtist = cleanAlbumArtistDisplay(alb.album_artist);
+    if (cleanArtist && cleanArtist.toLowerCase() !== 'steam soundtrack' && cleanArtist.toLowerCase() !== 'local video') {
+      const k = cleanArtist.toLowerCase();
+      const entry = artistMap.get(k) || {
+        display: cleanArtist,
+        albums: new Set<string>(),
+        tracks: new Set<string>(),
+        artUrl: alb.art_url || null,
+      };
+      entry.albums.add(alb.id);
+      if (!entry.artUrl && alb.art_url) entry.artUrl = alb.art_url;
+      artistMap.set(k, entry);
+    }
+  }
+
+  for (const t of audioTracks) {
+    const g = (t.genre || '').trim();
+    if (g) {
+      const k = g.toLowerCase();
+      const prev = genreMap.get(k);
+      genreMap.set(k, { display: prev?.display || g, count: (prev?.count || 0) + 1 });
+    }
+    const dec = decadeFromYear(t.release_year);
+    if (dec) {
+      decadeMap.set(dec, (decadeMap.get(dec) || 0) + 1);
+    } else {
+      unknownYearCount += 1;
+    }
+    if (t.art_url && t.art_url.trim().length > 0) {
+      hasArt += 1;
+    } else {
+      missingArt += 1;
+    }
+    if (syncedUris.has(t.uri)) {
+      synced += 1;
+      anyLyrics += 1;
+    } else if (allLyricsUris.has(t.uri)) {
+      anyLyrics += 1;
+    } else {
+      missingLyrics += 1;
+    }
+    for (const rawArt of t.artists || []) {
+      const name = rawArt.trim();
+      if (!name || name.toLowerCase() === 'unknown artist') continue;
+      const k = name.toLowerCase();
+      const entry = artistMap.get(k) || {
+        display: name,
+        albums: new Set<string>(),
+        tracks: new Set<string>(),
+        artUrl: t.art_url || null,
+      };
+      entry.tracks.add(t.uri);
+      if (t.album_id) entry.albums.add(t.album_id);
+      if (!entry.artUrl && t.art_url) entry.artUrl = t.art_url;
+      artistMap.set(k, entry);
+    }
+  }
+
+  const genres = Array.from(genreMap.values())
+    .map((x) => ({ genre: x.display, count: x.count }))
+    .sort((a, b) => b.count - a.count || a.genre.localeCompare(b.genre))
+    .slice(0, 24);
+
+  const eras = Array.from(decadeMap.entries())
+    .map(([dec, count]) => ({ id: dec, label: dec, count }))
+    .sort((a, b) => b.id.localeCompare(a.id));
+  if (unknownYearCount > 0) {
+    eras.push({ id: 'unknown', label: 'No Year', count: unknownYearCount });
+  }
+
+  const artists = Array.from(artistMap.values())
+    .map((a) => ({
+      name: a.display,
+      albumCount: a.albums.size,
+      trackCount: a.tracks.size,
+      artUrl: a.artUrl,
+    }))
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+  return {
+    genres,
+    eras,
+    artworkCounts: { hasArt, missingArt },
+    lyricsCounts: { synced, anyLyrics, missing: missingLyrics },
+    artists,
+  };
+}
+
+export interface LocalDiscoverPaneProps {
+  browseHubTarget: BrowseHubTarget;
+  localSubTab: LocalSubTab;
+  setLocalSubTab: React.Dispatch<React.SetStateAction<LocalSubTab>>;
+  activeMountRoot: string | null;
+  setActiveMountRoot: React.Dispatch<React.SetStateAction<string | null>>;
+  localFolderPath: string;
+  setLocalFolderPath: React.Dispatch<React.SetStateAction<string>>;
+  snap: SimpStateSnapshot | null;
+  allLocalAlbums: AlbumRecord[];
+  allLocalTracks: TrackMetadata[];
+  mountTracks: TrackMetadata[];
+  localVideos: TrackMetadata[];
+  localDiscover: LocalDiscoverResponse;
+  facetsSummary: LocalFacetsSummary;
+  localGenreFilter: string;
+  setLocalGenreFilter: React.Dispatch<React.SetStateAction<string>>;
+  localYearFilter: string;
+  setLocalYearFilter: React.Dispatch<React.SetStateAction<string>>;
+  localArtworkFilter: LocalArtworkFilter;
+  setLocalArtworkFilter: React.Dispatch<React.SetStateAction<LocalArtworkFilter>>;
+  localLyricsFilter: LocalLyricsFilter;
+  setLocalLyricsFilter: React.Dispatch<React.SetStateAction<LocalLyricsFilter>>;
+  localAlpha: AlphaBucket;
+  setLocalAlpha: React.Dispatch<React.SetStateAction<AlphaBucket>>;
+  mediaTypeFilter: 'all' | 'video' | 'audio';
+  onOpenFilters?: () => void;
+  onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
+  pushCurrentNavState: () => void;
+  setPlayingContextId: (ctxId: string) => void;
+  setView: (view: 'lock' | 'browser') => void;
+  handleAddTracksToPlaylist: (
+    uris: string[],
+    label: string,
+    tracks?: TrackMetadata[]
+  ) => Promise<void>;
+  renderSimpAlbumCard: (alb: AlbumRecord) => React.ReactNode;
+  renderLocalArtistCard: (
+    artistName: string,
+    artUrl?: string | null,
+    subtitle?: string
+  ) => React.ReactNode;
+  renderSingleSongRow: (
+    s: TrackMetadata,
+    peerList: TrackMetadata[],
+    ctxPrefix: string,
+    compact?: boolean
+  ) => React.ReactNode;
+  openLibraryContextMenu: (target: any) => void;
+}
+
+export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
+  browseHubTarget,
+  localSubTab,
+  setLocalSubTab,
+  activeMountRoot,
+  setActiveMountRoot,
+  localFolderPath,
+  setLocalFolderPath,
+  snap,
+  allLocalAlbums,
+  allLocalTracks,
+  mountTracks,
+  localVideos,
+  localDiscover,
+  facetsSummary,
+  localGenreFilter,
+  setLocalGenreFilter,
+  localYearFilter,
+  setLocalYearFilter,
+  localArtworkFilter,
+  setLocalArtworkFilter,
+  localLyricsFilter,
+  setLocalLyricsFilter,
+  localAlpha,
+  setLocalAlpha,
+  mediaTypeFilter,
+  onOpenFilters,
+  onPlayLocalSmartStation,
+  pushCurrentNavState,
+  setPlayingContextId,
+  setView,
+  handleAddTracksToPlaylist,
+  renderSimpAlbumCard,
+  renderLocalArtistCard,
+  renderSingleSongRow,
+  openLibraryContextMenu,
+}) => {
+  const { syncedUris, allLyricsUris } = useLibraryLyricsStatus();
+  const isMountedMode = browseHubTarget === 'mount';
+  const effectiveSubTab: LocalSubTab = isMountedMode ? 'folders' : localSubTab;
+
+  const hasRichFilter =
+    localGenreFilter !== 'all' ||
+    localYearFilter !== 'all' ||
+    localArtworkFilter !== 'all' ||
+    localLyricsFilter !== 'all';
+
+  const hasAnyFilter = hasRichFilter || localAlpha !== 'all' || mediaTypeFilter !== 'all';
+
+  const clearRichFilters = () => {
+    setLocalGenreFilter('all');
+    setLocalYearFilter('all');
+    setLocalArtworkFilter('all');
+    setLocalLyricsFilter('all');
+    setLocalAlpha('all');
+  };
+
+  const trackMatchesFilters = useMemo(() => {
+    return (t: TrackMetadata): boolean => {
+      const isVid = isUiVideoTrack(t);
+      if (mediaTypeFilter === 'video' && !isVid) return false;
+      if (mediaTypeFilter === 'audio' && isVid) return false;
+      if (localGenreFilter !== 'all') {
+        if ((t.genre || '').trim().toLowerCase() !== localGenreFilter.toLowerCase()) {
+          return false;
+        }
+      }
+      if (localYearFilter !== 'all') {
+        if (localYearFilter === 'unknown') {
+          if (t.release_year != null) return false;
+        } else if (/^\d{4}s$/.test(localYearFilter)) {
+          if (decadeFromYear(t.release_year) !== localYearFilter) return false;
+        } else if (String(t.release_year || '') !== localYearFilter) {
+          return false;
+        }
+      }
+      if (localArtworkFilter === 'has_art') {
+        if (!t.art_url || !t.art_url.trim()) return false;
+      } else if (localArtworkFilter === 'missing_art') {
+        if (t.art_url && t.art_url.trim()) return false;
+      }
+      if (localLyricsFilter === 'synced') {
+        if (!syncedUris.has(t.uri)) return false;
+      } else if (localLyricsFilter === 'has_lyrics') {
+        if (!allLyricsUris.has(t.uri)) return false;
+      } else if (localLyricsFilter === 'missing_lyrics') {
+        if (allLyricsUris.has(t.uri)) return false;
+      }
+      return true;
+    };
+  }, [
+    mediaTypeFilter,
+    localGenreFilter,
+    localYearFilter,
+    localArtworkFilter,
+    localLyricsFilter,
+    syncedUris,
+    allLyricsUris,
+  ]);
+
+  const tracksByAlbumId = useMemo(() => {
+    const map = new Map<string, TrackMetadata[]>();
+    for (const t of allLocalTracks) {
+      if (!t.album_id) continue;
+      const list = map.get(t.album_id);
+      if (list) list.push(t);
+      else map.set(t.album_id, [t]);
+    }
+    return map;
+  }, [allLocalTracks]);
+
+  const filteredAlbumsList = useMemo(() => {
+    return allLocalAlbums.filter((alb) => {
+      if (mediaTypeFilter === 'video') return false;
+      if (localAlpha !== 'all' && !matchesAlphaBucket(alb.title, localAlpha)) return false;
+      const albTracks = tracksByAlbumId.get(alb.id) || [];
+      if (hasRichFilter && albTracks.length > 0) {
+        return albTracks.some(trackMatchesFilters);
+      }
+      if (localGenreFilter !== 'all') {
+        if ((alb.genre || '').trim().toLowerCase() !== localGenreFilter.toLowerCase()) {
+          return false;
+        }
+      }
+      if (localYearFilter !== 'all') {
+        if (localYearFilter === 'unknown') {
+          if (alb.release_year != null) return false;
+        } else if (/^\d{4}s$/.test(localYearFilter)) {
+          if (decadeFromYear(alb.release_year) !== localYearFilter) return false;
+        } else if (String(alb.release_year || '') !== localYearFilter) {
+          return false;
+        }
+      }
+      if (localArtworkFilter === 'has_art' && (!alb.art_url || !alb.art_url.trim())) {
+        return false;
+      }
+      if (localArtworkFilter === 'missing_art' && alb.art_url && alb.art_url.trim()) {
+        return false;
+      }
+      if (localLyricsFilter !== 'all') return false;
+      return true;
+    });
+  }, [
+    allLocalAlbums,
+    mediaTypeFilter,
+    localAlpha,
+    tracksByAlbumId,
+    hasRichFilter,
+    trackMatchesFilters,
+    localGenreFilter,
+    localYearFilter,
+    localArtworkFilter,
+    localLyricsFilter,
+  ]);
+
+  const filteredTracksList = useMemo(
+    () => allLocalTracks.filter(trackMatchesFilters),
+    [allLocalTracks, trackMatchesFilters]
+  );
+
+  const filteredArtistsList = useMemo(() => {
+    if (!hasRichFilter && localAlpha === 'all') {
+      return facetsSummary.artists;
+    }
+    const matchingArtistKeys = new Set<string>();
+    for (const t of filteredTracksList) {
+      for (const a of t.artists || []) {
+        const k = a.trim().toLowerCase();
+        if (k) matchingArtistKeys.add(k);
+      }
+    }
+    for (const alb of filteredAlbumsList) {
+      const k = cleanAlbumArtistDisplay(alb.album_artist).toLowerCase();
+      if (k) matchingArtistKeys.add(k);
+    }
+    return facetsSummary.artists.filter((art) => {
+      if (localAlpha !== 'all' && !matchesAlphaBucket(art.name, localAlpha)) return false;
+      if (hasRichFilter && !matchingArtistKeys.has(art.name.toLowerCase())) return false;
+      return true;
+    });
+  }, [hasRichFilter, localAlpha, facetsSummary.artists, filteredTracksList, filteredAlbumsList]);
+
+  // Folder / Mount Drill-Down computation
+  const mountsList = snap?.mounts || [];
+  const effectiveMount =
+    (activeMountRoot ? mountsList.find((m) => m.mount_root === activeMountRoot) : null) ||
+    (mountsList.length === 1 ? mountsList[0] : null);
+
+  const folderDrillData = useMemo(() => {
+    if (!effectiveMount) {
+      return {
+        curPrefix: '',
+        breadcrumbs: [] as string[],
+        subfolders: [] as Array<{
+          name: string;
+          fullRelPath: string;
+          trackCount: number;
+          albumCount: number;
+          artUrls: string[];
+        }>,
+        directTracks: [] as TrackMetadata[],
+        subtreeTracks: [] as TrackMetadata[],
+        albumsHere: [] as AlbumRecord[],
+      };
+    }
+    const sourceTracks =
+      allLocalTracks.length > 0
+        ? allLocalTracks.filter((t) => t.mount_root === effectiveMount.mount_root)
+        : mountTracks;
+    const scopedTracks = sourceTracks.filter(trackMatchesFilters);
+    const curPrefix = normalizeParentFolderPath(localFolderPath);
+    const breadcrumbs = curPrefix ? curPrefix.split('/').filter(Boolean) : [];
+
+    const childMap = new Map<
+      string,
+      {
+        name: string;
+        fullRelPath: string;
+        tracks: number;
+        albumIds: Set<string>;
+        artUrls: string[];
+      }
+    >();
+    const directTracks: TrackMetadata[] = [];
+    const subtreeTracks: TrackMetadata[] = [];
+    const directAlbumIds = new Set<string>();
+
+    for (const t of scopedTracks) {
+      const rel = normalizeParentFolderPath(t.parent_folder);
+      if (rel === curPrefix) {
+        directTracks.push(t);
+        subtreeTracks.push(t);
+        if (t.album_id) directAlbumIds.add(t.album_id);
+        continue;
+      }
+      const isChild = curPrefix === '' ? rel.length > 0 : rel.startsWith(`${curPrefix}/`);
+      if (!isChild) continue;
+      subtreeTracks.push(t);
+      const remainder = curPrefix === '' ? rel : rel.slice(curPrefix.length + 1);
+      const seg = remainder.split('/')[0];
+      if (!seg) continue;
+      const fullRelPath = curPrefix ? `${curPrefix}/${seg}` : seg;
+      let entry = childMap.get(seg);
+      if (!entry) {
+        entry = {
+          name: seg,
+          fullRelPath,
+          tracks: 0,
+          albumIds: new Set<string>(),
+          artUrls: [],
+        };
+        childMap.set(seg, entry);
+      }
+      entry.tracks += 1;
+      if (t.album_id) entry.albumIds.add(t.album_id);
+      if (t.art_url && entry.artUrls.length < 4 && !entry.artUrls.includes(t.art_url)) {
+        entry.artUrls.push(t.art_url);
+      }
+    }
+
+    const subfolders = Array.from(childMap.values())
+      .map((s) => ({
+        name: s.name,
+        fullRelPath: s.fullRelPath,
+        trackCount: s.tracks,
+        albumCount: s.albumIds.size,
+        artUrls: s.artUrls,
+      }))
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+    const albumsHere = filteredAlbumsList.filter((alb) => directAlbumIds.has(alb.id));
+
+    return {
+      curPrefix,
+      breadcrumbs,
+      subfolders,
+      directTracks,
+      subtreeTracks,
+      albumsHere,
+    };
+  }, [
+    effectiveMount,
+    allLocalTracks,
+    mountTracks,
+    trackMatchesFilters,
+    localFolderPath,
+    filteredAlbumsList,
+  ]);
+
+  const filterSummaryParts: string[] = [];
+  if (localGenreFilter !== 'all') filterSummaryParts.push(localGenreFilter);
+  if (localYearFilter !== 'all') filterSummaryParts.push(localYearFilter);
+  if (localArtworkFilter === 'has_art') filterSummaryParts.push('Has Art');
+  if (localArtworkFilter === 'missing_art') filterSummaryParts.push('Missing Art');
+  if (localLyricsFilter === 'synced') filterSummaryParts.push('Synced LRC');
+  if (localLyricsFilter === 'has_lyrics') filterSummaryParts.push('Any Lyrics');
+  if (localLyricsFilter === 'missing_lyrics') filterSummaryParts.push('Missing Lyrics');
+  if (localAlpha !== 'all') filterSummaryParts.push(localAlpha.toUpperCase());
+  if (mediaTypeFilter !== 'all') filterSummaryParts.push(mediaTypeFilter);
+
+  const hubTitle =
+    effectiveSubTab === 'artists'
+      ? `Local Artists (${filteredArtistsList.length})`
+      : effectiveSubTab === 'albums'
+      ? `Local Albums (${filteredAlbumsList.length})`
+      : effectiveSubTab === 'folders'
+      ? effectiveMount
+        ? `${effectiveMount.label}${folderDrillData.curPrefix ? ` / ${folderDrillData.curPrefix}` : ''}`
+        : 'Storage Mounts & Folders'
+      : effectiveSubTab === 'videos'
+      ? `Local Videos (${localVideos.length})`
+      : 'Local Music & Storage';
+
+  const switchLocalTab = (tab: LocalSubTab) => {
+    pushCurrentNavState();
+    setLocalSubTab(tab);
+    if (tab !== 'folders') {
+      setActiveMountRoot(null);
+      setLocalFolderPath('');
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+      {/* Top Emerald Header + Quick Sub-Tabs + Filter Trigger */}
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          paddingBottom: 10,
+          borderBottom: '1px solid #143328',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <ImpIcon name="local" size={16} color="#6ee7b7" />
+            <span
+              style={{
+                fontSize: 15,
+                fontWeight: 800,
+                color: '#6ee7b7',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              💾 {hubTitle}
+            </span>
+          </div>
+          <FilterTriggerButton
+            summary={filterSummaryParts.length > 0 ? filterSummaryParts.join(' • ') : 'All'}
+            active={hasAnyFilter}
+            accentColor="#34d399"
+            activeBg="#0b241c"
+            activeText="#6ee7b7"
+            onClick={onOpenFilters}
+          />
+        </div>
+
+        {/* Sub-tab Strip & Active Filter Clear Pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {(
+            [
+              { id: 'overview', label: '⚡ Overview' },
+              { id: 'artists', label: `🎤 Artists (${facetsSummary.artists.length})` },
+              { id: 'albums', label: `💿 Albums (${allLocalAlbums.length})` },
+              { id: 'folders', label: `📂 Folders (${mountsList.length})` },
+              ...(localVideos.length > 0 && mediaTypeFilter !== 'audio'
+                ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideos.length})` }]
+                : []),
+            ] as const
+          ).map((t) => {
+            const active = effectiveSubTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                data-right-filter-pill="true"
+                onClick={() => switchLocalTab(t.id)}
+                style={{
+                  padding: '5px 11px',
+                  borderRadius: 8,
+                  background: active ? '#0b241c' : '#0b0e12',
+                  border: active ? '1px solid #34d399' : '1px solid #1b2a24',
+                  color: active ? '#6ee7b7' : '#9ca3af',
+                  fontSize: 11,
+                  fontWeight: active ? 800 : 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+
+          {hasAnyFilter && (
+            <button
+              type="button"
+              data-right-filter-pill="true"
+              onClick={clearRichFilters}
+              style={{
+                padding: '5px 10px',
+                borderRadius: 8,
+                background: '#221216',
+                border: '1px solid #7f1d1d',
+                color: '#fca5a5',
+                fontSize: 11,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              ✕ Clear Filters
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ===================================================================
+          TAB 1: ⚡ LOCAL OVERVIEW (Genres, Eras, Health, Smart Stations, Shelves)
+         =================================================================== */}
+      {effectiveSubTab === 'overview' && (
+        <>
+          {hasRichFilter && (
+            <section
+              data-section-anchor="local_filtered_preview"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <CollapsibleSectionHeader
+                sectionKey="local:filtered_preview"
+                accentColor="#34d399"
+                title={`⚲ FILTERED LOCAL MATCHES (${filteredAlbumsList.length} albums • ${filteredTracksList.length} tracks)`}
+              />
+              {filteredAlbumsList.length > 0 && (
+                <div style={tileGridStyle}>
+                  {filteredAlbumsList.slice(0, 24).map(renderSimpAlbumCard)}
+                </div>
+              )}
+              {filteredTracksList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {filteredTracksList.slice(0, 50).map((t) =>
+                    renderSingleSongRow(t, filteredTracksList, 'local_overview_filtered')
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* Local Smart Stations */}
+          {localDiscover.smart_stations.length > 0 && mediaTypeFilter !== 'video' && (
+            <section
+              data-section-anchor="local_smart_stations"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <PinnableSectionHeader
+                title={`📻 LOCAL SMART STATIONS (${localDiscover.smart_stations.length})`}
+                accentColor="#34d399"
+                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[0]}
+                liveItems={localDiscover.smart_stations}
+              />
+              <div style={tileGridStyle}>
+                {localDiscover.smart_stations.map((st) => (
+                  <div
+                    key={st.id}
+                    data-right-tile="true"
+                    data-tile-key={`local_station:${st.id}`}
+                    role="button"
+                    tabIndex={0}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      openLibraryContextMenu({
+                        type: 'collection',
+                        kind: 'local_station',
+                        id: st.id,
+                        title: st.title,
+                        subtitle: `${st.track_count} tracks • ${st.subtitle}`,
+                        art_url: st.art_url,
+                        source: 'local',
+                        rawItem: st,
+                      });
+                    }}
+                    onClick={() => onPlayLocalSmartStation(st, false)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onPlayLocalSmartStation(st, false);
+                      }
+                    }}
+                    style={{
+                      borderRadius: 12,
+                      background: 'linear-gradient(155deg, #0b241c 0%, #090d14 100%)',
+                      border: '1px solid #143328',
+                      padding: 12,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      cursor: 'pointer',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                      {st.art_url ? (
+                        <img
+                          src={st.art_url}
+                          alt=""
+                          loading="lazy"
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 8,
+                            objectFit: 'cover',
+                            border: '1px solid #34d399',
+                            flexShrink: 0,
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 8,
+                            background: '#0f2d23',
+                            border: '1px solid #34d399',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <ImpIcon name="music" size={18} color="#6ee7b7" />
+                        </div>
+                      )}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: 800,
+                            color: '#ecfdf5',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {st.title}
+                        </div>
+                        <div style={{ fontSize: 10.5, color: '#6ee7b7', marginTop: 2 }}>
+                          {st.track_count} tracks
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.3 }}>
+                      {st.subtitle}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Browse by Genre */}
+          {facetsSummary.genres.length > 0 && (
+            <section
+              data-section-anchor="local_genres"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <CollapsibleSectionHeader
+                sectionKey="local:genres"
+                accentColor="#34d399"
+                title={`🎸 BROWSE BY GENRE (${facetsSummary.genres.length})`}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {facetsSummary.genres.map((g) => (
+                  <button
+                    key={g.genre}
+                    type="button"
+                    data-right-tile="true"
+                    data-tile-key={`local_genre:${g.genre}`}
+                    onClick={() => {
+                      pushCurrentNavState();
+                      setLocalGenreFilter(g.genre);
+                      setLocalSubTab('albums');
+                    }}
+                    style={{
+                      padding: '8px 13px',
+                      borderRadius: 10,
+                      background:
+                        localGenreFilter.toLowerCase() === g.genre.toLowerCase()
+                          ? '#0b241c'
+                          : '#0b1015',
+                      border:
+                        localGenreFilter.toLowerCase() === g.genre.toLowerCase()
+                          ? '1px solid #34d399'
+                          : '1px solid #1b2a24',
+                      color: '#d1fae5',
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                  >
+                    <span>{g.genre}</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: '#6ee7b7',
+                        background: 'rgba(16, 185, 129, 0.14)',
+                        padding: '1px 6px',
+                        borderRadius: 99,
+                      }}
+                    >
+                      {g.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Browse by Era / Decade */}
+          {facetsSummary.eras.length > 0 && (
+            <section
+              data-section-anchor="local_eras"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <CollapsibleSectionHeader
+                sectionKey="local:eras"
+                accentColor="#34d399"
+                title={`📅 BROWSE BY DECADE & YEAR`}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {facetsSummary.eras.map((era) => (
+                  <button
+                    key={era.id}
+                    type="button"
+                    data-right-tile="true"
+                    data-tile-key={`local_era:${era.id}`}
+                    onClick={() => {
+                      pushCurrentNavState();
+                      setLocalYearFilter(era.id);
+                      setLocalSubTab('albums');
+                    }}
+                    style={{
+                      padding: '8px 13px',
+                      borderRadius: 10,
+                      background: localYearFilter === era.id ? '#0b241c' : '#0b1015',
+                      border:
+                        localYearFilter === era.id ? '1px solid #34d399' : '1px solid #1b2a24',
+                      color: '#a7f3d0',
+                      fontSize: 11.5,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                  >
+                    <span>{era.label}</span>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: '#6ee7b7',
+                        background: 'rgba(16, 185, 129, 0.14)',
+                        padding: '1px 6px',
+                        borderRadius: 99,
+                      }}
+                    >
+                      {era.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Metadata & Curation Health */}
+          <section
+            data-section-anchor="local_health"
+            style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+          >
+            <CollapsibleSectionHeader
+              sectionKey="local:health"
+              accentColor="#34d399"
+              title="🩺 METADATA & CURATION HEALTH (CLICK TO INSPECT)"
+            />
+            <div style={tileGridStyle}>
+              {[
+                {
+                  key: 'has_art',
+                  title: '🖼️ Artwork Found',
+                  count: facetsSummary.artworkCounts.hasArt,
+                  sub: 'Tracks with embedded or folder art',
+                  accent: '#38bdf8',
+                  onClick: () => {
+                    pushCurrentNavState();
+                    clearRichFilters();
+                    setLocalArtworkFilter('has_art');
+                    setLocalSubTab('albums');
+                  },
+                },
+                {
+                  key: 'missing_art',
+                  title: '⚠️ Missing Artwork',
+                  count: facetsSummary.artworkCounts.missingArt,
+                  sub: 'Tracks lacking cover art',
+                  accent: '#facc15',
+                  onClick: () => {
+                    pushCurrentNavState();
+                    clearRichFilters();
+                    setLocalArtworkFilter('missing_art');
+                    setLocalSubTab('albums');
+                  },
+                },
+                {
+                  key: 'synced_lrc',
+                  title: '🎤 Synced Lyrics (LRC)',
+                  count: facetsSummary.lyricsCounts.synced,
+                  sub: 'Karaoke-ready timed lyrics',
+                  accent: '#34d399',
+                  onClick: () => {
+                    pushCurrentNavState();
+                    clearRichFilters();
+                    setLocalLyricsFilter('synced');
+                    setLocalSubTab('albums');
+                  },
+                },
+                {
+                  key: 'missing_lyrics',
+                  title: '📝 Missing Lyrics',
+                  count: facetsSummary.lyricsCounts.missing,
+                  sub: 'Tracks without indexed lyrics yet',
+                  accent: '#94a3b8',
+                  onClick: () => {
+                    pushCurrentNavState();
+                    clearRichFilters();
+                    setLocalLyricsFilter('missing_lyrics');
+                    setLocalSubTab('albums');
+                  },
+                },
+              ].map((card) => (
+                <button
+                  key={card.key}
+                  type="button"
+                  data-right-tile="true"
+                  data-tile-key={`local_health:${card.key}`}
+                  onClick={card.onClick}
+                  style={{
+                    borderRadius: 12,
+                    background: '#0b1016',
+                    border: '1px solid #1e293b',
+                    padding: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 4,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 800, color: card.accent }}>
+                    {card.title}
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 900, fontFamily: 'monospace', color: '#f8fafc' }}>
+                    {card.count}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: '#94a3b8' }}>{card.sub}</div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Recently Added Local Releases */}
+          {localDiscover.recent_albums.length > 0 && mediaTypeFilter !== 'video' && (
+            <section
+              data-section-anchor="local_recent_releases"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <PinnableSectionHeader
+                title={`🆕 RECENTLY ADDED LOCAL RELEASES (${localDiscover.recent_albums.length})`}
+                accentColor="#34d399"
+                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[2]}
+                liveItems={localDiscover.recent_albums}
+              />
+              <div style={tileGridStyle}>
+                {localDiscover.recent_albums.map(renderSimpAlbumCard)}
+              </div>
+            </section>
+          )}
+
+          {/* Rediscover Local Gems */}
+          {localDiscover.rediscover_albums.length > 0 && mediaTypeFilter !== 'video' && (
+            <section
+              data-section-anchor="local_rediscover"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <PinnableSectionHeader
+                title={`✨ REDISCOVER LOCAL GEMS (${localDiscover.rediscover_albums.length})`}
+                accentColor="#34d399"
+                descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[1]}
+                liveItems={localDiscover.rediscover_albums}
+              />
+              <div style={tileGridStyle}>
+                {localDiscover.rediscover_albums.map(renderSimpAlbumCard)}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ===================================================================
+          TAB 2: 🎤 ARTISTS
+         =================================================================== */}
+      {effectiveSubTab === 'artists' && (
+        <section
+          data-section-anchor="local_artists_grid"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+        >
+          {filteredArtistsList.length > 0 ? (
+            <div style={tileGridStyle}>
+              {filteredArtistsList.map((a) =>
+                renderLocalArtistCard(
+                  a.name,
+                  a.artUrl,
+                  `${a.albumCount} albums • ${a.trackCount} tracks`
+                )
+              )}
+            </div>
+          ) : (
+            <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
+              No local artists match the active filters.
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ===================================================================
+          TAB 3: 💿 ALBUMS (Full Local Collection + Matching Tracks Drawer)
+         =================================================================== */}
+      {effectiveSubTab === 'albums' && (
+        <>
+          <section
+            data-section-anchor="local_albums_grid"
+            style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+          >
+            {filteredAlbumsList.length > 0 ? (
+              <div style={tileGridStyle}>{filteredAlbumsList.map(renderSimpAlbumCard)}</div>
+            ) : (
+              <div style={{ padding: 20, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
+                No local albums match the current filters.
+              </div>
+            )}
+          </section>
+
+          {hasRichFilter && filteredTracksList.length > 0 && (
+            <section
+              data-section-anchor="local_matching_tracks"
+              style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+            >
+              <CollapsibleSectionHeader
+                sectionKey="local:matching_tracks"
+                accentColor="#34d399"
+                title={`🎵 MATCHING LOCAL TRACKS (${filteredTracksList.length})`}
+              />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {filteredTracksList.slice(0, 150).map((t) =>
+                  renderSingleSongRow(t, filteredTracksList, 'local_albums_matching')
+                )}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* ===================================================================
+          TAB 4: 📂 MOUNTS & INTERACTIVE SUBFOLDER DRILL-DOWN
+         =================================================================== */}
+      {effectiveSubTab === 'folders' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+          {/* Mount Selector Strip */}
+          {mountsList.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-right-filter-pill="true"
+                onClick={() => {
+                  pushCurrentNavState();
+                  setActiveMountRoot(null);
+                  setLocalFolderPath('');
+                }}
+                style={{
+                  padding: '5px 10px',
+                  borderRadius: 7,
+                  background: !effectiveMount ? '#0b241c' : '#0b0e12',
+                  border: !effectiveMount ? '1px solid #34d399' : '1px solid #1b2a24',
+                  color: !effectiveMount ? '#6ee7b7' : '#9ca3af',
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                All Mounts ({mountsList.length})
+              </button>
+              {mountsList.map((m) => {
+                const isActive = effectiveMount?.mount_root === m.mount_root;
+                return (
+                  <button
+                    key={m.mount_root}
+                    type="button"
+                    data-right-filter-pill="true"
+                    onClick={() => {
+                      pushCurrentNavState();
+                      setActiveMountRoot(m.mount_root);
+                      setLocalFolderPath('');
+                    }}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: 7,
+                      background: isActive ? '#0b241c' : '#0b0e12',
+                      border: isActive ? '1px solid #34d399' : '1px solid #1b2a24',
+                      color: isActive ? '#6ee7b7' : '#9ca3af',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    💾 {m.label} ({m.track_count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {!effectiveMount ? (
+            mountsList.length > 0 ? (
+              <div style={tileGridStyle}>
+                {mountsList.map((m) => (
+                  <button
+                    key={m.mount_root}
+                    type="button"
+                    data-right-tile="true"
+                    data-tile-key={`local_mount:${m.mount_root}`}
+                    onClick={() => {
+                      pushCurrentNavState();
+                      setActiveMountRoot(m.mount_root);
+                      setLocalFolderPath('');
+                    }}
+                    style={{
+                      borderRadius: 12,
+                      background: '#081712',
+                      border: '1px solid #143328',
+                      padding: 14,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 5,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ fontSize: 13.5, fontWeight: 800, color: '#6ee7b7' }}>
+                      💾 {m.label}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: '#94a3b8',
+                        wordBreak: 'break-all',
+                      }}
+                    >
+                      {m.mount_root}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#a7f3d0', marginTop: 2 }}>
+                      {m.track_count} tracks{!m.is_online ? ' • Offline' : ''}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
+                No local storage folders configured. Add a music folder in Settings!
+              </div>
+            )
+          ) : (
+            <>
+              {/* Interactive Breadcrumb + Folder Actions */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 8,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#081510',
+                  border: '1px solid #143328',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {folderDrillData.breadcrumbs.length > 0 && (
+                    <button
+                      type="button"
+                      data-right-filter-pill="true"
+                      onClick={() => {
+                        pushCurrentNavState();
+                        const nextSegs = folderDrillData.breadcrumbs.slice(0, -1);
+                        setLocalFolderPath(nextSegs.join('/'));
+                      }}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        background: '#112a20',
+                        border: '1px solid #235743',
+                        color: '#6ee7b7',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↑ Up
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    data-right-filter-pill="true"
+                    onClick={() => {
+                      pushCurrentNavState();
+                      setLocalFolderPath('');
+                    }}
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      background: folderDrillData.breadcrumbs.length === 0 ? '#0b241c' : '#0d1117',
+                      border:
+                        folderDrillData.breadcrumbs.length === 0
+                          ? '1px solid #34d399'
+                          : '1px solid #1e293b',
+                      color: '#6ee7b7',
+                      fontSize: 11,
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    💾 {effectiveMount.label}
+                  </button>
+                  {folderDrillData.breadcrumbs.map((seg, idx) => {
+                    const targetPath = folderDrillData.breadcrumbs.slice(0, idx + 1).join('/');
+                    const isLast = idx === folderDrillData.breadcrumbs.length - 1;
+                    return (
+                      <React.Fragment key={targetPath}>
+                        <span style={{ color: '#475569', fontFamily: 'monospace' }}>/</span>
+                        <button
+                          type="button"
+                          data-right-filter-pill="true"
+                          onClick={() => {
+                            pushCurrentNavState();
+                            setLocalFolderPath(targetPath);
+                          }}
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            background: isLast ? '#0b241c' : '#0d1117',
+                            border: isLast ? '1px solid #34d399' : '1px solid #1e293b',
+                            color: isLast ? '#a7f3d0' : '#cbd5e1',
+                            fontSize: 11,
+                            fontWeight: isLast ? 800 : 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          📂 {seg}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+                </div>
+
+                {folderDrillData.subtreeTracks.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      data-right-tile="true"
+                      onClick={() => {
+                        const audioOnly = folderDrillData.subtreeTracks.filter(
+                          (t) => !isUiVideoTrack(t)
+                        );
+                        const playable =
+                          audioOnly.length > 0 ? audioOnly : folderDrillData.subtreeTracks;
+                        setPlayingContextId(
+                          `mount:${effectiveMount.mount_root}:${folderDrillData.curPrefix || '/'}`
+                        );
+                        defaultSimpClient.loadQueue(
+                          playable.map((t) => t.uri),
+                          0,
+                          playable
+                        );
+                        setView('lock');
+                      }}
+                      style={{
+                        minHeight: 32,
+                        padding: '0 10px',
+                        borderRadius: 8,
+                        background: '#0b241c',
+                        border: '1px solid #34d399',
+                        color: '#6ee7b7',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ▶ Play Folder ({folderDrillData.subtreeTracks.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const audioOnly = folderDrillData.subtreeTracks.filter(
+                          (t) => !isUiVideoTrack(t)
+                        );
+                        const targets =
+                          audioOnly.length > 0 ? audioOnly : folderDrillData.subtreeTracks;
+                        handleAddTracksToPlaylist(
+                          targets.map((t) => t.uri),
+                          `${targets.length} tracks from ${
+                            folderDrillData.curPrefix || effectiveMount.label
+                          }`,
+                          targets
+                        );
+                      }}
+                      style={{
+                        minHeight: 32,
+                        padding: '0 10px',
+                        borderRadius: 8,
+                        background: '#12141e',
+                        border: '1px solid #2a2a38',
+                        color: '#67e8f9',
+                        fontSize: 11,
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      + All to ★
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Subfolder Cards */}
+              {folderDrillData.subfolders.length > 0 && (
+                <section
+                  data-section-anchor="local_subfolders"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                >
+                  <CollapsibleSectionHeader
+                    sectionKey="local:subfolders"
+                    accentColor="#34d399"
+                    title={`📂 SUBFOLDERS (${folderDrillData.subfolders.length})`}
+                  />
+                  <div style={tileGridStyle}>
+                    {folderDrillData.subfolders.map((sub) => (
+                      <button
+                        key={sub.fullRelPath}
+                        type="button"
+                        data-right-tile="true"
+                        data-tile-key={`local_folder:${effectiveMount.mount_root}:${sub.fullRelPath}`}
+                        onClick={() => {
+                          pushCurrentNavState();
+                          setLocalFolderPath(sub.fullRelPath);
+                        }}
+                        style={{
+                          borderRadius: 12,
+                          background: 'linear-gradient(155deg, #0b1c17 0%, #090c12 100%)',
+                          border: '1px solid #16382c',
+                          padding: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          minWidth: 0,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                          {sub.artUrls[0] ? (
+                            <img
+                              src={sub.artUrls[0]}
+                              alt=""
+                              loading="lazy"
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 8,
+                                objectFit: 'cover',
+                                border: '1px solid #265947',
+                                flexShrink: 0,
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 8,
+                                background: '#0e2820',
+                                border: '1px solid #265947',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              <ImpIcon name="folder" size={18} color="#6ee7b7" />
+                            </div>
+                          )}
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div
+                              style={{
+                                fontSize: 12.5,
+                                fontWeight: 800,
+                                color: '#d1fae5',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              📂 {sub.name}
+                            </div>
+                            <div style={{ fontSize: 10.5, color: '#6ee7b7', marginTop: 2 }}>
+                              {sub.albumCount > 0 ? `${sub.albumCount} albums • ` : ''}
+                              {sub.trackCount} tracks
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Albums directly inside this folder */}
+              {folderDrillData.albumsHere.length > 0 && (
+                <section
+                  data-section-anchor="local_folder_albums"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                >
+                  <CollapsibleSectionHeader
+                    sectionKey="local:folder_albums"
+                    accentColor="#34d399"
+                    title={`💿 ALBUMS IN THIS FOLDER (${folderDrillData.albumsHere.length})`}
+                  />
+                  <div style={tileGridStyle}>
+                    {folderDrillData.albumsHere.map(renderSimpAlbumCard)}
+                  </div>
+                </section>
+              )}
+
+              {/* Tracks directly inside this folder */}
+              {folderDrillData.directTracks.length > 0 && (
+                <section
+                  data-section-anchor="local_folder_tracks"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+                >
+                  <CollapsibleSectionHeader
+                    sectionKey="local:folder_tracks"
+                    accentColor="#34d399"
+                    title={`🎵 TRACKS IN THIS FOLDER (${folderDrillData.directTracks.length})`}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {folderDrillData.directTracks.map((t) =>
+                      renderSingleSongRow(
+                        t,
+                        folderDrillData.directTracks,
+                        `folder:${folderDrillData.curPrefix || 'root'}`
+                      )
+                    )}
+                  </div>
+                </section>
+              )}
+
+              {folderDrillData.subfolders.length === 0 &&
+                folderDrillData.albumsHere.length === 0 &&
+                folderDrillData.directTracks.length === 0 && (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
+                    No matching files indexed in this folder.
+                  </div>
+                )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================
+          TAB 5: 🎬 LOCAL VIDEOS
+         =================================================================== */}
+      {effectiveSubTab === 'videos' && (
+        <section
+          data-section-anchor="local_videos_list"
+          style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
+        >
+          {localVideos.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {localVideos.map((v) => renderSingleSongRow(v, localVideos, 'local_video_hub'))}
+            </div>
+          ) : (
+            <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
+              No local video files indexed yet.
+            </div>
+          )}
+        </section>
+      )}
+    </div>
+  );
+};

@@ -23,7 +23,7 @@ pub enum RepeatMode {
     Track,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TrackMetadata {
     pub uri: String,
     pub title: String,
@@ -38,9 +38,15 @@ pub struct TrackMetadata {
     pub mount_root: Option<String>,
     #[serde(default)]
     pub content_rating: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub release_year: Option<i32>,
+    #[serde(default)]
+    pub parent_folder: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AlbumRecord {
     pub id: String,
     pub title: String,
@@ -51,6 +57,10 @@ pub struct AlbumRecord {
     pub track_count: usize,
     #[serde(default)]
     pub content_rating: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default)]
+    pub parent_folder: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
