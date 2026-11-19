@@ -54,7 +54,7 @@ pub fn show_simp_macos_window() {
         }
         win_ptr.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::prefer_efficiency_cores_for_macos_process();
+        simp_core::restore_foreground_priority_for_macos_process();
     });
 }
 
@@ -86,7 +86,7 @@ pub unsafe fn toggle_simp_macos_window() {
         }
         win.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::prefer_efficiency_cores_for_macos_process();
+        simp_core::restore_foreground_priority_for_macos_process();
     }
 }
 
@@ -538,13 +538,13 @@ pub fn ensure_inprocess_or_existing_daemon() {
 pub fn run_macos_native_app(ui_url: &str) {
     ensure_inprocess_or_existing_daemon();
     simp_core::mpris::set_native_window_raiser(show_simp_macos_window);
-    simp_core::prefer_efficiency_cores_for_macos_process();
+    simp_core::restore_foreground_priority_for_macos_process();
 
     unsafe {
         let _pool = NSAutoreleasePool::new(nil);
         let app = NSApp();
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
-        simp_core::prefer_efficiency_cores_for_macos_process();
+        simp_core::restore_foreground_priority_for_macos_process();
 
         let delegate_cls = register_delegate_class();
         let delegate: id = msg_send![delegate_cls, new];
@@ -625,7 +625,7 @@ pub fn run_macos_native_app(ui_url: &str) {
 
         window.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::prefer_efficiency_cores_for_macos_process();
+        simp_core::restore_foreground_priority_for_macos_process();
         app.run();
     }
 }

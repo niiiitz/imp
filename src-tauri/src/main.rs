@@ -6,6 +6,10 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() {
+    // On Windows, apply process-level Efficiency Mode (EcoQoS) at startup so WebView2 child
+    // processes inherit it as well; on macOS, only `--daemon` or tray-hidden background state
+    // uses `PRIO_DARWIN_BG` so interactive `WKWebView` visualizations stay at full frame rate.
+    #[cfg(target_os = "windows")]
     simp_core::prefer_efficiency_cores_for_macos_process();
     let args: Vec<String> = std::env::args().collect();
 

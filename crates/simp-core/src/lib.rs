@@ -531,17 +531,17 @@ pub fn prefer_efficiency_core_for_current_thread() {
 
     #[cfg(target_os = "macos")]
     unsafe {
-        // `QOS_CLASS_BACKGROUND` (0x09) + `PRIO_DARWIN_BG` strictly steer the thread onto Apple Silicon
-        // Efficiency Cores (`TH_BUCKET_SHARE_BG`), while keeping thread disk I/O at `IOPOL_IMPORTANT`.
-        const QOS_CLASS_BACKGROUND: u32 = 0x09;
+        // `QOS_CLASS_UTILITY` (0x11) steers worker threads onto Apple Silicon Efficiency Cores
+        // without attaching a `PRIO_DARWIN_BG` Mach voucher that would throttle sibling WebKit
+        // or Metal presentation threads.
+        const QOS_CLASS_UTILITY: u32 = 0x11;
         extern "C" {
             fn pthread_set_qos_class_self_np(
                 qos_class: u32,
                 relative_priority: libc::c_int,
             ) -> libc::c_int;
         }
-        let _ = pthread_set_qos_class_self_np(QOS_CLASS_BACKGROUND, 0);
-        macos_qos::set_bg_with_important_io(macos_qos::PRIO_DARWIN_THREAD, &[macos_qos::IOPOL_SCOPE_THREAD]);
+        let _ = pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);
     }
 
     #[cfg(target_os = "linux")]
@@ -615,6 +615,15 @@ pub fn prefer_efficiency_cores_for_macos_process() {
     }
 }
 
+/// Restores normal foreground process priority on macOS when the native window is active so
+/// `WKWebView` / Metal / `CVDisplayLink` rendering is never throttled by `PRIO_DARWIN_BG`.
+pub fn restore_foreground_priority_for_macos_process() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        let _ = libc::setpriority(macos_qos::PRIO_DARWIN_PROCESS, 0, 0);
+    }
+}
+
 /// Explicitly enables Windows 11 Efficiency Mode (`EcoQoS` + `IDLE_PRIORITY_CLASS`) on a newly
 /// spawned child process (`simp.exe --daemon`, browser UI window, or Widevine worker). No-op elsewhere.
 pub fn apply_windows_efficiency_mode_to_child(child: &std::process::Child) {
@@ -633,12 +642,10 @@ pub fn apply_windows_efficiency_mode_to_child(child: &std::process::Child) {
 
 #[cfg(target_os = "macos")]
 mod macos_qos {
-    pub const PRIO_DARWIN_THREAD: libc::c_int = 3;
     pub const PRIO_DARWIN_PROCESS: libc::c_int = 4;
     pub const PRIO_DARWIN_BG: libc::c_int = 0x1000;
     pub const IOPOL_TYPE_DISK: libc::c_int = 0;
     pub const IOPOL_SCOPE_PROCESS: libc::c_int = 0;
-    pub const IOPOL_SCOPE_THREAD: libc::c_int = 1;
     pub const IOPOL_SCOPE_DARWIN_BG: libc::c_int = 2;
     pub const IOPOL_IMPORTANT: libc::c_int = 1;
 
