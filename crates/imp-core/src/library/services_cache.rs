@@ -63,6 +63,55 @@ pub struct LiberationTrackRecord {
     pub blake3_hash: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: i64,
+    #[serde(default)]
+    pub local_path: Option<String>,
+    #[serde(default)]
+    pub downloaded_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiberationDownloadDbSummary {
+    pub verified_ok: usize,
+    pub corrupt_failed: usize,
+    pub skipped_drm: usize,
+    pub unavailable: usize,
+    pub remaining_uploaded: usize,
+    pub total_downloaded_bytes: u64,
+    pub estimated_remaining_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LocalAuditRecord {
+    pub file_path: String,
+    pub root_dir: String,
+    pub file_size_bytes: u64,
+    pub container_format: String,
+    pub status: String,
+    pub decoded_duration_ms: u64,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub peak_db: Option<f32>,
+    pub decode_errors: u64,
+    pub blake3_hash: Option<String>,
+    pub tag_artist: String,
+    pub tag_album: String,
+    pub tag_title: String,
+    pub tag_track_number: Option<u32>,
+    pub has_artwork: bool,
+    pub reason: Option<String>,
+    pub audited_at: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalAuditSummary {
+    pub total_files: usize,
+    pub verified_ok: usize,
+    pub corrupt_decode: usize,
+    pub truncated_duration: usize,
+    pub silent_audio: usize,
+    pub drm_protected_m4p: usize,
+    pub unreadable: usize,
+    pub total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -190,8 +239,40 @@ impl ServicesCacheDatabase {
                 ON liberation_tracks(probe_status);
             CREATE INDEX IF NOT EXISTS idx_liberation_tracks_album
                 ON liberation_tracks(artist, album);
+
+            CREATE TABLE IF NOT EXISTS liberation_local_audit (
+                file_path             TEXT PRIMARY KEY,
+                root_dir              TEXT NOT NULL,
+                file_size_bytes       INTEGER NOT NULL DEFAULT 0,
+                container_format      TEXT NOT NULL DEFAULT '',
+                status                TEXT NOT NULL,
+                decoded_duration_ms   INTEGER NOT NULL DEFAULT 0,
+                sample_rate           INTEGER NOT NULL DEFAULT 0,
+                channels              INTEGER NOT NULL DEFAULT 0,
+                peak_db               REAL,
+                decode_errors         INTEGER NOT NULL DEFAULT 0,
+                blake3_hash           TEXT,
+                tag_artist            TEXT NOT NULL DEFAULT '',
+                tag_album             TEXT NOT NULL DEFAULT '',
+                tag_title             TEXT NOT NULL DEFAULT '',
+                tag_track_number      INTEGER,
+                has_artwork           INTEGER NOT NULL DEFAULT 0,
+                reason                TEXT,
+                audited_at            INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_liberation_local_audit_status
+                ON liberation_local_audit(status);
+            CREATE INDEX IF NOT EXISTS idx_liberation_local_audit_root
+                ON liberation_local_audit(root_dir);
             ",
         )?;
+        for ddl in [
+            "ALTER TABLE liberation_tracks ADD COLUMN local_path TEXT;",
+            "ALTER TABLE liberation_tracks ADD COLUMN downloaded_bytes INTEGER;",
+        ] {
+            let _ = conn.execute(ddl, []);
+        }
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
@@ -726,7 +807,7 @@ impl ServicesCacheDatabase {
                     library_album_id, track_number, disc_number, album_track_count, duration_ms, year, genre,
                     artwork_url, cloud_origin_hint, ownership_class, asset_flavor, asset_url_kind,
                     observed_flavors_json, content_length_bytes, probe_status, verification_status, blake3_hash,
-                    last_error, updated_at
+                    last_error, updated_at, local_path, downloaded_bytes
              FROM liberation_tracks
              WHERE (?1 IS NULL OR ownership_class = ?1)
                AND (?2 IS NULL OR (
@@ -760,7 +841,7 @@ impl ServicesCacheDatabase {
                     library_album_id, track_number, disc_number, album_track_count, duration_ms, year, genre,
                     artwork_url, cloud_origin_hint, ownership_class, asset_flavor, asset_url_kind,
                     observed_flavors_json, content_length_bytes, probe_status, verification_status, blake3_hash,
-                    last_error, updated_at
+                    last_error, updated_at, local_path, downloaded_bytes
              FROM liberation_tracks
              ORDER BY artist ASC, album ASC, COALESCE(disc_number, 1) ASC, COALESCE(track_number, 0) ASC, title ASC",
         )?;
@@ -774,6 +855,329 @@ impl ServicesCacheDatabase {
         Ok(deleted)
     }
 
+    fn download_scope_where(scope: &str) -> &'static str {
+        if scope.trim() == "reclaimable_only" {
+            "ownership_class IN ('reclaimable_direct', 'reclaimable_clear_hls')
+             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable')"
+        } else {
+            "(cloud_origin_hint = 'uploaded' OR ownership_class IN ('reclaimable_direct', 'reclaimable_clear_hls'))
+             AND ownership_class NOT IN ('subscription_drm_excluded', 'unavailable')
+             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable')"
+        }
+    }
+
+    pub fn list_download_candidates(
+        &self,
+        scope: &str,
+        limit: usize,
+    ) -> Result<Vec<LiberationTrackRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let where_sql = Self::download_scope_where(scope);
+        let sql = format!(
+            "SELECT library_song_id, catalog_id, purchased_id, isrc, title, artist, album_artist, album,
+                    library_album_id, track_number, disc_number, album_track_count, duration_ms, year, genre,
+                    artwork_url, cloud_origin_hint, ownership_class, asset_flavor, asset_url_kind,
+                    observed_flavors_json, content_length_bytes, probe_status, verification_status, blake3_hash,
+                    last_error, updated_at, local_path, downloaded_bytes
+             FROM liberation_tracks
+             WHERE {where_sql}
+             ORDER BY artist ASC, album ASC, COALESCE(disc_number, 1) ASC, COALESCE(track_number, 0) ASC, library_song_id ASC
+             LIMIT ?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![limit.max(1) as i64], Self::map_liberation_track_row)?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    pub fn get_download_scope_estimate(&self, scope: &str) -> Result<(usize, u64)> {
+        let conn = self.conn.lock().unwrap();
+        let where_sql = Self::download_scope_where(scope);
+        let sql = format!(
+            "SELECT COUNT(*), COALESCE(SUM(COALESCE(content_length_bytes, CAST(duration_ms AS INTEGER) * 32)), 0)
+             FROM liberation_tracks
+             WHERE {where_sql}"
+        );
+        let (cnt, bytes): (i64, i64) = conn.query_row(&sql, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok((cnt.max(0) as usize, bytes.max(0) as u64))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_liberation_download_result(
+        &self,
+        library_song_id: &str,
+        verification_status: &str,
+        ownership_class_opt: Option<&str>,
+        local_path: Option<&str>,
+        downloaded_bytes: Option<u64>,
+        blake3_hash: Option<&str>,
+        asset_flavor: Option<&str>,
+        asset_url_kind: Option<&str>,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = current_unix_sec();
+        conn.execute(
+            "UPDATE liberation_tracks
+             SET verification_status = ?2,
+                 ownership_class = COALESCE(?3, ownership_class),
+                 local_path = COALESCE(?4, local_path),
+                 downloaded_bytes = COALESCE(?5, downloaded_bytes),
+                 content_length_bytes = COALESCE(?5, content_length_bytes),
+                 blake3_hash = COALESCE(?6, blake3_hash),
+                 asset_flavor = COALESCE(?7, asset_flavor),
+                 asset_url_kind = COALESCE(?8, asset_url_kind),
+                 probe_status = CASE WHEN ?3 IS NOT NULL THEN 'probed' ELSE probe_status END,
+                 last_error = ?9,
+                 updated_at = ?10
+             WHERE library_song_id = ?1",
+            params![
+                library_song_id,
+                verification_status,
+                ownership_class_opt,
+                local_path,
+                downloaded_bytes.map(|v| v as i64),
+                blake3_hash,
+                asset_flavor,
+                asset_url_kind,
+                last_error,
+                now,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn reset_failed_liberation_downloads(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE liberation_tracks
+             SET verification_status = 'not_downloaded',
+                 last_error = NULL
+             WHERE verification_status IN ('corrupt_failed', 'downloading')",
+            [],
+        )?;
+        Ok(updated)
+    }
+
+    pub fn get_liberation_download_summary(&self) -> Result<LiberationDownloadDbSummary> {
+        let conn = self.conn.lock().unwrap();
+        let mut summary = LiberationDownloadDbSummary::default();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT verification_status, COUNT(*) FROM liberation_tracks GROUP BY verification_status",
+            )?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            for row in rows.flatten() {
+                let c = row.1.max(0) as usize;
+                match row.0.as_str() {
+                    "verified_ok" => summary.verified_ok += c,
+                    "corrupt_failed" => summary.corrupt_failed += c,
+                    "skipped_drm" => summary.skipped_drm += c,
+                    "unavailable" => summary.unavailable += c,
+                    _ => {}
+                }
+            }
+        }
+        let dl_bytes: i64 = conn
+            .query_row(
+                "SELECT COALESCE(SUM(COALESCE(downloaded_bytes, content_length_bytes, 0)), 0)
+                 FROM liberation_tracks
+                 WHERE verification_status = 'verified_ok'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        summary.total_downloaded_bytes = dl_bytes.max(0) as u64;
+        drop(conn);
+
+        if let Ok((rem_cnt, rem_bytes)) = self.get_download_scope_estimate("uploaded_and_reclaimable")
+        {
+            summary.remaining_uploaded = rem_cnt;
+            summary.estimated_remaining_bytes = rem_bytes;
+        }
+        Ok(summary)
+    }
+
+    pub fn clear_local_audit_for_root(&self, root_dir: &str) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM liberation_local_audit WHERE root_dir = ?1",
+            params![root_dir],
+        )?;
+        Ok(deleted)
+    }
+
+    pub fn upsert_local_audit_record(&self, rec: &LocalAuditRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO liberation_local_audit (
+                file_path, root_dir, file_size_bytes, container_format, status,
+                decoded_duration_ms, sample_rate, channels, peak_db, decode_errors,
+                blake3_hash, tag_artist, tag_album, tag_title, tag_track_number,
+                has_artwork, reason, audited_at
+             ) VALUES (
+                ?1, ?2, ?3, ?4, ?5,
+                ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15,
+                ?16, ?17, ?18
+             )
+             ON CONFLICT(file_path) DO UPDATE SET
+                root_dir = excluded.root_dir,
+                file_size_bytes = excluded.file_size_bytes,
+                container_format = excluded.container_format,
+                status = excluded.status,
+                decoded_duration_ms = excluded.decoded_duration_ms,
+                sample_rate = excluded.sample_rate,
+                channels = excluded.channels,
+                peak_db = excluded.peak_db,
+                decode_errors = excluded.decode_errors,
+                blake3_hash = excluded.blake3_hash,
+                tag_artist = excluded.tag_artist,
+                tag_album = excluded.tag_album,
+                tag_title = excluded.tag_title,
+                tag_track_number = excluded.tag_track_number,
+                has_artwork = excluded.has_artwork,
+                reason = excluded.reason,
+                audited_at = excluded.audited_at",
+            params![
+                rec.file_path,
+                rec.root_dir,
+                rec.file_size_bytes as i64,
+                rec.container_format,
+                rec.status,
+                rec.decoded_duration_ms as i64,
+                rec.sample_rate as i64,
+                rec.channels as i64,
+                rec.peak_db.map(|v| v as f64),
+                rec.decode_errors as i64,
+                rec.blake3_hash,
+                rec.tag_artist,
+                rec.tag_album,
+                rec.tag_title,
+                rec.tag_track_number.map(|v| v as i64),
+                if rec.has_artwork { 1i64 } else { 0i64 },
+                rec.reason,
+                rec.audited_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_local_audit_summary(&self, root_dir: Option<&str>) -> Result<LocalAuditSummary> {
+        let conn = self.conn.lock().unwrap();
+        let root_opt = root_dir.map(str::trim).filter(|s| !s.is_empty());
+        let mut summary = LocalAuditSummary::default();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT status, COUNT(*), COALESCE(SUM(file_size_bytes), 0)
+                 FROM liberation_local_audit
+                 WHERE (?1 IS NULL OR root_dir = ?1)
+                 GROUP BY status",
+            )?;
+            let rows = stmt.query_map(params![root_opt], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+            })?;
+            for row in rows.flatten() {
+                let c = row.1.max(0) as usize;
+                summary.total_files += c;
+                summary.total_bytes = summary.total_bytes.saturating_add(row.2.max(0) as u64);
+                match row.0.as_str() {
+                    "verified_ok" => summary.verified_ok += c,
+                    "corrupt_decode" => summary.corrupt_decode += c,
+                    "truncated_duration" => summary.truncated_duration += c,
+                    "silent_audio" => summary.silent_audio += c,
+                    "drm_protected_m4p" => summary.drm_protected_m4p += c,
+                    _ => summary.unreadable += c,
+                }
+            }
+        }
+        Ok(summary)
+    }
+
+    pub fn query_local_audit_records(
+        &self,
+        root_dir: Option<&str>,
+        status_filter: Option<&str>,
+        search: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<LocalAuditRecord>, usize)> {
+        let conn = self.conn.lock().unwrap();
+        let root_opt = root_dir.map(str::trim).filter(|s| !s.is_empty());
+        let status_opt = status_filter
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "all")
+            .map(str::to_ascii_lowercase);
+        let search_like = search
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| format!("%{}%", s.to_ascii_lowercase()));
+
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM liberation_local_audit
+             WHERE (?1 IS NULL OR root_dir = ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR lower(file_path) LIKE ?3 OR lower(tag_artist) LIKE ?3 OR lower(tag_album) LIKE ?3 OR lower(tag_title) LIKE ?3)",
+            params![root_opt, status_opt, search_like],
+            |r| r.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT file_path, root_dir, file_size_bytes, container_format, status,
+                    decoded_duration_ms, sample_rate, channels, peak_db, decode_errors,
+                    blake3_hash, tag_artist, tag_album, tag_title, tag_track_number,
+                    has_artwork, reason, audited_at
+             FROM liberation_local_audit
+             WHERE (?1 IS NULL OR root_dir = ?1)
+               AND (?2 IS NULL OR status = ?2)
+               AND (?3 IS NULL OR lower(file_path) LIKE ?3 OR lower(tag_artist) LIKE ?3 OR lower(tag_album) LIKE ?3 OR lower(tag_title) LIKE ?3)
+             ORDER BY
+               CASE WHEN status != 'verified_ok' THEN 0 ELSE 1 END ASC,
+               file_path ASC
+             LIMIT ?4 OFFSET ?5",
+        )?;
+
+        let rows = stmt.query_map(
+            params![
+                root_opt,
+                status_opt,
+                search_like,
+                limit.clamp(1, 500) as i64,
+                offset as i64
+            ],
+            |row| {
+                let sz: i64 = row.get(2)?;
+                let dur: i64 = row.get(5)?;
+                let sr: i64 = row.get(6)?;
+                let ch: i64 = row.get(7)?;
+                let peak: Option<f64> = row.get(8)?;
+                let dec_err: i64 = row.get(9)?;
+                let tn: Option<i64> = row.get(14)?;
+                let art: i64 = row.get(15)?;
+                Ok(LocalAuditRecord {
+                    file_path: row.get(0)?,
+                    root_dir: row.get(1)?,
+                    file_size_bytes: sz.max(0) as u64,
+                    container_format: row.get(3)?,
+                    status: row.get(4)?,
+                    decoded_duration_ms: dur.max(0) as u64,
+                    sample_rate: sr.max(0) as u32,
+                    channels: ch.max(0) as u16,
+                    peak_db: peak.map(|v| v as f32),
+                    decode_errors: dec_err.max(0) as u64,
+                    blake3_hash: row.get(10)?,
+                    tag_artist: row.get(11)?,
+                    tag_album: row.get(12)?,
+                    tag_title: row.get(13)?,
+                    tag_track_number: tn.and_then(|v| if v > 0 { Some(v as u32) } else { None }),
+                    has_artwork: art != 0,
+                    reason: row.get(16)?,
+                    audited_at: row.get(17)?,
+                })
+            },
+        )?;
+        Ok((rows.filter_map(Result::ok).collect(), total.max(0) as usize))
+    }
+
     fn map_liberation_track_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<LiberationTrackRecord> {
         let tn: Option<i64> = row.get(9)?;
         let dn: Option<i64> = row.get(10)?;
@@ -781,6 +1185,7 @@ impl ServicesCacheDatabase {
         let dur: i64 = row.get(12)?;
         let yr: Option<i64> = row.get(13)?;
         let clb: Option<i64> = row.get(21)?;
+        let dlb: Option<i64> = row.get(28)?;
         Ok(LiberationTrackRecord {
             library_song_id: row.get(0)?,
             catalog_id: row.get(1)?,
@@ -809,6 +1214,8 @@ impl ServicesCacheDatabase {
             blake3_hash: row.get(24)?,
             last_error: row.get(25)?,
             updated_at: row.get(26)?,
+            local_path: row.get(27)?,
+            downloaded_bytes: dlb.and_then(|v| if v >= 0 { Some(v as u64) } else { None }),
         })
     }
 }
@@ -948,6 +1355,8 @@ mod tests {
             blake3_hash: None,
             last_error: None,
             updated_at: 1_000,
+            local_path: None,
+            downloaded_bytes: None,
         }
     }
 

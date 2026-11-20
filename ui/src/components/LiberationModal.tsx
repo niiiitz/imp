@@ -1,6 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { resolveDaemonUrl } from '../api/servicesCacheApi';
+import { FolderChooserModal } from './FolderChooserModal';
 import { ImpIcon } from './icons/ImpIcon';
+import { LiberationAuditTab } from './liberation/LiberationAuditTab';
+import { LiberationDownloadTab } from './liberation/LiberationDownloadTab';
+import { LiberationReunionTab } from './liberation/LiberationReunionTab';
+import {
+  formatBytesHuman,
+  formatDurationMs,
+  liberationChipStyle as chipStyle,
+  liberationFilterPillStyle as filterPillStyle,
+  liberationTabBtnStyle as tabBtnStyle,
+} from './liberation/liberationUiHelpers';
 
 interface LiberationRuntimeStatus {
   phase: string;
@@ -125,22 +136,6 @@ type OriginFilter = 'all' | 'purchased' | 'matched' | 'uploaded' | 'subscription
 
 const PAGE_LIMIT = 50;
 
-function formatBytesHuman(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
-  const gb = bytes / (1024 * 1024 * 1024);
-  if (gb >= 1) return `${gb.toFixed(2)} GB`;
-  const mb = bytes / (1024 * 1024);
-  return `${mb.toFixed(1)} MB`;
-}
-
-function formatDurationMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return '--:--';
-  const totalSec = Math.round(ms / 1000);
-  const mins = Math.floor(totalSec / 60);
-  const secs = totalSec % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
 function ownershipMeta(cls: string): { label: string; color: string; bg: string; border: string } {
   switch (cls) {
     case 'reclaimable_direct':
@@ -207,7 +202,26 @@ function originLabel(origin: string): string {
 
 export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose, showToast }) => {
   const [statusData, setStatusData] = useState<LiberationStatusResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<'tracks' | 'diagnostics'>('tracks');
+  const [activeTab, setActiveTab] = useState<
+    'tracks' | 'diagnostics' | 'download' | 'audit' | 'reunion'
+  >('tracks');
+  const [rescueFolder, setRescueFolder] = useState<string>(() => {
+    try {
+      return window.localStorage.getItem('imp-liberation-folder') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [chooserTarget, setChooserTarget] = useState<'download' | 'audit' | 'reunion' | null>(null);
+
+  const updateRescueFolder = useCallback((next: string) => {
+    setRescueFolder(next);
+    try {
+      window.localStorage.setItem('imp-liberation-folder', next);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('all');
   const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
   const [searchInput, setSearchInput] = useState<string>('');
@@ -319,19 +333,23 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
     return () => window.clearInterval(timer);
   }, [open, isRunning, probedCount, totalCount, activeTab, fetchStatus, fetchTracks, fetchDiagnostics]);
 
-  // Capture Escape key so it closes only LiberationModal
+  // Capture Escape key so it unwinds nested FolderChooserModal first, then closes LiberationModal
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        if (chooserTarget !== null) {
+          setChooserTarget(null);
+        } else {
+          onClose();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [open, onClose]);
+  }, [open, chooserTarget, onClose]);
 
   if (!open) return null;
 
@@ -503,7 +521,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 15, fontWeight: 800 }}>
-                  Project LIBERATION — Cloud Library Census
+                  Project LIBERATION — Apple Cloud Library Rescue Suite
                 </span>
                 <span
                   style={{
@@ -516,11 +534,11 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
                     color: '#34d399',
                   }}
                 >
-                  Stage 1 · Read-Only · Strict DRM-Free Audit
+                  Strict DRM-Free Rescue Suite
                 </span>
               </div>
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
-                Audits owned/uploaded/matched iCloud tracks &amp; album fragmentation without downloading or writing files.
+                Audits &amp; reclaims unencrypted Cloud Locker assets, 4-stage verifies local folders, and reunites fragmented albums.
               </div>
             </div>
           </div>
@@ -548,17 +566,73 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
           </button>
         </div>
 
-        {/* Action Controls + Progress */}
+        {/* Navigation Tabs */}
         <div
           style={{
-            padding: '10px 18px',
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
-            background: 'rgba(10, 12, 20, 0.72)',
+            padding: '8px 18px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(10, 12, 20, 0.8)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
+            gap: 6,
+            flexWrap: 'wrap',
           }}
         >
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={() => setActiveTab('tracks')}
+            style={tabBtnStyle(activeTab === 'tracks')}
+          >
+            Stage 1: Census ({tracksTotal.toLocaleString()})
+          </button>
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={() => setActiveTab('diagnostics')}
+            style={tabBtnStyle(activeTab === 'diagnostics')}
+          >
+            Fragmentation Preview
+            {diagnostics ? ` (${diagnostics.incomplete_album_count})` : ''}
+          </button>
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={() => setActiveTab('download')}
+            style={tabBtnStyle(activeTab === 'download')}
+          >
+            Stage 2A: Reclaim Uploaded
+          </button>
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={() => setActiveTab('audit')}
+            style={tabBtnStyle(activeTab === 'audit')}
+          >
+            Stage 2B: Verify Folder
+          </button>
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={() => setActiveTab('reunion')}
+            style={tabBtnStyle(activeTab === 'reunion')}
+          >
+            Stage 3: Album Reunion
+          </button>
+        </div>
+
+        {/* Stage 1 Census Action Controls + KPI Telemetry */}
+        {(activeTab === 'tracks' || activeTab === 'diagnostics') && (
+          <>
+            <div
+              style={{
+                padding: '10px 18px',
+                borderBottom: '1px solid rgba(255,255,255,0.07)',
+                background: 'rgba(10, 12, 20, 0.72)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}
+            >
           <div
             style={{
               display: 'flex',
@@ -819,39 +893,8 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
             )}
           </div>
         </div>
-
-        {/* Sub-Tabs */}
-        <div
-          style={{
-            padding: '8px 18px',
-            borderBottom: '1px solid rgba(255,255,255,0.07)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 10,
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              type="button"
-              data-focusable="true"
-              onClick={() => setActiveTab('tracks')}
-              style={tabBtnStyle(activeTab === 'tracks')}
-            >
-              Library Census ({tracksTotal.toLocaleString()})
-            </button>
-            <button
-              type="button"
-              data-focusable="true"
-              onClick={() => setActiveTab('diagnostics')}
-              style={tabBtnStyle(activeTab === 'diagnostics')}
-            >
-              Album Fragmentation Preview
-              {diagnostics ? ` (${diagnostics.incomplete_album_count})` : ''}
-            </button>
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Main Scrollable Content */}
         {activeTab === 'tracks' ? (
@@ -1073,7 +1116,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
               </div>
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'diagnostics' ? (
           /* Album Fragmentation Preview Tab */
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '10px 18px', gap: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
@@ -1178,45 +1221,40 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
               )}
             </div>
           </div>
+        ) : activeTab === 'download' ? (
+          <LiberationDownloadTab
+            open={open && activeTab === 'download'}
+            destDir={rescueFolder}
+            setDestDir={updateRescueFolder}
+            onBrowseDest={() => setChooserTarget('download')}
+            showToast={showToast}
+          />
+        ) : activeTab === 'audit' ? (
+          <LiberationAuditTab
+            open={open && activeTab === 'audit'}
+            rootDir={rescueFolder}
+            setRootDir={updateRescueFolder}
+            onBrowseRoot={() => setChooserTarget('audit')}
+          />
+        ) : (
+          <LiberationReunionTab
+            rootDir={rescueFolder}
+            setRootDir={updateRescueFolder}
+            onBrowseRoot={() => setChooserTarget('reunion')}
+            showToast={showToast}
+          />
         )}
       </div>
+
+      <FolderChooserModal
+        open={chooserTarget !== null}
+        initialPath={rescueFolder}
+        onSelectFolder={(folderPath) => {
+          updateRescueFolder(folderPath);
+          setChooserTarget(null);
+        }}
+        onClose={() => setChooserTarget(null)}
+      />
     </div>
   );
 };
-
-function chipStyle(color: string): React.CSSProperties {
-  return {
-    padding: '2px 7px',
-    borderRadius: 6,
-    background: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    color,
-    fontWeight: 700,
-  };
-}
-
-function tabBtnStyle(active: boolean): React.CSSProperties {
-  return {
-    padding: '6px 12px',
-    borderRadius: 8,
-    border: active ? '1px solid rgba(251, 113, 133, 0.55)' : '1px solid rgba(255,255,255,0.1)',
-    background: active ? 'rgba(244, 63, 94, 0.16)' : 'rgba(255,255,255,0.03)',
-    color: active ? '#fda4af' : '#94a3b8',
-    fontSize: 11.5,
-    fontWeight: 800,
-    cursor: 'pointer',
-  };
-}
-
-function filterPillStyle(active: boolean, accent: string): React.CSSProperties {
-  return {
-    padding: '4px 9px',
-    borderRadius: 6,
-    border: active ? `1px solid ${accent}` : '1px solid rgba(255,255,255,0.12)',
-    background: active ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)',
-    color: active ? accent : '#cbd5e1',
-    fontSize: 10.5,
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}

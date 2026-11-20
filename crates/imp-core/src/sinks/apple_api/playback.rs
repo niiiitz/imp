@@ -1571,6 +1571,101 @@ pub fn probe_owned_library_asset(
     probe_owned_library_asset_with_tokens(&dev_token, &user_token, library_song_id)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreshDirectDownloadAsset {
+    pub url: String,
+    pub flavor: String,
+    pub container: String,
+    pub size_hint: Option<u64>,
+}
+
+/// Stage 2A on-demand URL resolver: queries `webPlayback` strictly with `{ "universalLibraryId": clean_id }`
+/// right before downloading, confirms unencrypted direct audio container magic bytes via a 512-byte peek,
+/// and strictly rejects any DRM (`ctrp`/`cbcp`/`m4p`) or non-direct asset.
+pub fn resolve_fresh_direct_audio_download(
+    dev_token: &str,
+    user_token: &str,
+    library_song_id: &str,
+) -> Result<std::result::Result<FreshDirectDownloadAsset, (LiberationOwnershipClass, String)>> {
+    let clean_id = extract_clean_apple_song_id(library_song_id);
+    let json = apple_post_json(
+        "https://play.music.apple.com/WebObjects/MZPlay.woa/wa/webPlayback",
+        dev_token,
+        user_token,
+        &serde_json::json!({ "universalLibraryId": clean_id }),
+    )?;
+
+    match inspect_owned_web_playback_response(clean_id, &json) {
+        OwnedWebPlaybackInspection::DirectClear {
+            flavor,
+            url,
+            size_hint,
+            ..
+        } => {
+            let head = peek_url_magic(&url)?;
+            match detect_audio_container_from_magic(&head) {
+                Some("drm_m4p") => Ok(Err((
+                    LiberationOwnershipClass::SubscriptionDrmExcluded,
+                    "Legacy FairPlay M4P DRM container excluded".to_string(),
+                ))),
+                Some(container) => {
+                    let resolved_flavor = if flavor == "unknown" || flavor == "direct_audio" {
+                        format!("cloud_locker_{container}")
+                    } else {
+                        flavor
+                    };
+                    Ok(Ok(FreshDirectDownloadAsset {
+                        url,
+                        flavor: resolved_flavor,
+                        container: container.to_string(),
+                        size_hint,
+                    }))
+                }
+                None => Ok(Err((
+                    LiberationOwnershipClass::Error,
+                    "Unrecognized container at direct audio URL".to_string(),
+                ))),
+            }
+        }
+        OwnedWebPlaybackInspection::ClearHlsCandidate {
+            flavor,
+            playlist_url,
+            ..
+        } => {
+            let head = peek_url_magic(&playlist_url)?;
+            match detect_audio_container_from_magic(&head) {
+                Some("drm_m4p") => Ok(Err((
+                    LiberationOwnershipClass::SubscriptionDrmExcluded,
+                    "Legacy FairPlay M4P DRM container excluded".to_string(),
+                ))),
+                Some(container) => {
+                    let resolved_flavor = if flavor == "unknown" || flavor == "direct_audio" {
+                        format!("cloud_locker_{container}")
+                    } else {
+                        flavor
+                    };
+                    Ok(Ok(FreshDirectDownloadAsset {
+                        url: playlist_url,
+                        flavor: resolved_flavor,
+                        container: container.to_string(),
+                        size_hint: None,
+                    }))
+                }
+                None => Ok(Err((
+                    LiberationOwnershipClass::SubscriptionDrmExcluded,
+                    "Non-direct or DRM HLS asset".to_string(),
+                ))),
+            }
+        }
+        OwnedWebPlaybackInspection::DrmExcluded { reason, .. } => {
+            Ok(Err((LiberationOwnershipClass::SubscriptionDrmExcluded, reason)))
+        }
+        OwnedWebPlaybackInspection::Unavailable { reason, .. } => {
+            Ok(Err((LiberationOwnershipClass::Unavailable, reason)))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

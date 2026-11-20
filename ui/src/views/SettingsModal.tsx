@@ -351,7 +351,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     scAuthOpen;
 
   const handleWalkBackNested = () => {
-    if (liberationModalOpen) {
+    const chooserClose = document.querySelector<HTMLElement>('[data-folder-chooser-close="true"]');
+    if (chooserClose) {
+      chooserClose.click();
+    } else if (liberationModalOpen) {
       setLiberationModalOpen(false);
     } else if (brightnessScrubActive) {
       setBrightnessScrubActive(false);

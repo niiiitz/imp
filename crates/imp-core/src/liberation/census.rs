@@ -948,6 +948,8 @@ fn parse_library_song_to_liberation_record(
         blake3_hash: None,
         last_error: None,
         updated_at,
+        local_path: None,
+        downloaded_bytes: None,
     })
 }
 
@@ -1209,14 +1211,17 @@ pub fn compute_album_fragmentation_diagnostics(
         let b_miss = b.missing_track_numbers.len().max(
             (b.expected_track_count as usize).saturating_sub(b.owned_or_library_tracks),
         );
-        let a_ratio =
-            (a.owned_or_library_tracks * 1000) / (a.expected_track_count.max(1) as usize);
-        let b_ratio =
-            (b.owned_or_library_tracks * 1000) / (b.expected_track_count.max(1) as usize);
+        let a_truly_missing = a.owned_or_library_tracks < (a.expected_track_count as usize);
+        let b_truly_missing = b.owned_or_library_tracks < (b.expected_track_count as usize);
+        let a_ratio = ((a.owned_or_library_tracks.min(a.expected_track_count as usize)) * 1000)
+            / (a.expected_track_count.max(1) as usize);
+        let b_ratio = ((b.owned_or_library_tracks.min(b.expected_track_count as usize)) * 1000)
+            / (b.expected_track_count.max(1) as usize);
 
         a.stray_candidates
             .is_empty()
             .cmp(&b.stray_candidates.is_empty())
+            .then_with(|| b_truly_missing.cmp(&a_truly_missing))
             .then_with(|| b_ratio.cmp(&a_ratio))
             .then_with(|| a_miss.cmp(&b_miss))
             .then_with(|| a.artist.cmp(&b.artist))
@@ -1274,6 +1279,8 @@ mod tests {
             blake3_hash: None,
             last_error: None,
             updated_at: 1_000,
+            local_path: None,
+            downloaded_bytes: None,
         }
     }
 
