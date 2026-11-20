@@ -1,6 +1,12 @@
 #![allow(unexpected_cfgs)]
 
-use crate::dsp::{global_dsp_state, StreamDspProcessor};
+use crate::dsp::global_dsp_state;
+use crate::sinks::tap_dsp::{
+    reset_global_tap_status, set_global_tap_status, AudioTapStatusSnapshot, StereoTapRingBuffer,
+    TapDspOutput,
+};
+#[cfg(test)]
+use crate::sinks::tap_dsp::TapDspSource;
 use crate::viz::AudioTapBuffer;
 use core_foundation::array::CFArray;
 use core_foundation::base::TCFType;
@@ -9,7 +15,6 @@ use core_foundation::number::CFNumber;
 use core_foundation::string::CFString;
 use objc::runtime::{Class, Object};
 use objc::{class, msg_send, sel, sel_impl};
-use rodio::{OutputStream, Sink, Source};
 use imp_protocol::PlaybackEvent;
 use std::collections::{HashMap, HashSet};
 use std::ffi::{c_char, c_void, CString};
@@ -17,6 +22,8 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+#[cfg(test)]
+use rodio::Source;
 use tokio::sync::broadcast;
 
 type Id = *mut Object;
@@ -49,9 +56,6 @@ const CATAP_MUTED_WHEN_TAPPED: isize = 2;
 
 const PROC_PIDT_SHORTBSDINFO: libc::c_int = 13;
 const MAXCOMLEN: usize = 16;
-
-const RING_CAPACITY_FRAMES: usize = 16_384; // ~341ms @ 48 kHz
-const RING_MASK: usize = RING_CAPACITY_FRAMES - 1;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -187,147 +191,6 @@ extern "C" {
         buffer: *mut c_void,
         buffersize: u32,
     ) -> libc::c_int;
-}
-
-/// Lock-free single-producer / single-consumer ring buffer holding interleaved stereo `f32` frames.
-pub struct StereoTapRingBuffer {
-    samples: Vec<AtomicU32>,
-    write_frames: AtomicU64,
-    read_frames: AtomicU64,
-}
-
-impl Default for StereoTapRingBuffer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StereoTapRingBuffer {
-    pub fn new() -> Self {
-        let mut samples = Vec::with_capacity(RING_CAPACITY_FRAMES * 2);
-        for _ in 0..(RING_CAPACITY_FRAMES * 2) {
-            samples.push(AtomicU32::new(0.0f32.to_bits()));
-        }
-        Self {
-            samples,
-            write_frames: AtomicU64::new(0),
-            read_frames: AtomicU64::new(0),
-        }
-    }
-
-    pub fn clear(&self) {
-        let w = self.write_frames.load(Ordering::Acquire);
-        self.read_frames.store(w, Ordering::Release);
-    }
-
-    pub fn retain_recent(&self, max_frames: u64) {
-        let w = self.write_frames.load(Ordering::Acquire);
-        let r = self.read_frames.load(Ordering::Relaxed);
-        let min_r = w.saturating_sub(max_frames);
-        if r < min_r || r > w {
-            self.read_frames.store(min_r, Ordering::Release);
-        }
-    }
-
-    pub fn available_frames(&self) -> u64 {
-        let w = self.write_frames.load(Ordering::Acquire);
-        let r = self.read_frames.load(Ordering::Relaxed);
-        w.saturating_sub(r)
-    }
-
-    #[inline]
-    pub fn push_frame(&self, left: f32, right: f32) {
-        let w = self.write_frames.load(Ordering::Relaxed);
-        let idx = ((w as usize) & RING_MASK) * 2;
-        self.samples[idx].store(left.to_bits(), Ordering::Relaxed);
-        self.samples[idx + 1].store(right.to_bits(), Ordering::Relaxed);
-        self.write_frames.store(w.wrapping_add(1), Ordering::Release);
-    }
-
-    /// Reads the next stereo frame `(left, right)`, keeping buffered latency bounded below ~85ms.
-    #[inline]
-    pub fn pop_frame(&self) -> Option<(f32, f32)> {
-        let w = self.write_frames.load(Ordering::Acquire);
-        let mut r = self.read_frames.load(Ordering::Relaxed);
-        if w <= r {
-            return None;
-        }
-        let avail = w.saturating_sub(r);
-        if avail > 4096 {
-            r = w - 1024;
-        }
-        let idx = ((r as usize) & RING_MASK) * 2;
-        let left = f32::from_bits(self.samples[idx].load(Ordering::Relaxed));
-        let right = f32::from_bits(self.samples[idx + 1].load(Ordering::Relaxed));
-        self.read_frames.store(r.wrapping_add(1), Ordering::Release);
-        Some((left, right))
-    }
-}
-
-struct TapDspSource {
-    ring: Arc<StereoTapRingBuffer>,
-    tap_buffer: Arc<AudioTapBuffer>,
-    dsp: StreamDspProcessor,
-    sample_rate: u32,
-    running: Arc<AtomicBool>,
-    pending_right: Option<f32>,
-}
-
-impl TapDspSource {
-    fn new(
-        ring: Arc<StereoTapRingBuffer>,
-        tap_buffer: Arc<AudioTapBuffer>,
-        sample_rate: u32,
-        running: Arc<AtomicBool>,
-    ) -> Self {
-        let sr = sample_rate.clamp(8_000, 192_000);
-        tap_buffer.set_sample_rate(sr);
-        Self {
-            ring,
-            tap_buffer,
-            dsp: StreamDspProcessor::new(global_dsp_state(), sr),
-            sample_rate: sr,
-            running,
-            pending_right: None,
-        }
-    }
-}
-
-impl Iterator for TapDspSource {
-    type Item = f32;
-
-    #[inline]
-    fn next(&mut self) -> Option<f32> {
-        if !self.running.load(Ordering::Relaxed) {
-            return None;
-        }
-        if let Some(r_out) = self.pending_right.take() {
-            return Some(r_out);
-        }
-        let (l_in, r_in) = self.ring.pop_frame().unwrap_or((0.0, 0.0));
-        let (l_out, r_out) = self.dsp.process_stereo(l_in, r_in, self.sample_rate);
-        self.tap_buffer.push_mono_sample(0.5 * (l_out + r_out));
-        self.pending_right = Some(r_out);
-        Some(l_out)
-    }
-}
-
-impl Source for TapDspSource {
-    fn current_frame_len(&self) -> Option<usize> {
-        None
-    }
-
-    fn channels(&self) -> u16 {
-        2
-    }
-
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    fn total_duration(&self) -> Option<Duration> {
-        None
-    }
 }
 
 struct TapCallbackContext {
@@ -976,47 +839,6 @@ unsafe fn create_webkit_process_tap(
     })
 }
 
-struct TapDspOutput {
-    _stream: OutputStream,
-    sink: Sink,
-    running: Arc<AtomicBool>,
-}
-
-impl TapDspOutput {
-    fn open(
-        ring: Arc<StereoTapRingBuffer>,
-        tap_buffer: Arc<AudioTapBuffer>,
-        sample_rate: u32,
-    ) -> Option<Self> {
-        let (_stream, handle) = OutputStream::try_default().ok()?;
-        let sink = Sink::try_new(&handle).ok()?;
-        // MusicKit / WebKit already scales output amplitude by `perceptual_cubic_gain(volume)`.
-        sink.set_volume(1.0);
-        ring.retain_recent(1024);
-        let prime_frames = ((sample_rate as u64 * 20) / 1000).clamp(256, 960);
-        for _ in 0..12 {
-            if ring.available_frames() >= prime_frames {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(2));
-        }
-        let running = Arc::new(AtomicBool::new(true));
-        let src = TapDspSource::new(ring, tap_buffer, sample_rate, running.clone());
-        sink.append(src);
-        sink.play();
-        Some(Self {
-            _stream,
-            sink,
-            running,
-        })
-    }
-
-    fn stop(self) {
-        self.running.store(false, Ordering::Release);
-        self.sink.stop();
-    }
-}
-
 struct TapSharedState {
     ring: Arc<StereoTapRingBuffer>,
     tap_buffer: Arc<AudioTapBuffer>,
@@ -1217,6 +1039,15 @@ impl MacOsWebKitAudioTap {
                             ) {
                                 shared.dsp_active.store(true, Ordering::Release);
                                 active_dsp_out = Some(out);
+                                set_global_tap_status(AudioTapStatusSnapshot {
+                                    platform: "macos".to_string(),
+                                    mode: "macos_coreaudio_tap_dsp".to_string(),
+                                    dsp_active: true,
+                                    spectrum_active: true,
+                                    worker_sink_label: None,
+                                    detail: "CoreAudio process tap muted dry output; 10-Band EQ + Vocal DSP active."
+                                        .to_string(),
+                                });
                             } else {
                                 unsafe {
                                     let _ = switch_or_recreate_tap_mute(
@@ -1243,6 +1074,25 @@ impl MacOsWebKitAudioTap {
                                 CATAP_UNMUTED,
                             );
                         }
+                        set_global_tap_status(AudioTapStatusSnapshot {
+                            platform: "macos".to_string(),
+                            mode: "macos_coreaudio_tap_spectrum".to_string(),
+                            dsp_active: false,
+                            spectrum_active: true,
+                            worker_sink_label: None,
+                            detail: "CoreAudio process tap spectrum analyzer active (EQ bypassed)."
+                                .to_string(),
+                        });
+                    } else if active_tap.is_some() && active_dsp_out.is_none() && has_nonzero {
+                        set_global_tap_status(AudioTapStatusSnapshot {
+                            platform: "macos".to_string(),
+                            mode: "macos_coreaudio_tap_spectrum".to_string(),
+                            dsp_active: false,
+                            spectrum_active: true,
+                            worker_sink_label: None,
+                            detail: "CoreAudio process tap spectrum analyzer active (EQ bypassed)."
+                                .to_string(),
+                        });
                     }
 
                     if has_nonzero && recently_nonzero {
@@ -1269,6 +1119,7 @@ impl MacOsWebKitAudioTap {
                         tap.teardown();
                     }
                 }
+                reset_global_tap_status();
             });
     }
 

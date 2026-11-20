@@ -106,6 +106,46 @@ export function useAppleMusicWorker(): void {
       (new URLSearchParams(window.location.search).get('worker') === 'apple' ||
         window.location.pathname.startsWith('/apple-worker'));
 
+    let lastAppliedSinkLabel = '';
+    const syncWorkerAudioSink = async () => {
+      if (!isDedicatedWorker || typeof window === 'undefined') return;
+      const audioEl = document.getElementById('apple-music-player') as
+        | (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> })
+        | null;
+      if (!audioEl || typeof audioEl.setSinkId !== 'function') return;
+      try {
+        const res = await fetch('/api/dsp');
+        const json = await res.json().catch(() => null);
+        const desiredLabel = String(json?.tap_status?.worker_sink_label || '').trim();
+        if (desiredLabel === lastAppliedSinkLabel) return;
+        if (!desiredLabel) {
+          lastAppliedSinkLabel = '';
+          await audioEl.setSinkId('').catch(() => {});
+          return;
+        }
+        const devices = await navigator.mediaDevices?.enumerateDevices?.();
+        if (!Array.isArray(devices)) return;
+        const needle = desiredLabel.toLowerCase();
+        const target = devices.find(
+          (d) =>
+            d.kind === 'audiooutput' &&
+            (d.label.toLowerCase().includes(needle) || needle.includes(d.label.toLowerCase()))
+        );
+        if (target?.deviceId) {
+          await audioEl.setSinkId(target.deviceId);
+          lastAppliedSinkLabel = desiredLabel;
+        }
+      } catch {
+        // Ignore transient sink discovery issues when worker audio element is not yet active
+      }
+    };
+
+    const sinkPollTimer = isDedicatedWorker
+      ? window.setInterval(() => {
+          void syncWorkerAudioSink();
+        }, 3000)
+      : null;
+
     const ensureInstance = async (): Promise<any | null> => {
       if (mkRef.current) return mkRef.current;
       if (configuringPromiseRef.current) {
@@ -342,6 +382,7 @@ export function useAppleMusicWorker(): void {
               if (audioEl.paused && mk.playbackState !== States?.loading && mk.playbackState !== States?.waiting) {
                 await audioEl.play().catch(() => {});
               }
+              void syncWorkerAudioSink();
             }
 
             isLoadingRef.current = false;
@@ -420,6 +461,9 @@ export function useAppleMusicWorker(): void {
 
     return () => {
       cancelled = true;
+      if (sinkPollTimer !== null) {
+        window.clearInterval(sinkPollTimer);
+      }
       unsubState();
       unsubSink();
     };

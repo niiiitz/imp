@@ -42,4 +42,16 @@ core-graphics.workspace = true
 block.workspace = true
 dispatch.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.54.0", default-features = false, features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_Devices_FunctionDiscovery",
+] }
+
 

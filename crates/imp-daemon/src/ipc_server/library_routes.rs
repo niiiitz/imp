@@ -428,9 +428,11 @@ fn schedule_debounced_settings_save(cfg: imp_protocol::SimpSettings) {
 
 pub(super) async fn dsp_get_handler() -> impl IntoResponse {
     let snap = imp_core::dsp::global_dsp_state().snapshot();
+    let tap_status = imp_core::sinks::tap_dsp::global_tap_status();
     Json(serde_json::json!({
         "ok": true,
         "data": snap,
+        "tap_status": tap_status,
         "presets": imp_core::dsp::BUILTIN_EQ_PRESETS,
         "band_freqs_hz": imp_core::dsp::EQ_BAND_FREQS_HZ,
         "band_labels": imp_core::dsp::EQ_BAND_LABELS,

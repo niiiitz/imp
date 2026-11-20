@@ -325,6 +325,18 @@ pub fn close_windows_ui_windows() {
     }
 }
 
+/// Returns unique process IDs owning any active headless Apple Music worker window on Windows.
+pub fn find_windows_headless_worker_pids() -> Vec<u32> {
+    #[cfg(target_os = "windows")]
+    {
+        return win32_window_mgr::find_headless_worker_pids();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Vec::new()
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod win32_window_mgr {
     use std::ffi::c_void;
@@ -365,6 +377,7 @@ mod win32_window_mgr {
         fn SetForegroundWindow(h_wnd: Hwnd) -> i32;
         fn GetWindowLongPtrW(h_wnd: Hwnd, n_index: i32) -> isize;
         fn SetWindowLongPtrW(h_wnd: Hwnd, n_index: i32, dw_new_long: isize) -> isize;
+        fn GetWindowThreadProcessId(h_wnd: Hwnd, lpdw_process_id: *mut u32) -> u32;
         fn PostMessageW(h_wnd: Hwnd, msg: u32, w_param: Wparam, l_param: Lparam) -> i32;
         fn keybd_event(b_vk: u8, b_scan: u8, dw_flags: u32, dw_extra_info: usize);
     }
@@ -537,6 +550,30 @@ mod win32_window_mgr {
         unsafe {
             EnumWindows(enum_close_ui_cb, 0);
         }
+    }
+
+    unsafe extern "system" fn enum_find_worker_pids_cb(hwnd: Hwnd, l_param: Lparam) -> i32 {
+        let title = read_window_title(hwnd);
+        if is_worker_hwnd(hwnd, &title) && !l_param.eq(&0) {
+            let pids = &mut *(l_param as *mut Vec<u32>);
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid != 0 && !pids.contains(&pid) {
+                pids.push(pid);
+            }
+        }
+        1
+    }
+
+    pub fn find_headless_worker_pids() -> Vec<u32> {
+        let mut pids = Vec::new();
+        unsafe {
+            EnumWindows(
+                enum_find_worker_pids_cb,
+                (&mut pids as *mut Vec<u32>) as Lparam,
+            );
+        }
+        pids
     }
 }
 

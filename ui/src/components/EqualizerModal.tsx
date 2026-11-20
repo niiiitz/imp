@@ -68,6 +68,15 @@ export const BUILTIN_PRESETS: EqPresetOption[] = [
   },
 ];
 
+export interface TapStatusInfo {
+  platform: string;
+  mode: string;
+  dsp_active: boolean;
+  spectrum_active: boolean;
+  worker_sink_label?: string | null;
+  detail: string;
+}
+
 interface EqualizerModalProps {
   open: boolean;
   onClose: () => void;
@@ -113,6 +122,28 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const draggingSliderRef = useRef<number | null>(null);
   const faderTrackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const [tapStatus, setTapStatus] = useState<TapStatusInfo | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const loadTapStatus = () => {
+      fetch('/api/dsp')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (!cancelled && j?.tap_status) {
+            setTapStatus(j.tap_status as TapStatusInfo);
+          }
+        })
+        .catch(() => {});
+    };
+    loadTapStatus();
+    const timer = window.setTimeout(loadTapStatus, 400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, dspState.eq_enabled, dspState.vocal_mode]);
 
   // Focus capture & restoration on modal open/close
   useEffect(() => {
@@ -388,6 +419,40 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             <span>Close (B / Esc)</span>
           </button>
         </div>
+
+        {/* Section 1: Live OS Audio Tap Status (when active) + Vocal Isolation */}
+        {tapStatus && tapStatus.mode && tapStatus.mode !== 'idle' && (
+          <div
+            style={{
+              padding: '7px 12px',
+              borderRadius: 10,
+              background: tapStatus.dsp_active
+                ? 'rgba(16, 185, 129, 0.12)'
+                : 'rgba(245, 158, 11, 0.12)',
+              border: tapStatus.dsp_active
+                ? '1px solid rgba(52, 211, 153, 0.35)'
+                : '1px solid rgba(251, 191, 36, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+              fontSize: 11,
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 800,
+                letterSpacing: '0.04em',
+                color: tapStatus.dsp_active ? '#6ee7b7' : '#fcd34d',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {tapStatus.dsp_active ? 'DSP ACTIVE' : 'SPECTRUM ONLY'}
+            </span>
+            <span style={{ color: '#cbd5e1', flex: 1, minWidth: 200 }}>{tapStatus.detail}</span>
+          </div>
+        )}
 
         {/* Section 1: Vocal Isolation & 1-Click Karaoke Mode */}
         <div

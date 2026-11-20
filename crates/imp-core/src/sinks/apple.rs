@@ -16,6 +16,14 @@ fn worker_slot() -> &'static Mutex<Option<Child>> {
     HEADLESS_WIDEVINE_WORKER.get_or_init(|| Mutex::new(None))
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn current_worker_child_pid() -> Option<u32> {
+    worker_slot()
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().map(|child| child.id()))
+}
+
 /// Returns true when Zero-Browser Native Rust Widevine CDM (`libwidevinecdm.so` FFI) mode is enabled.
 /// Enabled by default on Linux/SteamOS whenever `libwidevinecdm.so` is available (unless `SIMP_NATIVE_APPLE_CDM=0`
 /// or `disable-native-cdm` is set). On Windows and macOS, defaults to `false` because `widevinecdm.dll`
@@ -69,6 +77,10 @@ pub struct AppleMusicSink {
     pub worker_playing_ack: bool,
     #[cfg(target_os = "macos")]
     pub macos_tap: Arc<crate::sinks::macos_tap::MacOsWebKitAudioTap>,
+    #[cfg(target_os = "linux")]
+    pub linux_tap: Arc<crate::sinks::linux_tap::LinuxPulseAudioTap>,
+    #[cfg(target_os = "windows")]
+    pub windows_tap: Arc<crate::sinks::windows_tap::WindowsAudioTap>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -94,6 +106,10 @@ impl AppleMusicSink {
             worker_playing_ack: false,
             #[cfg(target_os = "macos")]
             macos_tap: Arc::new(crate::sinks::macos_tap::MacOsWebKitAudioTap::new()),
+            #[cfg(target_os = "linux")]
+            linux_tap: Arc::new(crate::sinks::linux_tap::LinuxPulseAudioTap::new()),
+            #[cfg(target_os = "windows")]
+            windows_tap: Arc::new(crate::sinks::windows_tap::WindowsAudioTap::new()),
         }
     }
 
@@ -103,10 +119,33 @@ impl AppleMusicSink {
             self.macos_tap
                 .start_or_refresh(self.volume, broadcast_tx.clone());
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "linux")]
+        {
+            if !self.using_native_engine {
+                self.linux_tap
+                    .start_or_refresh(self.volume, broadcast_tx.clone());
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            if !self.using_native_engine {
+                self.windows_tap
+                    .start_or_refresh(self.volume, broadcast_tx.clone());
+            }
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
         {
             let _ = broadcast_tx;
         }
+    }
+
+    fn stop_os_audio_tap(&self) {
+        #[cfg(target_os = "macos")]
+        self.macos_tap.stop();
+        #[cfg(target_os = "linux")]
+        self.linux_tap.stop();
+        #[cfg(target_os = "windows")]
+        self.windows_tap.stop();
     }
 
     pub fn set_volume(&mut self, normalized_vol: f64) {
@@ -213,6 +252,8 @@ impl AppleMusicSink {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
+            #[cfg(target_os = "linux")]
+            crate::sinks::linux_tap::teardown_linux_apple_null_sink();
         }
     }
 
@@ -659,8 +700,7 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.pause();
             }
         }
-        #[cfg(target_os = "macos")]
-        self.macos_tap.stop();
+        self.stop_os_audio_tap();
         self.emit_pause(broadcast_tx);
     }
 
@@ -670,8 +710,7 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.release_pipewire_stream();
             }
         }
-        #[cfg(target_os = "macos")]
-        self.macos_tap.stop();
+        self.stop_os_audio_tap();
         self.emit_pause(broadcast_tx);
     }
 
@@ -717,8 +756,7 @@ impl crate::sinks::AudioSink for AppleMusicSink {
                 eng.release_pipewire_stream();
             }
         }
-        #[cfg(target_os = "macos")]
-        self.macos_tap.stop();
+        self.stop_os_audio_tap();
         self.emit_pause(broadcast_tx);
         Self::kill_headless_widevine_worker();
     }
@@ -1020,7 +1058,7 @@ fn prepare_firefox_widevine_profile(ff_root: &Path, require_cdm_present: bool) -
 }
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn apply_pipewire_env(cmd: &mut Command) {
+pub(crate) fn apply_pipewire_env(cmd: &mut Command) {
     cmd.env("MOZ_NO_REMOTE", "1");
     cmd.env("GTK_USE_PORTAL", "0");
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
@@ -1061,6 +1099,11 @@ fn spawn_headless_widevine_browser() -> Option<Child> {
     // directory (`require_cdm = true`). Never spawn Chromium `--headless=new` (which hardcodes `NullAudioSink`
     // and advances `<audio>` `currentTime` silently while muting any open foreground browser window!).
     let require_cdm = true;
+    #[cfg(target_os = "linux")]
+    let use_null_sink = crate::sinks::linux_tap::ensure_linux_apple_null_sink();
+    #[cfg(not(target_os = "linux"))]
+    let use_null_sink = false;
+    let pulse_sink_env_arg = format!("--env=PULSE_SINK={}", crate::sinks::linux_tap::LINUX_APPLE_TAP_SINK_NAME);
 
     // 1. Flatpak Firefox (`org.mozilla.firefox` — pre-installed on SteamOS with Widevine CDM + real PipeWire output)
     let flatpak_ff_root = home.join(".var/app/org.mozilla.firefox/.mozilla/firefox");
@@ -1076,20 +1119,16 @@ fn spawn_headless_widevine_browser() -> Option<Child> {
             prepare_firefox_widevine_profile(&flatpak_ff_root, require_cdm)
         {
             let mut cmd = Command::new("flatpak");
-            cmd.args([
-                "run",
-                "--socket=pulseaudio",
-                "--filesystem=xdg-run/pipewire-0",
-                "org.mozilla.firefox",
-                "--headless",
-                "--no-remote",
-                "--profile",
-            ])
-            .arg(&profile_dir)
-            .arg(worker_url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
+            cmd.args(["run", "--socket=pulseaudio", "--filesystem=xdg-run/pipewire-0"]);
+            if use_null_sink {
+                cmd.arg(&pulse_sink_env_arg);
+            }
+            cmd.args(["org.mozilla.firefox", "--headless", "--no-remote", "--profile"])
+                .arg(&profile_dir)
+                .arg(worker_url)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
             apply_pipewire_env(&mut cmd);
             if let Ok(child) = cmd.spawn() {
                 return Some(child);
@@ -1108,6 +1147,12 @@ fn spawn_headless_widevine_browser() -> Option<Child> {
             .stdout(Stdio::null())
             .stderr(Stdio::null());
         apply_pipewire_env(&mut cmd);
+        if use_null_sink {
+            cmd.env(
+                "PULSE_SINK",
+                crate::sinks::linux_tap::LINUX_APPLE_TAP_SINK_NAME,
+            );
+        }
         if let Ok(child) = cmd.spawn() {
             return Some(child);
         }
@@ -1143,6 +1188,7 @@ fn spawn_windows_headless_widevine_browser() -> Option<Child> {
                 "--disable-extensions",
                 "--disable-sync",
                 "--autoplay-policy=no-user-gesture-required",
+                "--use-fake-ui-for-media-stream",
                 "--disable-background-timer-throttling",
                 "--disable-renderer-backgrounding",
                 "--disable-backgrounding-occluded-windows",
