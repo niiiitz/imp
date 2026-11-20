@@ -11,6 +11,7 @@ import {
 } from '@simp/client';
 import { CompanionPairView } from './components/CompanionPairView';
 import type { BrowseHubTarget } from './views/library/libraryHelpers';
+import { computeRelativeSubpath } from './views/library/localFolderTree';
 import {
   addAppleItemToCloudLibrary,
   AppleCatalogSearchResults,
@@ -177,7 +178,7 @@ const ConsoleMainApp: React.FC = () => {
       const next = typeof action === 'function' ? action(prev) : action;
       try {
         window.localStorage.setItem('simp_imp_fyp_active', next === 'imp_fyp' ? '1' : '0');
-      } catch {}
+      } catch { }
       return next;
     });
   }, []);
@@ -266,12 +267,12 @@ const ConsoleMainApp: React.FC = () => {
             const next = merged.slice(0, 40);
             try {
               window.localStorage.setItem('simp_recently_played_v1', JSON.stringify(next));
-            } catch {}
+            } catch { }
             return next;
           });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
 
     fetch('http://127.0.0.1:18888/api/favorites')
       .then((r) => r.json())
@@ -280,7 +281,7 @@ const ConsoleMainApp: React.FC = () => {
           setFavoritedUris(d.uris);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -290,7 +291,7 @@ const ConsoleMainApp: React.FC = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cur),
-    }).catch(() => {});
+    }).catch(() => { });
     setRecentlyPlayed((prev) => {
       if (prev[0]?.uri === cur.uri) return prev;
       const next = [cur, ...prev.filter((t) => t.uri !== cur.uri)].slice(0, 40);
@@ -865,7 +866,7 @@ const ConsoleMainApp: React.FC = () => {
           return prev;
         });
       })
-      .catch(() => {});
+      .catch(() => { });
 
     defaultSimpClient
       .query<PlaylistRecord[]>('get_playlists')
@@ -878,7 +879,7 @@ const ConsoleMainApp: React.FC = () => {
           );
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [browserSourceFilter, browserSearch]);
 
   useEffect(() => {
@@ -905,17 +906,17 @@ const ConsoleMainApp: React.FC = () => {
           fetch('/api/soundcloud/client-auth', { method: 'POST' })
             .then(() => defaultSimpClient.getSoundCloudAuthConfig())
             .then((nextCfg) => setSoundcloudAuthCfg(nextCfg))
-            .catch(() => {});
+            .catch(() => { });
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     if (sourceModalOpen || powerModalOpen) {
       defaultSimpClient
         .getAppleMusicAuthConfig()
         .then((cfg) => {
           setAppleAuthCfg(cfg);
         })
-        .catch(() => {});
+        .catch(() => { });
     }
     if (!sourceModalOpen && !powerModalOpen) {
       setConfirmHardReset(false);
@@ -934,7 +935,7 @@ const ConsoleMainApp: React.FC = () => {
       defaultSimpClient
         .query<TrackMetadata[]>('get_album_tracks', { album_id: browserTarget.id })
         .then(setBrowserTracks)
-        .catch(() => {});
+        .catch(() => { });
     } else if (browserTarget.kind === 'playlist') {
       defaultSimpClient
         .query<TrackMetadata[]>('get_playlist_items', {
@@ -943,7 +944,7 @@ const ConsoleMainApp: React.FC = () => {
           offset: 0,
         })
         .then(setBrowserTracks)
-        .catch(() => {});
+        .catch(() => { });
     } else if (browserTarget.kind === 'mount') {
       defaultSimpClient
         .query<TrackMetadata[]>('get_tracks', {
@@ -954,7 +955,7 @@ const ConsoleMainApp: React.FC = () => {
           offset: 0,
         })
         .then(setBrowserTracks)
-        .catch(() => {});
+        .catch(() => { });
     } else if (browserTarget.kind === 'cdda') {
       setBrowserTracks(opticalDisc?.tracks || []);
     } else if (
@@ -966,7 +967,7 @@ const ConsoleMainApp: React.FC = () => {
         .then((tracks) => {
           setBrowserTracks(tracks);
         })
-        .catch(() => {});
+        .catch(() => { });
     } else if (
       browserTarget.kind === 'soundcloud_playlist' &&
       browserTarget.id !== 'active_queue' &&
@@ -976,7 +977,7 @@ const ConsoleMainApp: React.FC = () => {
         .then((tracks) => {
           setBrowserTracks(tracks);
         })
-        .catch(() => {});
+        .catch(() => { });
     } else if (
       browserTarget.kind === 'cloud_album' &&
       activeCloudAlbum?.id !== browserTarget.id
@@ -986,7 +987,7 @@ const ConsoleMainApp: React.FC = () => {
           setActiveCloudAlbum(album);
           setBrowserTracks(tracks);
         })
-        .catch(() => {});
+        .catch(() => { });
     }
   }, [
     browserTarget,
@@ -1019,9 +1020,8 @@ const ConsoleMainApp: React.FC = () => {
                 kind: 'cdda',
                 id: res.disc_id || res.device_path || '/dev/sr0',
                 title: `📀 ${res.album_title || 'DVD Video'}`,
-                subtitle: `${res.artist_name || 'DVD-Video'}${
-                  res.release_year ? ` • ${res.release_year}` : ''
-                }`,
+                subtitle: `${res.artist_name || 'DVD-Video'}${res.release_year ? ` • ${res.release_year}` : ''
+                  }`,
                 art_url: res.art_url,
               };
             }
@@ -1029,9 +1029,8 @@ const ConsoleMainApp: React.FC = () => {
               kind: 'cdda',
               id: res.disc_id || res.device_path || '/dev/sr0',
               title: `💿 ${res.album_title || 'Audio CD'}`,
-              subtitle: `${res.artist_name || 'Unknown Artist'}${
-                res.release_year ? ` • ${res.release_year}` : ''
-              }${res.disc_id ? ` • DiscID ${res.disc_id.slice(0, 8)}…` : ''}`,
+              subtitle: `${res.artist_name || 'Unknown Artist'}${res.release_year ? ` • ${res.release_year}` : ''
+                }${res.disc_id ? ` • DiscID ${res.disc_id.slice(0, 8)}…` : ''}`,
               art_url: res.art_url,
             };
           }
@@ -1056,14 +1055,14 @@ const ConsoleMainApp: React.FC = () => {
     setOpticalDisc((prev) =>
       prev
         ? {
-            ...prev,
-            disc_present: false,
-            is_audio_cd: false,
-            is_dvd_video: false,
-            dvd_titles: [],
-            tracks: [],
-            status_message: 'Tray ejected',
-          }
+          ...prev,
+          disc_present: false,
+          is_audio_cd: false,
+          is_dvd_video: false,
+          dvd_titles: [],
+          tracks: [],
+          status_message: 'Tray ejected',
+        }
         : null
     );
     setBrowserTarget((prev) => (prev?.kind === 'cdda' ? null : prev));
@@ -1396,7 +1395,7 @@ const ConsoleMainApp: React.FC = () => {
             },
           ]);
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => {
           swrInFlightRef.current.delete('sc:likes_sets');
           setCloudLoading(false);
@@ -1427,7 +1426,7 @@ const ConsoleMainApp: React.FC = () => {
             },
           ]);
         })
-        .catch(() => {})
+        .catch(() => { })
         .finally(() => {
           swrInFlightRef.current.delete('sc:stream_radio');
           setCloudLoading(false);
@@ -1525,7 +1524,7 @@ const ConsoleMainApp: React.FC = () => {
         promises.push(
           searchAppleMusicCatalog(term)
             .then((res) => setCatalogSearchResults(res))
-            .catch(() => {})
+            .catch(() => { })
         );
       } else {
         setCatalogSearchResults({ songs: [], albums: [], playlists: [], stations: [] });
@@ -1534,7 +1533,7 @@ const ConsoleMainApp: React.FC = () => {
         promises.push(
           searchSoundCloudCatalog(term)
             .then((res) => setScCatalogSearchResults(res))
-            .catch(() => {})
+            .catch(() => { })
         );
       } else {
         setScCatalogSearchResults({ songs: [], playlists: [] });
@@ -1740,12 +1739,12 @@ const ConsoleMainApp: React.FC = () => {
 
   const isOverlayOrPopoverOpen = Boolean(
     sourceModalOpen ||
-      powerModalOpen ||
-      volumePopoverOpen ||
-      brightnessPopoverOpen ||
-      quickHelpOpen ||
-      oskTarget ||
-      pendingHybridAdd
+    powerModalOpen ||
+    volumePopoverOpen ||
+    brightnessPopoverOpen ||
+    quickHelpOpen ||
+    oskTarget ||
+    pendingHybridAdd
   );
 
   // Auto-dismiss transient volume/brightness popovers after 8s of inactivity so
@@ -1803,19 +1802,19 @@ const ConsoleMainApp: React.FC = () => {
     const gpPoll =
       view === 'lock'
         ? window.setInterval(() => {
-            const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-            for (const p of pads) {
-              if (!p) continue;
-              const pressed = p.buttons.map((b) => (b.pressed ? '1' : '0')).join('');
-              const axes = p.axes.map((a) => (Math.abs(a) > 0.3 ? a.toFixed(1) : '0')).join(',');
-              const sig = `${pressed}|${axes}`;
-              if (lastGpSig && sig !== lastGpSig) {
-                resetIdleTimer();
-              }
-              lastGpSig = sig;
-              break;
+          const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for (const p of pads) {
+            if (!p) continue;
+            const pressed = p.buttons.map((b) => (b.pressed ? '1' : '0')).join('');
+            const axes = p.axes.map((a) => (Math.abs(a) > 0.3 ? a.toFixed(1) : '0')).join(',');
+            const sig = `${pressed}|${axes}`;
+            if (lastGpSig && sig !== lastGpSig) {
+              resetIdleTimer();
             }
-          }, 150)
+            lastGpSig = sig;
+            break;
+          }
+        }, 150)
         : undefined;
 
     return () => {
@@ -2012,6 +2011,27 @@ const ConsoleMainApp: React.FC = () => {
     []
   );
 
+  const openLocalMountInBrowser = useCallback(
+    (mountRoot: string, targetPath?: string, toastMsg?: string) => {
+      const subpath = targetPath ? computeRelativeSubpath(mountRoot, targetPath) : '';
+      if (toastMsg) {
+        showToast(toastMsg);
+      } else if (subpath) {
+        showToast(`Already indexed — opening "${subpath}"`);
+      } else {
+        showToast(`Already indexed under "${mountRoot}" — opening folder`);
+      }
+      setSourceModalOpen(false);
+      setView('browser');
+      window.dispatchEvent(
+        new CustomEvent('simp-open-local-mount', { detail: { path: mountRoot, subpath } })
+      );
+    },
+    [setView, showToast]
+  );
+  const openLocalMountInBrowserRef = useRef(openLocalMountInBrowser);
+  openLocalMountInBrowserRef.current = openLocalMountInBrowser;
+
   useEffect(() => {
     const onOpenTrackProps = (ev: Event) => {
       const detail = (ev as CustomEvent).detail;
@@ -2045,7 +2065,7 @@ const ConsoleMainApp: React.FC = () => {
             reason: soundcloud.reason,
           });
         }
-      } catch {}
+      } catch { }
     };
     const initialTimer = window.setTimeout(runProbe, 3500);
     const interval = window.setInterval(runProbe, 30 * 60 * 1000);
@@ -2176,7 +2196,7 @@ const ConsoleMainApp: React.FC = () => {
               const resolved = stripVerbatimPrefix(String(res.resolved_folder));
               const covering = findCoveringParentMount(resolved, mountsRef.current);
               if (covering) {
-                showToast(`Already included under parent Local Folder: ${covering}`);
+                openLocalMountInBrowserRef.current(covering, resolved);
               } else {
                 setPendingDroppedFolder(resolved);
               }
@@ -2194,7 +2214,7 @@ const ConsoleMainApp: React.FC = () => {
       if (extractedPath) {
         const covering = findCoveringParentMount(extractedPath, mountsRef.current);
         if (covering) {
-          showToast(`Already included under parent Local Folder: ${covering}`);
+          openLocalMountInBrowserRef.current(covering, extractedPath);
         } else {
           setPendingDroppedFolder(extractedPath);
         }
@@ -2328,7 +2348,7 @@ const ConsoleMainApp: React.FC = () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ playlist_id: found.id }),
-          }).catch(() => {});
+          }).catch(() => { });
         }
         targetPlId = found?.id || explicitPlaylistId;
         targetPlName = found?.name || 'IMP Playlist';
@@ -2408,18 +2428,18 @@ const ConsoleMainApp: React.FC = () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(favTrack),
-    }).catch(() => {});
+    }).catch(() => { });
 
     if (favTrack.source === 'apple_music') {
-      setAppleItemFavorited(favTrack.uri, 'songs', nextFav, showToast).catch(() => {});
+      setAppleItemFavorited(favTrack.uri, 'songs', nextFav, showToast).catch(() => { });
     } else if (favTrack.source === 'soundcloud') {
       if (nextFav) {
-        likeSoundCloudTrack(favTrack.uri, showToast).catch(() => {});
+        likeSoundCloudTrack(favTrack.uri, showToast).catch(() => { });
         setScLikedTracks((prev) =>
           prev.some((t) => t.uri === favTrack.uri) ? prev : [favTrack, ...prev]
         );
       } else {
-        unlikeSoundCloudTrack(favTrack.uri, showToast).catch(() => {});
+        unlikeSoundCloudTrack(favTrack.uri, showToast).catch(() => { });
         setScLikedTracks((prev) => prev.filter((t) => t.uri !== favTrack.uri));
       }
     }
@@ -2453,7 +2473,7 @@ const ConsoleMainApp: React.FC = () => {
           playlist_id: favPl.id,
           track_uri: favTrack.uri,
         })
-        .catch(() => {});
+        .catch(() => { });
       refreshLibraryData();
       if (favTrack.source !== 'apple_music' && favTrack.source !== 'soundcloud') {
         showToast(`Removed "${favTrack.title}" from ❤️ Favorites`);
@@ -2490,7 +2510,7 @@ const ConsoleMainApp: React.FC = () => {
                 },
               ]);
             })
-            .catch(() => {});
+            .catch(() => { });
         }
       } catch (err: any) {
         showToast(err?.message || 'Could not add to Apple Music Cloud Library');
@@ -2575,7 +2595,7 @@ const ConsoleMainApp: React.FC = () => {
     try {
       await defaultSimpClient.query('delete_playlist', { playlist_id: playlistId });
       if (playlistId.startsWith('soundcloud:playlist:')) {
-        setSoundCloudPlaylistLiked(playlistId, false).catch(() => {});
+        setSoundCloudPlaylistLiked(playlistId, false).catch(() => { });
       }
       setBrowserTarget((prev) =>
         prev?.kind === 'playlist' && prev.id === playlistId
@@ -2656,17 +2676,18 @@ const ConsoleMainApp: React.FC = () => {
     if (!cleaned) return;
     const covering = findCoveringParentMount(cleaned, mountsRef.current);
     if (covering) {
-      showToast(`Already included under parent Local Folder: ${covering}`);
+      if (opts?.navigateAfterAdd) {
+        openLocalMountInBrowser(covering, cleaned);
+      } else {
+        showToast(`Already included under parent Local Folder: ${covering}`);
+      }
       return;
     }
     defaultSimpClient.addLibraryPath(cleaned);
     setCustomFolderPath('');
     showToast(`Scanning folder: ${cleaned}`);
     if (opts?.navigateAfterAdd) {
-      setView('browser');
-      window.dispatchEvent(
-        new CustomEvent('simp-open-local-mount', { detail: { path: cleaned } })
-      );
+      openLocalMountInBrowser(cleaned, undefined, `Scanning folder: ${cleaned}`);
     }
     window.setTimeout(() => refreshLibraryData(), 700);
   };
@@ -2898,125 +2919,125 @@ const ConsoleMainApp: React.FC = () => {
         powerModalOpen={powerModalOpen}
         setPowerModalOpen={setPowerModalOpen}
         snap={snap}
-          track={track}
-          albums={albums}
-          playlists={playlists}
-          browserSourceFilter={browserSourceFilter}
-          setBrowserSourceFilter={setBrowserSourceFilter}
-          selectedSources={selectedSources}
-          setSelectedSources={setSelectedSources}
-          setBrowserSourceFilterRaw={setBrowserSourceFilterState}
-          browseHubTarget={browseHubTarget}
-          setBrowseHubTarget={setBrowseHubTarget}
-          browserSearch={browserSearch}
-          setBrowserSearch={setBrowserSearch}
-          searchPreferredSource={searchPreferredSource}
-          browserTarget={browserTarget}
-          setBrowserTarget={setBrowserTarget}
-          browserTracks={browserTracks}
-          setBrowserTracks={setBrowserTracks}
-          opticalDisc={opticalDisc}
-          cdScanning={cdScanning}
-          handleScanOpticalDisc={handleScanOpticalDisc}
-          handleEjectOpticalDisc={handleEjectOpticalDisc}
-          appleSubTab={appleSubTab}
-          setAppleSubTab={setAppleSubTab}
-          cloudPlaylists={cloudPlaylists}
-          setCloudPlaylists={setCloudPlaylists}
-          radioStations={radioStations}
-          setRadioStations={setRadioStations}
-          personalRadioStations={personalRadioStations}
-          setPersonalRadioStations={setPersonalRadioStations}
-          liveRadioStations={liveRadioStations}
-          setLiveRadioStations={setLiveRadioStations}
-          artistRadioShows={artistRadioShows}
-          setArtistRadioShows={setArtistRadioShows}
-          clubMixes={clubMixes}
-          setClubMixes={setClubMixes}
-          genreRadioStations={genreRadioStations}
-          setGenreRadioStations={setGenreRadioStations}
-          forYouPlaylists={forYouPlaylists}
-          setForYouPlaylists={setForYouPlaylists}
-          forYouAlbums={forYouAlbums}
-          setForYouAlbums={setForYouAlbums}
-          forYouNewReleases={forYouNewReleases}
-          setForYouNewReleases={setForYouNewReleases}
-          forYouShelves={forYouShelves}
-          setForYouShelves={setForYouShelves}
-          appleRecentlyPlayedTracks={appleRecentlyPlayedTracks}
-          setAppleRecentlyPlayedTracks={setAppleRecentlyPlayedTracks}
-          newFeedRecentReleases={newFeedRecentReleases}
-          setNewFeedRecentReleases={setNewFeedRecentReleases}
-          newFeedAlbums={newFeedAlbums}
-          setNewFeedAlbums={setNewFeedAlbums}
-          newFeedPlaylists={newFeedPlaylists}
-          setNewFeedPlaylists={setNewFeedPlaylists}
-          newFeedSongs={newFeedSongs}
-          setNewFeedSongs={setNewFeedSongs}
-          catalogSearchResults={catalogSearchResults}
-          cloudLoading={cloudLoading}
-          setCloudLoading={setCloudLoading}
-          activeCloudAlbum={activeCloudAlbum}
-          activeCloudPlaylist={activeCloudPlaylist}
-          soundCloudSubTab={soundCloudSubTab}
-          setSoundCloudSubTab={setSoundCloudSubTab}
-          scLikedTracks={scLikedTracks}
-          setScLikedTracks={setScLikedTracks}
-          scPlaylists={scPlaylists}
-          setScPlaylists={setScPlaylists}
-          scStreamTracks={scStreamTracks}
-          setScStreamTracks={setScStreamTracks}
-          scStreamPlaylists={scStreamPlaylists}
-          setScStreamPlaylists={setScStreamPlaylists}
-          scTrendingTracks={scTrendingTracks}
-          setScTrendingTracks={setScTrendingTracks}
-          scTrendingMixes={scTrendingMixes}
-          setScTrendingMixes={setScTrendingMixes}
-          scTrendingPlaylists={scTrendingPlaylists}
-          setScTrendingPlaylists={setScTrendingPlaylists}
-          scMoreOfWhatYouLike={scMoreOfWhatYouLike}
-          scFreshUploads={scFreshUploads}
-          scRecommendedArtists={scRecommendedArtists}
-          scDiscoverNextHref={scDiscoverNextHref}
-          setScDiscoverNextHref={setScDiscoverNextHref}
-          scSelectedGenre={scSelectedGenre}
-          setScSelectedGenre={setScSelectedGenre}
-          scCatalogSearchResults={scCatalogSearchResults}
-          setScCatalogSearchResults={setScCatalogSearchResults}
-          activeScPlaylist={activeScPlaylist}
-          creatingPlaylist={creatingPlaylist}
-          setCreatingPlaylist={setCreatingPlaylist}
-          newPlaylistName={newPlaylistName}
-          setNewPlaylistName={setNewPlaylistName}
-          activePlaylistId={activePlaylistId}
-          setActivePlaylistId={setActivePlaylistId}
-          playingContextId={playingContextId}
-          setPlayingContextId={setPlayingContextId}
-          setOskTarget={setOskTarget}
-          setSourceModalOpen={setSourceModalOpen}
-          setView={setView}
-          applyFocusMarker={applyFocusMarker}
-          handleCreatePlaylist={handleCreatePlaylist}
-          handleAddTracksToPlaylist={handleAddTracksToPlaylist}
-          handleFavoriteTrack={handleFavoriteTrack}
-          handleAddAppleToCloudLibrary={handleAddAppleToCloudLibrary}
-          favoritedUris={favoritedUris}
-          handleRemoveTrackFromPlaylist={handleRemoveTrackFromPlaylist}
-          handleDeletePlaylist={handleDeletePlaylist}
-          handleDeleteAlbum={handleDeleteAlbum}
-          handlePinCloudPlaylist={handlePinCloudPlaylist}
-          handlePinCloudAlbum={handlePinCloudAlbum}
-          handleOpenCloudPlaylist={handleOpenCloudPlaylist}
-          handleOpenFullAppleAlbum={handleOpenFullAppleAlbum}
-          handleStartAppleStation={handleStartAppleStation}
-          handleOpenSoundCloudPlaylist={handleOpenSoundCloudPlaylist}
-          handlePinSoundCloudPlaylist={handlePinSoundCloudPlaylist}
-          handleStartSoundCloudTrackRadio={handleStartSoundCloudTrackRadio}
-          sourceVisibility={sourceVisibility}
-          recentlyPlayed={recentlyPlayed}
-          showToast={showToast}
-          handleRemoveFolder={handleRemoveFolder}
-        />
+        track={track}
+        albums={albums}
+        playlists={playlists}
+        browserSourceFilter={browserSourceFilter}
+        setBrowserSourceFilter={setBrowserSourceFilter}
+        selectedSources={selectedSources}
+        setSelectedSources={setSelectedSources}
+        setBrowserSourceFilterRaw={setBrowserSourceFilterState}
+        browseHubTarget={browseHubTarget}
+        setBrowseHubTarget={setBrowseHubTarget}
+        browserSearch={browserSearch}
+        setBrowserSearch={setBrowserSearch}
+        searchPreferredSource={searchPreferredSource}
+        browserTarget={browserTarget}
+        setBrowserTarget={setBrowserTarget}
+        browserTracks={browserTracks}
+        setBrowserTracks={setBrowserTracks}
+        opticalDisc={opticalDisc}
+        cdScanning={cdScanning}
+        handleScanOpticalDisc={handleScanOpticalDisc}
+        handleEjectOpticalDisc={handleEjectOpticalDisc}
+        appleSubTab={appleSubTab}
+        setAppleSubTab={setAppleSubTab}
+        cloudPlaylists={cloudPlaylists}
+        setCloudPlaylists={setCloudPlaylists}
+        radioStations={radioStations}
+        setRadioStations={setRadioStations}
+        personalRadioStations={personalRadioStations}
+        setPersonalRadioStations={setPersonalRadioStations}
+        liveRadioStations={liveRadioStations}
+        setLiveRadioStations={setLiveRadioStations}
+        artistRadioShows={artistRadioShows}
+        setArtistRadioShows={setArtistRadioShows}
+        clubMixes={clubMixes}
+        setClubMixes={setClubMixes}
+        genreRadioStations={genreRadioStations}
+        setGenreRadioStations={setGenreRadioStations}
+        forYouPlaylists={forYouPlaylists}
+        setForYouPlaylists={setForYouPlaylists}
+        forYouAlbums={forYouAlbums}
+        setForYouAlbums={setForYouAlbums}
+        forYouNewReleases={forYouNewReleases}
+        setForYouNewReleases={setForYouNewReleases}
+        forYouShelves={forYouShelves}
+        setForYouShelves={setForYouShelves}
+        appleRecentlyPlayedTracks={appleRecentlyPlayedTracks}
+        setAppleRecentlyPlayedTracks={setAppleRecentlyPlayedTracks}
+        newFeedRecentReleases={newFeedRecentReleases}
+        setNewFeedRecentReleases={setNewFeedRecentReleases}
+        newFeedAlbums={newFeedAlbums}
+        setNewFeedAlbums={setNewFeedAlbums}
+        newFeedPlaylists={newFeedPlaylists}
+        setNewFeedPlaylists={setNewFeedPlaylists}
+        newFeedSongs={newFeedSongs}
+        setNewFeedSongs={setNewFeedSongs}
+        catalogSearchResults={catalogSearchResults}
+        cloudLoading={cloudLoading}
+        setCloudLoading={setCloudLoading}
+        activeCloudAlbum={activeCloudAlbum}
+        activeCloudPlaylist={activeCloudPlaylist}
+        soundCloudSubTab={soundCloudSubTab}
+        setSoundCloudSubTab={setSoundCloudSubTab}
+        scLikedTracks={scLikedTracks}
+        setScLikedTracks={setScLikedTracks}
+        scPlaylists={scPlaylists}
+        setScPlaylists={setScPlaylists}
+        scStreamTracks={scStreamTracks}
+        setScStreamTracks={setScStreamTracks}
+        scStreamPlaylists={scStreamPlaylists}
+        setScStreamPlaylists={setScStreamPlaylists}
+        scTrendingTracks={scTrendingTracks}
+        setScTrendingTracks={setScTrendingTracks}
+        scTrendingMixes={scTrendingMixes}
+        setScTrendingMixes={setScTrendingMixes}
+        scTrendingPlaylists={scTrendingPlaylists}
+        setScTrendingPlaylists={setScTrendingPlaylists}
+        scMoreOfWhatYouLike={scMoreOfWhatYouLike}
+        scFreshUploads={scFreshUploads}
+        scRecommendedArtists={scRecommendedArtists}
+        scDiscoverNextHref={scDiscoverNextHref}
+        setScDiscoverNextHref={setScDiscoverNextHref}
+        scSelectedGenre={scSelectedGenre}
+        setScSelectedGenre={setScSelectedGenre}
+        scCatalogSearchResults={scCatalogSearchResults}
+        setScCatalogSearchResults={setScCatalogSearchResults}
+        activeScPlaylist={activeScPlaylist}
+        creatingPlaylist={creatingPlaylist}
+        setCreatingPlaylist={setCreatingPlaylist}
+        newPlaylistName={newPlaylistName}
+        setNewPlaylistName={setNewPlaylistName}
+        activePlaylistId={activePlaylistId}
+        setActivePlaylistId={setActivePlaylistId}
+        playingContextId={playingContextId}
+        setPlayingContextId={setPlayingContextId}
+        setOskTarget={setOskTarget}
+        setSourceModalOpen={setSourceModalOpen}
+        setView={setView}
+        applyFocusMarker={applyFocusMarker}
+        handleCreatePlaylist={handleCreatePlaylist}
+        handleAddTracksToPlaylist={handleAddTracksToPlaylist}
+        handleFavoriteTrack={handleFavoriteTrack}
+        handleAddAppleToCloudLibrary={handleAddAppleToCloudLibrary}
+        favoritedUris={favoritedUris}
+        handleRemoveTrackFromPlaylist={handleRemoveTrackFromPlaylist}
+        handleDeletePlaylist={handleDeletePlaylist}
+        handleDeleteAlbum={handleDeleteAlbum}
+        handlePinCloudPlaylist={handlePinCloudPlaylist}
+        handlePinCloudAlbum={handlePinCloudAlbum}
+        handleOpenCloudPlaylist={handleOpenCloudPlaylist}
+        handleOpenFullAppleAlbum={handleOpenFullAppleAlbum}
+        handleStartAppleStation={handleStartAppleStation}
+        handleOpenSoundCloudPlaylist={handleOpenSoundCloudPlaylist}
+        handlePinSoundCloudPlaylist={handlePinSoundCloudPlaylist}
+        handleStartSoundCloudTrackRadio={handleStartSoundCloudTrackRadio}
+        sourceVisibility={sourceVisibility}
+        recentlyPlayed={recentlyPlayed}
+        showToast={showToast}
+        handleRemoveFolder={handleRemoveFolder}
+      />
 
       {/* Unified Top-Left Hamburger (☰ / START) Nested Settings Drawer */}
       {(sourceModalOpen || powerModalOpen) && (
@@ -3081,13 +3102,13 @@ const ConsoleMainApp: React.FC = () => {
           onClose={() => {
             try {
               window.localStorage.setItem('simp_oobe_help_seen_v1', '1');
-            } catch {}
+            } catch { }
             setQuickHelpOpen(false);
           }}
           onOpenFoldersAccounts={() => {
             try {
               window.localStorage.setItem('simp_oobe_help_seen_v1', '1');
-            } catch {}
+            } catch { }
             setQuickHelpOpen(false);
             setInitialOpenFoldersAccounts(true);
             setSourceModalOpen(true);
@@ -3099,7 +3120,7 @@ const ConsoleMainApp: React.FC = () => {
               const next = { ...prev, [key]: nextVal };
               try {
                 window.localStorage.setItem('simp_source_visibility_v2', JSON.stringify(next));
-              } catch {}
+              } catch { }
               if (key === 'internet_archive') {
                 defaultSimpClient.configureInternetArchive({
                   enabled: nextVal,

@@ -562,6 +562,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [activeMountRoot, setActiveMountRoot] = useState<string | null>(null);
   const [localSubTab, setLocalSubTab] = useState<LocalSubTab>('overview');
   const [localFolderPath, setLocalFolderPath] = useState<string>('');
+  const [leftMountDrillOpen, setLeftMountDrillOpen] = useState<boolean>(false);
+  const [previewFolderPath, setPreviewFolderPath] = useState<string | null>(null);
   const [localGenreFilter, setLocalGenreFilter] = useState<string>('all');
   const [localYearFilter, setLocalYearFilter] = useState<string>('all');
   const [localArtworkFilter, setLocalArtworkFilter] = useState<LocalArtworkFilter>('all');
@@ -654,6 +656,22 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     window.addEventListener('simp-track-properties-updated', bump);
     return () => window.removeEventListener('simp-track-properties-updated', bump);
   }, []);
+  const totalMountTracks = useMemo(
+    () => (snap?.mounts || []).reduce((sum, m) => sum + (m.track_count || 0), 0),
+    [snap?.mounts]
+  );
+  useEffect(() => {
+    setPreviewFolderPath(null);
+  }, [localFolderPath, activeMountRoot, browseHubTarget, localSubTab]);
+  useEffect(() => {
+    if (
+      !activeMountRoot ||
+      (browseHubTarget !== 'mount' &&
+        !(browseHubTarget === 'local_discover' && localSubTab === 'folders'))
+    ) {
+      setLeftMountDrillOpen(false);
+    }
+  }, [activeMountRoot, browseHubTarget, localSubTab]);
   useEffect(() => {
     defaultSimpClient
       .query<TrackMetadata[]>('get_tracks', {
@@ -667,7 +685,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (Array.isArray(res)) setAllLocalTracks(res);
       })
       .catch(() => {});
-  }, [albums.length, snap?.mounts?.length, allLocalTracksVersion]);
+  }, [albums.length, snap?.mounts?.length, totalMountTracks, allLocalTracksVersion]);
   const allLocalAlbums = useMemo(
     () => albums.filter((alb) => !alb.id.startsWith('applemusic:album:')),
     [albums]
@@ -1555,7 +1573,34 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     [applyRightPaneTileFocus]
   );
 
-  const pendingDroppedMountPathRef = useRef<string | null>(null);
+  const focusLeftMountDrill = useCallback(
+    (preferSelector?: string) => {
+      if (xmbPreviewTriggerRef.current) return;
+      pendingRightFocusRef.current = null;
+      window.setTimeout(() => {
+        const leftCol = document.querySelector<HTMLElement>('[data-nav-col="left"]');
+        if (!leftCol) return;
+        const target =
+          (preferSelector ? leftCol.querySelector<HTMLElement>(preferSelector) : null) ||
+          leftCol.querySelector<HTMLElement>('[data-left-folder-path]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-folder-up="true"]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-drill-back="true"]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-context-kind="mount"]:not([disabled])');
+        if (target) {
+          applyFocusMarker(target);
+        } else {
+          focusRightPaneFirstTile();
+        }
+      }, 45);
+    },
+    [applyFocusMarker, focusRightPaneFirstTile]
+  );
+
+  const pendingDroppedMountPathRef = useRef<{
+    path: string;
+    subpath: string;
+    expiresAt: number;
+  } | null>(null);
   const normalizeMountCompare = useCallback((rawPath: string) => {
     let p = rawPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     const winDrive = p.match(/^([a-zA-Z]):\/(.*)$/);
@@ -1568,27 +1613,43 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     return p;
   }, []);
 
+  const ensureLocalSourceEnabled = useCallback(() => {
+    if (!isSourceIncluded('local')) {
+      setSelectedSources((prev) => (prev.includes('local') ? prev : [...prev, 'local']));
+    }
+  }, [isSourceIncluded, setSelectedSources]);
+
   const tryOpenPendingDroppedMount = useCallback(
     (mountsList: SimpStateSnapshot['mounts'] | undefined) => {
       const wanted = pendingDroppedMountPathRef.current;
-      if (!wanted || !mountsList || mountsList.length === 0) return false;
-      const wantedNorm = normalizeMountCompare(wanted);
+      if (!wanted) return false;
+      if (Date.now() > wanted.expiresAt) {
+        pendingDroppedMountPathRef.current = null;
+        return false;
+      }
+      if (!mountsList || mountsList.length === 0) return false;
+      const wantedNorm = normalizeMountCompare(wanted.path);
       const matched = mountsList.find(
         (m) => normalizeMountCompare(m.mount_root) === wantedNorm
       );
       if (!matched) return false;
       pendingDroppedMountPathRef.current = null;
+      ensureLocalSourceEnabled();
       setBrowserSearch('');
       setActiveMountRoot(matched.mount_root);
-      setLocalFolderPath('');
+      setPreviewFolderPath(null);
+      setLocalFolderPath(wanted.subpath || '');
+      setLeftMountDrillOpen(true);
       setLocalSubTab('folders');
       setBrowseHubTarget('mount');
       setRightPaneMode('browse');
-      focusRightPaneFirstTile();
+      setAllLocalTracksVersion((v) => v + 1);
+      focusLeftMountDrill();
       return true;
     },
     [
-      focusRightPaneFirstTile,
+      ensureLocalSourceEnabled,
+      focusLeftMountDrill,
       normalizeMountCompare,
       setBrowseHubTarget,
       setBrowserSearch,
@@ -1597,14 +1658,49 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   useEffect(() => {
     const onOpenLocalMount = (ev: Event) => {
-      const path = (ev as CustomEvent<{ path?: string }>).detail?.path;
-      if (!path) return;
-      pendingDroppedMountPathRef.current = path;
-      tryOpenPendingDroppedMount(snap?.mounts);
+      const detail = (ev as CustomEvent<{ path?: string; subpath?: string }>).detail;
+      const rawPath = detail?.path?.trim();
+      if (!rawPath) return;
+      const cleanPath = rawPath.replace(/[\\/]+$/, '') || rawPath;
+      const subpath = detail?.subpath || '';
+      ensureLocalSourceEnabled();
+
+      const wantedNorm = normalizeMountCompare(cleanPath);
+      const existing = snap?.mounts.find(
+        (m) => normalizeMountCompare(m.mount_root) === wantedNorm
+      );
+      const targetRoot = existing ? existing.mount_root : cleanPath;
+
+      if (!existing) {
+        pendingDroppedMountPathRef.current = {
+          path: cleanPath,
+          subpath,
+          expiresAt: Date.now() + 180_000,
+        };
+      } else {
+        pendingDroppedMountPathRef.current = null;
+      }
+
+      setBrowserSearch('');
+      setActiveMountRoot(targetRoot);
+      setPreviewFolderPath(null);
+      setLocalFolderPath(subpath);
+      setLeftMountDrillOpen(true);
+      setLocalSubTab('folders');
+      setBrowseHubTarget('mount');
+      setRightPaneMode('browse');
+      focusLeftMountDrill();
     };
     window.addEventListener('simp-open-local-mount', onOpenLocalMount);
     return () => window.removeEventListener('simp-open-local-mount', onOpenLocalMount);
-  }, [snap?.mounts, tryOpenPendingDroppedMount]);
+  }, [
+    snap?.mounts,
+    ensureLocalSourceEnabled,
+    normalizeMountCompare,
+    setBrowseHubTarget,
+    setBrowserSearch,
+    focusLeftMountDrill,
+  ]);
 
   useEffect(() => {
     if (pendingDroppedMountPathRef.current && snap?.mounts) {
@@ -1977,6 +2073,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     activeMountRoot: string | null;
     localSubTab: LocalSubTab;
     localFolderPath: string;
+    leftMountDrillOpen?: boolean;
     browserSearch: string;
     impFypActive?: boolean;
     activeArtistProfile?: typeof activeArtistProfile;
@@ -2013,6 +2110,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           activeMountRoot,
           localSubTab,
           localFolderPath,
+          leftMountDrillOpen,
           browserSearch,
           impFypActive,
           activeArtistProfile,
@@ -2031,6 +2129,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           last.activeMountRoot === next.activeMountRoot &&
           last.localSubTab === next.localSubTab &&
           last.localFolderPath === next.localFolderPath &&
+          Boolean(last.leftMountDrillOpen) === Boolean(next.leftMountDrillOpen) &&
           last.browserSearch === next.browserSearch &&
           last.impFypActive === next.impFypActive &&
           last.activeArtistProfile?.idOrName === next.activeArtistProfile?.idOrName &&
@@ -2060,6 +2159,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       activeMountRoot,
       localSubTab,
       localFolderPath,
+      leftMountDrillOpen,
       browserSearch,
       impFypActive,
       activeArtistProfile,
@@ -2067,6 +2167,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   );
 
   const handleWalkBack = useCallback(() => {
+    const focusedInLeft = Boolean(
+      document.querySelector('[data-nav-col="left"] [data-simp-active-focus="true"]')
+    );
     const exitedTileKey =
       rightPaneMode === 'artist' && activeArtistProfile
         ? `artist:${activeArtistProfile.source}:${activeArtistProfile.idOrName}`
@@ -2087,7 +2190,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           entry.browseHubTarget !== browseHubTarget ||
           entry.activeMountRoot !== activeMountRoot ||
           entry.localSubTab !== localSubTab ||
-          entry.localFolderPath !== localFolderPath;
+          entry.localFolderPath !== localFolderPath ||
+          Boolean(entry.leftMountDrillOpen) !== leftMountDrillOpen;
         if (differs) {
           targetIdx = i;
           break;
@@ -2100,16 +2204,24 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         setAppleSubTab(prev.appleSubTab);
         setSoundCloudSubTab(prev.soundCloudSubTab);
         setIaSubTab(prev.iaSubTab);
+        setPreviewFolderPath(null);
         setActiveMountRoot(prev.activeMountRoot);
         setLocalSubTab(prev.localSubTab);
         setLocalFolderPath(prev.localFolderPath);
+        setLeftMountDrillOpen(Boolean(prev.leftMountDrillOpen));
         setBrowserSearch(prev.browserSearch);
         setBrowseHubTarget(prev.browseHubTarget);
         setBrowserTarget(prev.browserTarget);
         setBrowserTracks(prev.browserTracks);
         setActiveArtistProfile(prev.activeArtistProfile || null);
         setRightPaneMode(prev.rightPaneMode);
-        if (prev.rightPaneMode === 'browse') {
+        if (focusedInLeft && prev.rightPaneMode === 'browse') {
+          focusLeftMountDrill(
+            prev.leftMountDrillOpen
+              ? undefined
+              : '[data-left-context-kind="mount"]'
+          );
+        } else if (prev.rightPaneMode === 'browse') {
           focusRightPaneFirstTile({
             tileKey: prev.returnTileKey || exitedTileKey,
             scrollTop: prev.scrollTop,
@@ -2134,14 +2246,23 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     if ((browseHubTarget === 'local_discover' || browseHubTarget === 'mount') && normFolder) {
       const parts = normFolder.split('/').filter(Boolean);
       parts.pop();
+      setPreviewFolderPath(null);
       setLocalFolderPath(parts.join('/'));
+      if (focusedInLeft && leftMountDrillOpen) {
+        focusLeftMountDrill();
+      }
       return;
     }
     if (activeMountRoot) {
+      setLeftMountDrillOpen(false);
+      setPreviewFolderPath(null);
       setActiveMountRoot(null);
       setLocalFolderPath('');
       setBrowseHubTarget('local_discover');
       setLocalSubTab('folders');
+      if (focusedInLeft) {
+        focusLeftMountDrill('[data-left-context-kind="mount"]');
+      }
       return;
     }
     if (browseHubTarget !== 'imp_fyp' && browseHubTarget !== 'imp_library') {
@@ -2157,6 +2278,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     activeMountRoot,
     localSubTab,
     localFolderPath,
+    leftMountDrillOpen,
     browseHubTarget,
     setBrowseHubTarget,
     setBrowserSourceFilter,
@@ -2168,6 +2290,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     setBrowserTarget,
     setBrowserTracks,
     setRightPaneMode,
+    focusLeftMountDrill,
     focusRightPaneFirstTile,
     focusRightPaneFirstTrack,
   ]);
@@ -4033,6 +4156,13 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         onPlayLocalSmartStation={handlePlayLocalSmartStation}
         openLeftItemContextMenu={openLeftItemContextMenu}
         onOpenOpticalDisc={openOpticalDiscCollection}
+        localFolderPath={localFolderPath}
+        setPreviewFolderPath={setPreviewFolderPath}
+        leftMountDrillOpen={leftMountDrillOpen}
+        setLeftMountDrillOpen={setLeftMountDrillOpen}
+        allLocalTracks={allLocalTracks}
+        mountTracks={mountTracks}
+        focusLeftMountDrill={focusLeftMountDrill}
       />
 
       {/* =====================================================================
@@ -4146,8 +4276,11 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             setActiveMountRoot={setActiveMountRoot}
             localSubTab={localSubTab}
             setLocalSubTab={setLocalSubTab}
-            localFolderPath={localFolderPath}
-            setLocalFolderPath={setLocalFolderPath}
+            localFolderPath={previewFolderPath ?? localFolderPath}
+            setLocalFolderPath={(next) => {
+              setPreviewFolderPath(null);
+              setLocalFolderPath(next);
+            }}
             allLocalAlbums={allLocalAlbums}
             allLocalTracks={allLocalTracks}
             facetsSummary={localFacetsSummary}
@@ -4432,12 +4565,14 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           onPlayLocalSmartStation={handlePlayLocalSmartStation}
           handleStartAppleStation={handleStartAppleStation}
           onOpenMount={(mountRoot) => {
+            setPreviewFolderPath(null);
             setActiveMountRoot(mountRoot);
             setLocalFolderPath('');
+            setLeftMountDrillOpen(true);
             setLocalSubTab('folders');
             setBrowseHubTarget('mount');
             setRightPaneMode('browse');
-            focusRightPaneFirstTile();
+            focusLeftMountDrill();
           }}
           onRescanMount={(mountRoot, label) => {
             defaultSimpClient.addLibraryPath(mountRoot);
@@ -4445,6 +4580,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           }}
           onRemoveMount={(mountRoot, label) => {
             if (activeMountRoot === mountRoot) {
+              setLeftMountDrillOpen(false);
+              setPreviewFolderPath(null);
               setActiveMountRoot(null);
             }
             if (handleRemoveFolder) {

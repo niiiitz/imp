@@ -18,6 +18,11 @@ import {
   type BrowseHubTarget,
   type LocalSubTab,
 } from "../libraryHelpers";
+import {
+  buildLocalFolderDrillData,
+  hasSubfoldersAtPath,
+  parentFolderPath,
+} from "../localFolderTree";
 import { ImpIcon, ImpIconName } from "../../../components/icons/ImpIcon";
 import { LocalSmartStation } from "../../../api/servicesCacheApi";
 
@@ -322,6 +327,13 @@ export interface LibraryXmbLeftColumnProps {
     id?: string
   ) => void;
   onOpenOpticalDisc: () => void;
+  localFolderPath: string;
+  setPreviewFolderPath: React.Dispatch<React.SetStateAction<string | null>>;
+  leftMountDrillOpen: boolean;
+  setLeftMountDrillOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  allLocalTracks: TrackMetadata[];
+  mountTracks: TrackMetadata[];
+  focusLeftMountDrill: (preferSelector?: string) => void;
 }
 
 export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
@@ -381,6 +393,13 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   onPlayLocalSmartStation,
   openLeftItemContextMenu,
   onOpenOpticalDisc,
+  localFolderPath,
+  setPreviewFolderPath,
+  leftMountDrillOpen,
+  setLeftMountDrillOpen,
+  allLocalTracks,
+  mountTracks,
+  focusLeftMountDrill,
 }) => {
   const [impNavOpen, setImpNavOpen] = React.useState<boolean>(() => {
     try {
@@ -414,6 +433,40 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
       return next;
     });
   };
+  const prevDrillKeyRef = React.useRef<string>('');
+  React.useEffect(() => {
+    const key = leftMountDrillOpen && activeMountRoot ? activeMountRoot : '';
+    if (key && key !== prevDrillKeyRef.current) {
+      if (!placesOpen) togglePlacesOpen();
+      setLocalNavOpen(true);
+    }
+    prevDrillKeyRef.current = key;
+  }, [leftMountDrillOpen, activeMountRoot, placesOpen, togglePlacesOpen]);
+  const activeDrillMount = React.useMemo(() => {
+    if (!leftMountDrillOpen || !activeMountRoot) return null;
+    const matched = snap?.mounts.find((m) => m.mount_root === activeMountRoot);
+    if (matched) return matched;
+    const cleanRoot = activeMountRoot.replace(/[\\/]+$/, '');
+    const label = cleanRoot.split(/[\\/]/).pop() || activeMountRoot;
+    return {
+      mount_root: activeMountRoot,
+      label,
+      mount_kind: 'user_custom',
+      is_online: true,
+      track_count: 0,
+      last_scanned_at: 0,
+    };
+  }, [leftMountDrillOpen, activeMountRoot, snap?.mounts]);
+  const leftFolderDrill = React.useMemo(
+    () =>
+      buildLocalFolderDrillData({
+        mountRoot: activeDrillMount?.mount_root,
+        allLocalTracks,
+        mountTracks,
+        localFolderPath,
+      }),
+    [activeDrillMount?.mount_root, allLocalTracks, mountTracks, localFolderPath]
+  );
   const [localStationsSecOpen, setLocalStationsSecOpen] = React.useState<boolean>(() => {
     try {
       return window.localStorage.getItem('simp_sec_local_stations') !== '0';
@@ -1122,12 +1175,21 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                             ) {
                               pushCurrentNavState();
                             }
+                            setPreviewFolderPath(null);
                             if (hub.id !== 'folders') {
                               setActiveMountRoot(null);
                               setLocalFolderPath('');
+                              setLocalSubTab(hub.id);
+                              setBrowseHubTarget('local_discover');
+                            } else if (!isPreview || !leftMountDrillOpen) {
+                              if (!isPreview) {
+                                setLeftMountDrillOpen(false);
+                                setActiveMountRoot(null);
+                                setLocalFolderPath('');
+                              }
+                              setLocalSubTab(hub.id);
+                              setBrowseHubTarget('local_discover');
                             }
-                            setLocalSubTab(hub.id);
-                            setBrowseHubTarget('local_discover');
                             setRightPaneMode('browse');
                             if (!isPreview) focusRightPaneFirstTile();
                           }}
@@ -1243,87 +1305,369 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       </div>
                     )}
 
-                    {/* Storage Mounts inside Local */}
-                    {snap?.mounts.map((m) => {
-                      const isMountActive =
-                        (browseHubTarget === 'mount' ||
-                          (browseHubTarget === 'local_discover' && localSubTab === 'folders')) &&
-                        activeMountRoot === m.mount_root &&
-                        rightPaneMode === 'browse';
-                      return (
-                        <button
-                          key={m.mount_root}
-                          data-left-active={isMountActive ? 'true' : undefined}
-                          data-left-context-kind="mount"
-                          data-left-context-id={m.mount_root}
-                          data-xmb-preview="true"
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            openLeftItemContextMenu('mount', m.mount_root);
-                          }}
-                          onClick={() => {
-                            const isPreview = xmbPreviewTriggerRef.current;
-                            if (
-                              !isPreview &&
-                              (browseHubTarget !== 'mount' ||
-                                activeMountRoot !== m.mount_root ||
-                                rightPaneMode !== 'browse')
-                            ) {
-                              pushCurrentNavState();
-                            }
-                            setActiveMountRoot(m.mount_root);
-                            setLocalFolderPath('');
-                            setLocalSubTab('folders');
-                            setBrowseHubTarget('mount');
-                            setRightPaneMode('browse');
-                            if (!isPreview) {
-                              focusRightPaneFirstTile();
-                            }
-                          }}
-                          title={m.mount_root}
+                    {/* Storage Mounts or Local-Scoped Breadcrumb Drill inside Local */}
+                    {activeDrillMount ? (
+                      <div
+                        data-left-folder-drill="true"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                          padding: '6px',
+                          borderRadius: 8,
+                          background: '#071410',
+                          border: '1px solid #1a4736',
+                        }}
+                      >
+                        <div
                           style={{
-                            minHeight: 32,
-                            padding: '0 10px',
-                            borderRadius: 7,
-                            background: isMountActive ? '#0b241c' : '#08120e',
-                            border: isMountActive ? '1px solid #34d399' : '1px solid #143328',
-                            color: isMountActive ? '#6ee7b7' : '#34d399',
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                            textAlign: 'left',
                             display: 'flex',
-                            justifyContent: 'space-between',
                             alignItems: 'center',
-                            gap: 8,
-                            opacity: m.is_online ? 1 : 0.65,
+                            gap: 4,
+                            flexWrap: 'wrap',
                           }}
                         >
-                          <span
-                            style={{
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              minWidth: 0,
-                              flex: 1,
+                          <button
+                            data-left-drill-back="true"
+                            onMouseEnter={() => setPreviewFolderPath(null)}
+                            onFocus={() => setPreviewFolderPath(null)}
+                            onClick={() => {
+                              pushCurrentNavState();
+                              setPreviewFolderPath(null);
+                              setLeftMountDrillOpen(false);
+                              setLocalFolderPath('');
+                              setActiveMountRoot(null);
+                              setLocalSubTab('folders');
+                              setBrowseHubTarget('local_discover');
+                              setRightPaneMode('browse');
+                              focusLeftMountDrill('[data-left-context-kind="mount"]');
                             }}
-                          >
-                            💾 {m.label}
-                            {!m.is_online ? ' (Offline)' : ''} ({m.track_count})
-                          </span>
-                          <span
                             style={{
-                              fontSize: 10,
-                              fontFamily: 'monospace',
-                              color: isMountActive ? '#6ee7b7' : '#34d399',
+                              minHeight: 26,
+                              padding: '0 8px',
+                              borderRadius: 6,
+                              background: '#0b241c',
+                              border: '1px solid #34d399',
+                              color: '#6ee7b7',
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              cursor: 'pointer',
                               flexShrink: 0,
                             }}
                           >
-                            ⊞
-                          </span>
-                        </button>
-                      );
-                    })}
+                            ← Mounts
+                          </button>
+                          <button
+                            data-left-mount-root-chip="true"
+                            onMouseEnter={() => setPreviewFolderPath(null)}
+                            onFocus={() => setPreviewFolderPath(null)}
+                            onClick={() => {
+                              pushCurrentNavState();
+                              setPreviewFolderPath(null);
+                              setLocalFolderPath('');
+                              setBrowseHubTarget('mount');
+                              setRightPaneMode('browse');
+                              focusLeftMountDrill();
+                            }}
+                            title={activeDrillMount.mount_root}
+                            style={{
+                              minHeight: 26,
+                              padding: '0 8px',
+                              borderRadius: 6,
+                              background:
+                                leftFolderDrill.curPrefix === '' ? '#0f3025' : '#081712',
+                              border:
+                                leftFolderDrill.curPrefix === ''
+                                  ? '1px solid #34d399'
+                                  : '1px solid #163b2d',
+                              color: '#ecfdf5',
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '100%',
+                            }}
+                          >
+                            💾 {activeDrillMount.label}
+                          </button>
+                          {leftFolderDrill.breadcrumbs.map((seg, idx) => {
+                            const segRel = leftFolderDrill.breadcrumbs
+                              .slice(0, idx + 1)
+                              .join('/');
+                            const isCurrent = idx === leftFolderDrill.breadcrumbs.length - 1;
+                            return (
+                              <React.Fragment key={segRel}>
+                                <span
+                                  style={{
+                                    color: '#34d399',
+                                    fontSize: 10,
+                                    fontFamily: 'monospace',
+                                  }}
+                                >
+                                  ›
+                                </span>
+                                <button
+                                  onMouseEnter={() => setPreviewFolderPath(null)}
+                                  onFocus={() => setPreviewFolderPath(null)}
+                                  onClick={() => {
+                                    pushCurrentNavState();
+                                    setPreviewFolderPath(null);
+                                    setLocalFolderPath(segRel);
+                                    setBrowseHubTarget('mount');
+                                    setRightPaneMode('browse');
+                                    focusLeftMountDrill();
+                                  }}
+                                  title={segRel}
+                                  style={{
+                                    minHeight: 24,
+                                    padding: '0 7px',
+                                    borderRadius: 6,
+                                    background: isCurrent ? '#0f3025' : '#081712',
+                                    border: isCurrent
+                                      ? '1px solid #34d399'
+                                      : '1px solid #163b2d',
+                                    color: isCurrent ? '#a7f3d0' : '#d1fae5',
+                                    fontSize: 10.5,
+                                    fontWeight: isCurrent ? 800 : 600,
+                                    cursor: 'pointer',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    maxWidth: 150,
+                                  }}
+                                >
+                                  {seg}
+                                </button>
+                              </React.Fragment>
+                            );
+                          })}
+                        </div>
+
+                        {leftFolderDrill.curPrefix !== '' && (
+                          <button
+                            data-left-folder-up="true"
+                            onMouseEnter={() => setPreviewFolderPath(null)}
+                            onFocus={() => setPreviewFolderPath(null)}
+                            onClick={() => {
+                              pushCurrentNavState();
+                              setPreviewFolderPath(null);
+                              setLocalFolderPath(parentFolderPath(leftFolderDrill.curPrefix));
+                              setBrowseHubTarget('mount');
+                              setRightPaneMode('browse');
+                              focusLeftMountDrill();
+                            }}
+                            style={{
+                              minHeight: 30,
+                              padding: '0 10px',
+                              borderRadius: 7,
+                              background: '#091c15',
+                              border: '1px solid #1b4d3a',
+                              color: '#6ee7b7',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                            }}
+                          >
+                            <span>↖ Up (..)</span>
+                            <span style={{ fontSize: 10, fontFamily: 'monospace', color: '#34d399' }}>
+                              parent
+                            </span>
+                          </button>
+                        )}
+
+                        {leftFolderDrill.subfolders.map((sf) => {
+                          const hasNestedChildren = hasSubfoldersAtPath({
+                            mountRoot: activeDrillMount.mount_root,
+                            allLocalTracks,
+                            mountTracks,
+                            folderPath: sf.fullRelPath,
+                          });
+                          return (
+                            <button
+                              key={sf.fullRelPath}
+                              data-left-folder-path={sf.fullRelPath}
+                              data-xmb-preview="true"
+                              onClick={() => {
+                                const isPreview = xmbPreviewTriggerRef.current;
+                                if (isPreview) {
+                                  setPreviewFolderPath(sf.fullRelPath);
+                                  setBrowseHubTarget('mount');
+                                  setRightPaneMode('browse');
+                                  return;
+                                }
+                                pushCurrentNavState();
+                                setPreviewFolderPath(null);
+                                setLocalFolderPath(sf.fullRelPath);
+                                setBrowseHubTarget('mount');
+                                setRightPaneMode('browse');
+                                if (hasNestedChildren) {
+                                  focusLeftMountDrill();
+                                } else {
+                                  focusRightPaneFirstTile();
+                                }
+                              }}
+                              title={sf.fullRelPath}
+                              style={{
+                                minHeight: 30,
+                                padding: '0 10px',
+                                borderRadius: 7,
+                                background: '#08120e',
+                                border: '1px solid #143328',
+                                color: '#d1fae5',
+                                fontSize: 11.5,
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: 8,
+                              }}
+                            >
+                              <span
+                                style={{
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  minWidth: 0,
+                                  flex: 1,
+                                }}
+                              >
+                                📁 {sf.name} ({sf.trackCount})
+                              </span>
+                              <span
+                                style={{
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
+                                  color: '#34d399',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                {hasNestedChildren ? '▸' : '→'}
+                              </span>
+                            </button>
+                          );
+                        })}
+
+                        {leftFolderDrill.subfolders.length === 0 && (
+                          <div
+                            style={{
+                              padding: '4px 8px',
+                              fontSize: 10.5,
+                              fontFamily: 'monospace',
+                              color: '#6ee7b7',
+                              opacity: 0.85,
+                            }}
+                          >
+                            {activeDrillMount.track_count === 0 &&
+                            leftFolderDrill.directTracks.length === 0
+                              ? '⏳ Scanning folder…'
+                              : `${leftFolderDrill.directTracks.length} track${
+                                  leftFolderDrill.directTracks.length === 1 ? '' : 's'
+                                } here — press → to browse`}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      snap?.mounts.map((m) => {
+                        const isMountActive =
+                          (browseHubTarget === 'mount' ||
+                            (browseHubTarget === 'local_discover' && localSubTab === 'folders')) &&
+                          activeMountRoot === m.mount_root &&
+                          rightPaneMode === 'browse';
+                        return (
+                          <button
+                            key={m.mount_root}
+                            data-left-active={isMountActive ? 'true' : undefined}
+                            data-left-context-kind="mount"
+                            data-left-context-id={m.mount_root}
+                            data-xmb-preview="true"
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              openLeftItemContextMenu('mount', m.mount_root);
+                            }}
+                            onClick={() => {
+                              const isPreview = xmbPreviewTriggerRef.current;
+                              if (
+                                !isPreview &&
+                                (browseHubTarget !== 'mount' ||
+                                  activeMountRoot !== m.mount_root ||
+                                  rightPaneMode !== 'browse')
+                              ) {
+                                pushCurrentNavState();
+                              }
+                              setPreviewFolderPath(null);
+                              setActiveMountRoot(m.mount_root);
+                              setLocalFolderPath('');
+                              setLocalSubTab('folders');
+                              setBrowseHubTarget('mount');
+                              setRightPaneMode('browse');
+                              if (!isPreview) {
+                                setLeftMountDrillOpen(true);
+                                const hasKids = hasSubfoldersAtPath({
+                                  mountRoot: m.mount_root,
+                                  allLocalTracks,
+                                  mountTracks,
+                                  folderPath: '',
+                                });
+                                if (hasKids || m.track_count === 0) {
+                                  focusLeftMountDrill();
+                                } else {
+                                  focusRightPaneFirstTile();
+                                }
+                              }
+                            }}
+                            title={m.mount_root}
+                            style={{
+                              minHeight: 32,
+                              padding: '0 10px',
+                              borderRadius: 7,
+                              background: isMountActive ? '#0b241c' : '#08120e',
+                              border: isMountActive ? '1px solid #34d399' : '1px solid #143328',
+                              color: isMountActive ? '#6ee7b7' : '#34d399',
+                              fontSize: 11.5,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: 8,
+                              opacity: m.is_online ? 1 : 0.65,
+                            }}
+                          >
+                            <span
+                              style={{
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                minWidth: 0,
+                                flex: 1,
+                              }}
+                            >
+                              💾 {m.label}
+                              {!m.is_online ? ' (Offline)' : ''} ({m.track_count})
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                fontFamily: 'monospace',
+                                color: isMountActive ? '#6ee7b7' : '#34d399',
+                                flexShrink: 0,
+                              }}
+                            >
+                              ⊞
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
 
                     {/* Optical Disc Drive (cdda:// or dvd://) inside Local */}
                     {sourceVisibility.optical_drive && (

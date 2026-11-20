@@ -601,6 +601,19 @@ impl AudioOrchestrator {
                     cfg.library.initial_scan_completed = true;
                     let _ = crate::library::vdf::save_settings(&cfg);
                 }
+                let norm_path = std::path::PathBuf::from(&normalized);
+                if norm_path.is_dir() {
+                    let label = norm_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| normalized.clone());
+                    let _ = self.db.upsert_mount(&normalized, &label, "user_custom", true);
+                    if let Ok(mounts) = self.db.get_mounts() {
+                        let _ = self
+                            .broadcast_tx
+                            .send(PlaybackEvent::StorageMountsChanged { mounts });
+                    }
+                }
                 self.handle_command(AudioCommand::RescanStorage);
             }
             AudioCommand::RemoveLibraryPath { path } => {

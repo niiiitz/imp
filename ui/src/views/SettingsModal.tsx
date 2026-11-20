@@ -55,7 +55,7 @@ export interface SettingsModalProps {
   customFolderPath: string;
   setCustomFolderPath: React.Dispatch<React.SetStateAction<string>>;
   setOskTarget: React.Dispatch<React.SetStateAction<OskTargetKind>>;
-  handleAddFolder: (folderPath: string) => void;
+  handleAddFolder: (folderPath: string, opts?: { navigateAfterAdd?: boolean }) => void;
   handleRemoveFolder: (mountRoot: string, label: string) => void;
   setView: React.Dispatch<React.SetStateAction<'lock' | 'browser'>>;
   setSourceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -927,13 +927,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleAddFolder(customFolderPath);
+                        if (e.key === 'Enter') {
+                          handleAddFolder(customFolderPath, { navigateAfterAdd: true });
+                        }
                       }}
                       style={compactInputStyle}
                     />
                     <button
                       type="button"
-                      onClick={() => handleAddFolder(customFolderPath)}
+                      onClick={() =>
+                        handleAddFolder(customFolderPath, { navigateAfterAdd: true })
+                      }
                       style={compactPrimaryBtnStyle}
                     >
                       Add
@@ -1554,7 +1558,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         applyFocusMarker={applyFocusMarker}
         onSelectFolder={(folderPath) => {
           setCustomFolderPath(folderPath);
-          handleAddFolder(folderPath);
+          setFolderChooserOpen(false);
+          handleAddFolder(folderPath, { navigateAfterAdd: true });
         }}
         onClose={() => {
           setFolderChooserOpen(false);
