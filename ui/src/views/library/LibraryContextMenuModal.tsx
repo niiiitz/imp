@@ -3,6 +3,7 @@ import {
   AlbumRecord,
   ArchiveItemSummary,
   defaultSimpClient,
+  OpticalDiscStatus,
   PlaylistRecord,
   TrackMetadata,
 } from '@simp/client';
@@ -21,10 +22,7 @@ export interface LibraryContextMenuModalProps {
   target: LibraryContextTarget;
   onClose: () => void;
   favoritedUris: string[];
-  writablePlaylists: PlaylistRecord[];
-  activePlaylistId: string | null;
   cleanCollectionTitle: (raw: string) => string;
-  cycleTargetHybridPlaylist: () => void;
   handlePlayTracksNext: (tracksToInsert: TrackMetadata[], label: string) => void;
   handleAddTracksToPlaylist: (
     uris: string[],
@@ -69,16 +67,19 @@ export interface LibraryContextMenuModalProps {
   handleDeleteAlbum: (albumId: string, title: string) => void;
   onPlayLocalSmartStation?: (st: LocalSmartStation, shuffle?: boolean) => void;
   handleStartAppleStation?: (st: AppleRadioStationSummary) => void;
+  onOpenMount?: (mountRoot: string) => void;
+  onRescanMount?: (mountRoot: string, label: string) => void;
+  onRemoveMount?: (mountRoot: string, label: string) => void;
+  onOpenOpticalDisc?: () => void;
+  onScanOpticalDisc?: () => void;
+  onEjectOpticalDisc?: () => void;
 }
 
 export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = ({
   target: libraryContextTarget,
   onClose,
   favoritedUris,
-  writablePlaylists,
-  activePlaylistId,
   cleanCollectionTitle,
-  cycleTargetHybridPlaylist,
   handlePlayTracksNext,
   handleAddTracksToPlaylist,
   handleFavoriteTrack,
@@ -105,9 +106,13 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
   handleDeleteAlbum,
   onPlayLocalSmartStation,
   handleStartAppleStation,
+  onOpenMount,
+  onRescanMount,
+  onRemoveMount,
+  onOpenOpticalDisc,
+  onScanOpticalDisc,
+  onEjectOpticalDisc,
 }) => {
-  const activeWritable =
-    writablePlaylists.find((p) => p.id === activePlaylistId) || writablePlaylists[0];
 
   const renderShelfActionButtons = (
     shelfActions?: LibraryShelfAction[],
@@ -349,33 +354,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                     cursor: 'pointer',
                   }}
                 >
-                  ★ Add to Imp Hybrid Playlist (
-                  {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
-                  )
+                  ★ Add to Imp Hybrid Playlist...
                 </button>
-
-                {writablePlaylists.length >= 2 && (
-                  <button
-                    data-focusable="true"
-                    onClick={() => {
-                      cycleTargetHybridPlaylist();
-                    }}
-                    style={{
-                      minHeight: 34,
-                      padding: '6px 12px',
-                      borderRadius: 8,
-                      background: '#10121a',
-                      border: '1px solid #222638',
-                      color: '#94a3b8',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    ⇄ Switch Target Hybrid Playlist
-                  </button>
-                )}
 
                 {handleFavoriteTrack && (
                   <button
@@ -768,13 +748,158 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                   Fork / Convert Pinned Collection to Hybrid Playlist
                 </button>
               )}
+            {libraryContextTarget.kind === 'mount' && (
+              <>
+                {onOpenMount && (
+                  <button
+                    data-focusable="true"
+                    data-default-focus="true"
+                    onClick={() => {
+                      const mountRoot = libraryContextTarget.id;
+                      onClose();
+                      onOpenMount(mountRoot);
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#0b241c',
+                      border: '1px solid #34d399',
+                      color: '#6ee7b7',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    📂 Open Folder &amp; Browse Subfolders
+                  </button>
+                )}
+                {onRescanMount && (
+                  <button
+                    data-focusable="true"
+                    onClick={() => {
+                      const { id, title } = libraryContextTarget;
+                      onClose();
+                      onRescanMount(id, title);
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#121824',
+                      border: '1px solid #26354d',
+                      color: '#bae6fd',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🔄 Rescan Folder
+                  </button>
+                )}
+              </>
+            )}
+            {libraryContextTarget.kind === 'cdda' && (
+              <>
+                {(Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.is_audio_cd) ||
+                  Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.is_dvd_video)) &&
+                  onOpenOpticalDisc && (
+                    <button
+                      data-focusable="true"
+                      data-default-focus="true"
+                      onClick={() => {
+                        onClose();
+                        onOpenOpticalDisc();
+                      }}
+                      style={{
+                        minHeight: 40,
+                        padding: '8px 12px',
+                        borderRadius: 10,
+                        background: '#1f160d',
+                        border: '1px solid #f59e0b',
+                        color: '#fde68a',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      💿 Open Disc Tracklist
+                    </button>
+                  )}
+                {onScanOpticalDisc && (
+                  <button
+                    data-focusable="true"
+                    data-default-focus={
+                      !Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.is_audio_cd) &&
+                      !Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.is_dvd_video)
+                        ? 'true'
+                        : undefined
+                    }
+                    onClick={() => {
+                      onClose();
+                      onScanOpticalDisc();
+                    }}
+                    style={{
+                      minHeight: 40,
+                      padding: '8px 12px',
+                      borderRadius: 10,
+                      background: '#141622',
+                      border: '1px solid #3f3f52',
+                      color: '#fcd34d',
+                      fontSize: 12,
+                      fontWeight: 800,
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    🔄 Rescan Optical Drive
+                  </button>
+                )}
+                {Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.drive_present) &&
+                  onEjectOpticalDisc && (
+                    <button
+                      data-focusable="true"
+                      onClick={() => {
+                        onClose();
+                        onEjectOpticalDisc();
+                      }}
+                      style={{
+                        minHeight: 40,
+                        padding: '8px 12px',
+                        borderRadius: 10,
+                        background: '#1f1216',
+                        border: '1px solid #7f1d1d',
+                        color: '#fca5a5',
+                        fontSize: 12,
+                        fontWeight: 800,
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ⏏ Eject Optical Disc
+                    </button>
+                  )}
+              </>
+            )}
             {libraryContextTarget.kind !== 'apple_station' &&
-              libraryContextTarget.kind !== 'artist' && (
+              libraryContextTarget.kind !== 'artist' &&
+              (libraryContextTarget.kind !== 'cdda' ||
+                Boolean(
+                  (libraryContextTarget.rawItem as OpticalDiscStatus | null)?.is_audio_cd &&
+                    ((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.tracks?.length || 0) > 0
+                )) && (
                 <>
                   <button
                     data-focusable="true"
                     data-default-focus={
-                      libraryContextTarget.kind !== 'local_station' ? 'true' : undefined
+                      libraryContextTarget.kind !== 'local_station' &&
+                      libraryContextTarget.kind !== 'mount' &&
+                      libraryContextTarget.kind !== 'cdda'
+                        ? 'true'
+                        : undefined
                     }
                     onClick={async () => {
                       const target = libraryContextTarget;
@@ -883,9 +1008,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       cursor: 'pointer',
                     }}
                   >
-                    ★ Add All Tracks to Imp Hybrid Playlist (
-                    {activeWritable ? cleanCollectionTitle(activeWritable.name) : 'Create / Select'}
-                    )
+                    ★ Add All Tracks to Imp Hybrid Playlist...
                   </button>
                 </>
               )}
@@ -1039,6 +1162,31 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                 }}
               >
                 Remove from Imp Library
+              </button>
+            )}
+
+            {libraryContextTarget.kind === 'mount' && onRemoveMount && (
+              <button
+                data-focusable="true"
+                onClick={() => {
+                  const { id, title } = libraryContextTarget;
+                  onClose();
+                  onRemoveMount(id, title);
+                }}
+                style={{
+                  minHeight: 40,
+                  padding: '8px 12px',
+                  borderRadius: 10,
+                  background: '#221014',
+                  border: '1px solid #7f1d1d',
+                  color: '#fca5a5',
+                  fontSize: 12,
+                  fontWeight: 800,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                🗑 Remove Mount from Library
               </button>
             )}
 

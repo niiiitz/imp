@@ -3015,6 +3015,7 @@ const ConsoleMainApp: React.FC = () => {
           sourceVisibility={sourceVisibility}
           recentlyPlayed={recentlyPlayed}
           showToast={showToast}
+          handleRemoveFolder={handleRemoveFolder}
         />
 
       {/* Unified Top-Left Hamburger (☰ / START) Nested Settings Drawer */}

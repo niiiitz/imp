@@ -948,6 +948,19 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       boxSizing: 'border-box',
                     }}
                   >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 800,
+                        fontFamily: 'monospace',
+                        letterSpacing: 1,
+                        textTransform: 'uppercase',
+                        color: '#64748b',
+                        padding: '2px 4px 0',
+                      }}
+                    >
+                      Stage &amp; Display
+                    </div>
                     {/* 1. Desktop Mode & Idle Visualizer Screensaver (Hidden inside Decky plugin iframe) */}
                     {!isDeckyEmbedded && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1120,6 +1133,21 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
 
                     {/* 2a. 10-Band Audio Equalizer & Vocal Stage Drawer */}
                     {!isVideoTrack && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1,
+                          textTransform: 'uppercase',
+                          color: '#64748b',
+                          padding: '6px 4px 0',
+                        }}
+                      >
+                        Audio &amp; Karaoke
+                      </div>
+                    )}
+                    {!isVideoTrack && (
                       <button
                         type="button"
                         data-equalizer-trigger="true"
@@ -1244,6 +1272,21 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     )}
 
                     {/* 2b. Karaoke / Foreground Synced Lyrics Overlay (LRCLIB v1/v2 + Local .lrc) */}
+                    {!isVideoTrack && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1,
+                          textTransform: 'uppercase',
+                          color: '#64748b',
+                          padding: '6px 4px 0',
+                        }}
+                      >
+                        Overlays &amp; HUD
+                      </div>
+                    )}
                     {!isVideoTrack && (
                       <button
                         type="button"

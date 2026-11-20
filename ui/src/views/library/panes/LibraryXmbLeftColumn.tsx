@@ -302,7 +302,6 @@ export interface LibraryXmbLeftColumnProps {
   cdScanning: boolean;
   browserTarget: BrowserTarget | null;
   selectLocalCollection: (target: BrowserTarget) => void;
-  setBrowserTracks: React.Dispatch<React.SetStateAction<TrackMetadata[]>>;
   handleScanOpticalDisc: (forceRefresh?: boolean, silent?: boolean) => Promise<void>;
   handleEjectOpticalDisc: () => void;
   setSourceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -318,6 +317,11 @@ export interface LibraryXmbLeftColumnProps {
   setImpFypActive: React.Dispatch<React.SetStateAction<boolean>>;
   localSmartStations: LocalSmartStation[];
   onPlayLocalSmartStation: (st: LocalSmartStation, shuffle?: boolean) => void;
+  openLeftItemContextMenu: (
+    kind: 'simp_album' | 'simp_playlist' | 'mount' | 'cdda',
+    id?: string
+  ) => void;
+  onOpenOpticalDisc: () => void;
 }
 
 export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
@@ -360,7 +364,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   cdScanning,
   browserTarget,
   selectLocalCollection,
-  setBrowserTracks,
   handleScanOpticalDisc,
   handleEjectOpticalDisc,
   setSourceModalOpen,
@@ -376,6 +379,8 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   setImpFypActive,
   localSmartStations,
   onPlayLocalSmartStation,
+  openLeftItemContextMenu,
+  onOpenOpticalDisc,
 }) => {
   const [impNavOpen, setImpNavOpen] = React.useState<boolean>(() => {
     try {
@@ -790,6 +795,10 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               data-left-context-kind="simp_album"
                               data-left-context-id={alb.id}
                               data-xmb-preview="true"
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                openLeftItemContextMenu('simp_album', alb.id);
+                              }}
                               onClick={() => {
                                 setImpFypActive(false);
                                 selectLocalCollection({
@@ -933,6 +942,10 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               data-left-active={isSelected ? 'true' : undefined}
                               data-left-context-kind="simp_playlist"
                               data-left-context-id={pl.id}
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                openLeftItemContextMenu('simp_playlist', pl.id);
+                              }}
                               onClick={() => {
                                 setImpFypActive(false);
                                 selectLocalCollection({ kind: 'playlist', id: pl.id });
@@ -1244,6 +1257,10 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                           data-left-context-kind="mount"
                           data-left-context-id={m.mount_root}
                           data-xmb-preview="true"
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            openLeftItemContextMenu('mount', m.mount_root);
+                          }}
                           onClick={() => {
                             const isPreview = xmbPreviewTriggerRef.current;
                             if (
@@ -1338,48 +1355,19 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               ? 'true'
                               : undefined
                           }
+                          data-left-context-kind="cdda"
                           data-xmb-preview={
                             opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
                               ? 'true'
                               : undefined
                           }
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            openLeftItemContextMenu('cdda');
+                          }}
                           onClick={() => {
-                            if (opticalDisc?.is_audio_cd) {
-                              selectLocalCollection({
-                                kind: 'cdda',
-                                id:
-                                  opticalDisc.disc_id ||
-                                  opticalDisc.device_path ||
-                                  '/dev/sr0',
-                                title: `💿 ${opticalDisc.album_title || 'Audio CD'}`,
-                                subtitle: `${opticalDisc.artist_name || 'Unknown Artist'}${
-                                  opticalDisc.release_year
-                                    ? ` • ${opticalDisc.release_year}`
-                                    : ''
-                                }${
-                                  opticalDisc.disc_id
-                                    ? ` • DiscID ${opticalDisc.disc_id.slice(0, 8)}…`
-                                    : ''
-                                }`,
-                                art_url: opticalDisc.art_url,
-                              });
-                              setBrowserTracks(opticalDisc.tracks);
-                            } else if (opticalDisc?.is_dvd_video) {
-                              selectLocalCollection({
-                                kind: 'cdda',
-                                id:
-                                  opticalDisc.disc_id ||
-                                  opticalDisc.device_path ||
-                                  '/dev/sr0',
-                                title: `📀 ${opticalDisc.album_title || 'DVD Video'}`,
-                                subtitle: `${opticalDisc.artist_name || 'DVD-Video'}${
-                                  opticalDisc.release_year
-                                    ? ` • ${opticalDisc.release_year}`
-                                    : ''
-                                }`,
-                                art_url: opticalDisc.art_url,
-                              });
-                              setBrowserTracks([]);
+                            if (opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video) {
+                              onOpenOpticalDisc();
                             } else if (!xmbPreviewTriggerRef.current) {
                               handleScanOpticalDisc(false, false);
                             }
@@ -2056,6 +2044,10 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 data-left-context-kind="simp_playlist"
                 data-left-context-id={pl.id}
                 data-xmb-preview="true"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openLeftItemContextMenu('simp_playlist', pl.id);
+                }}
                 onClick={() => {
                   if (isLocalPlaylist) {
                     setActivePlaylistId(pl.id);
