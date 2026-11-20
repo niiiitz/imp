@@ -10,24 +10,24 @@ fn main() {
     // processes inherit it as well; on macOS, only `--daemon` or tray-hidden background state
     // uses `PRIO_DARWIN_BG` so interactive `WKWebView` visualizations stay at full frame rate.
     #[cfg(target_os = "windows")]
-    simp_core::prefer_efficiency_cores_for_macos_process();
+    imp_core::prefer_efficiency_cores_for_macos_process();
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|arg| arg == "--version" || arg == "-V") {
-        println!("simp v{}", env!("CARGO_PKG_VERSION"));
+        println!("imp v{}", env!("CARGO_PKG_VERSION"));
         return;
     }
 
-    // Mode 0: Self-Updater (`simp update` / `simp --update` / `simp self-update`)
+    // Mode 0: Self-Updater (`imp update` / `imp --update` / `imp self-update`)
     if args
         .iter()
         .any(|arg| arg == "update" || arg == "--update" || arg == "self-update")
     {
         println!(
-            "Checking GitHub Releases for SIMP updates (current: v{})...",
+            "Checking GitHub Releases for IMP updates (current: v{})...",
             env!("CARGO_PKG_VERSION")
         );
-        match simp_core::updater::check_for_updates() {
+        match imp_core::updater::check_for_updates() {
             Ok(status) => {
                 if status.update_available {
                     println!(
@@ -40,10 +40,10 @@ fn main() {
                         status.latest_tag, status.current_version
                     );
                 }
-                match simp_core::updater::apply_self_update(Some(&status.latest_tag), true, false) {
+                match imp_core::updater::apply_self_update(Some(&status.latest_tag), true, false) {
                     Ok(res) => {
                         println!("✅ {}", res.message);
-                        match simp_core::updater::restart_daemon_synchronously() {
+                        match imp_core::updater::restart_daemon_synchronously() {
                             Ok(restart_msg) => println!("🔄 {restart_msg}"),
                             Err(e) => eprintln!("⚠️  Could not auto-restart background daemon: {e}"),
                         }
@@ -68,8 +68,8 @@ fn main() {
             .get(pos + 1)
             .map(|s| s.as_str())
             .unwrap_or("6777766099");
-        let settings = simp_daemon::config::load_or_create_settings();
-        match simp_core::sinks::apple_native::source::load_native_apple_music_rodio_source(
+        let settings = imp_daemon::config::load_or_create_settings();
+        match imp_core::sinks::apple_native::source::load_native_apple_music_rodio_source(
             &settings,
             song_id,
             Some(1),
@@ -95,11 +95,11 @@ fn main() {
         .iter()
         .position(|arg| arg == "probe-apple" || arg == "--probe-apple")
     {
-        let settings = simp_daemon::config::load_or_create_settings();
+        let settings = imp_daemon::config::load_or_create_settings();
         let song_id = if let Some(arg_id) = args.get(pos + 1).filter(|s| !s.starts_with('-')) {
             arg_id.clone()
         } else if let Ok(res) =
-            simp_core::sinks::apple_api::search_catalog(&settings, "Dev Lemons Broke Your Cover")
+            imp_core::sinks::apple_api::search_catalog(&settings, "Dev Lemons Broke Your Cover")
         {
             res.songs
                 .first()
@@ -109,7 +109,7 @@ fn main() {
             "1440857781".to_string()
         };
         println!("🔍 Probing Native Rust Apple Music HLS + fMP4 Pipeline for song_id={song_id}...");
-        match simp_core::sinks::apple_native::source::probe_apple_native_pipeline(
+        match imp_core::sinks::apple_native::source::probe_apple_native_pipeline(
             &settings, &song_id,
         ) {
             Ok(report) => {
@@ -131,24 +131,24 @@ fn main() {
     // Worker threads opt into Efficiency Cores (Windows EcoQoS / Apple Silicon Utility QoS / Linux EAS nice +5)
     // while the dedicated AudioOrchestrator / Rodio thread remains at full unthrottled priority.
     if args.iter().any(|arg| arg == "--daemon" || arg == "-d") {
-        simp_core::prefer_efficiency_cores_for_macos_process();
+        imp_core::prefer_efficiency_cores_for_macos_process();
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .on_thread_start(|| {
-                simp_core::prefer_efficiency_core_for_current_thread();
+                imp_core::prefer_efficiency_core_for_current_thread();
             })
             .enable_all()
             .build()
-            .expect("Failed to build Tokio runtime for SIMP daemon");
+            .expect("Failed to build Tokio runtime for IMP daemon");
 
-        if let Err(e) = rt.block_on(simp_daemon::run_daemon()) {
-            eprintln!("SIMP daemon exited with error: {e}");
+        if let Err(e) = rt.block_on(imp_daemon::run_daemon()) {
+            eprintln!("IMP daemon exited with error: {e}");
             std::process::exit(1);
         }
         return;
     }
 
     // Mode 2: Foreground UI Client (`simp` or `simp --ui`)
-    simp_ui_lib::run_ui();
+    imp_ui_lib::run_ui();
 }
 

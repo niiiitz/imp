@@ -11,7 +11,7 @@ use dispatch::Queue;
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
 use objc::{class, msg_send, sel, sel_impl};
-use simp_protocol::AudioCommand;
+use imp_protocol::AudioCommand;
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -54,7 +54,7 @@ pub fn show_simp_macos_window() {
         }
         win_ptr.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::restore_foreground_priority_for_macos_process();
+        imp_core::restore_foreground_priority_for_macos_process();
     });
 }
 
@@ -63,7 +63,7 @@ pub unsafe fn hide_simp_macos_window_to_tray(win: id) {
     if win != nil {
         let _: () = msg_send![win, orderOut: nil];
     }
-    simp_core::prefer_efficiency_cores_for_macos_process();
+    imp_core::prefer_efficiency_cores_for_macos_process();
 }
 
 /// Toggles the main SIMP window between visible/focused and hidden in the Menu Bar.
@@ -86,7 +86,7 @@ pub unsafe fn toggle_simp_macos_window() {
         }
         win.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::restore_foreground_priority_for_macos_process();
+        imp_core::restore_foreground_priority_for_macos_process();
     }
 }
 
@@ -183,7 +183,7 @@ extern "C" fn on_status_bar_click(_this: &Object, _cmd: Sel, _sender: id) {
         if show_menu {
             let header_item = STATUS_HEADER_ITEM_PTR.load(Ordering::SeqCst) as id;
             if header_item != nil {
-                if let Some((summary, _)) = simp_core::mpris::current_now_playing_summary() {
+                if let Some((summary, _)) = imp_core::mpris::current_now_playing_summary() {
                     let _: () = msg_send![header_item, setTitle: ns_string(&summary)];
                 }
             }
@@ -213,19 +213,19 @@ extern "C" fn on_menu_toggle_window(_this: &Object, _cmd: Sel, _sender: id) {
 }
 
 extern "C" fn on_menu_play_pause(_this: &Object, _cmd: Sel, _sender: id) {
-    if !simp_core::mpris::send_inprocess_audio_command(AudioCommand::TogglePlayPause) {
+    if !imp_core::mpris::send_inprocess_audio_command(AudioCommand::TogglePlayPause) {
         send_daemon_ws_action(r#"{"command":"toggle_play_pause"}"#);
     }
 }
 
 extern "C" fn on_menu_next_track(_this: &Object, _cmd: Sel, _sender: id) {
-    if !simp_core::mpris::send_inprocess_audio_command(AudioCommand::Next) {
+    if !imp_core::mpris::send_inprocess_audio_command(AudioCommand::Next) {
         send_daemon_ws_action(r#"{"command":"next"}"#);
     }
 }
 
 extern "C" fn on_menu_prev_track(_this: &Object, _cmd: Sel, _sender: id) {
-    if !simp_core::mpris::send_inprocess_audio_command(AudioCommand::Previous) {
+    if !imp_core::mpris::send_inprocess_audio_command(AudioCommand::Previous) {
         send_daemon_ws_action(r#"{"command":"previous"}"#);
     }
 }
@@ -258,7 +258,7 @@ extern "C" fn create_popup_webview(
         );
         let _: () = msg_send![popup_win, setReleasedWhenClosed: NO];
         popup_win.center();
-        popup_win.setTitle_(ns_string("SIMP — Sign In"));
+        popup_win.setTitle_(ns_string("IMP — Sign In"));
 
         let dark_appearance: id = msg_send![
             class!(NSAppearance),
@@ -381,7 +381,7 @@ unsafe fn setup_macos_main_menubar(delegate: id) {
     let app_menu = NSMenu::new(nil).autorelease();
     let show_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("Show / Hide SIMP Window"),
+            ns_string("Show / Hide IMP Window"),
             sel!(onMenuToggleWindow:),
             ns_string("0"),
         )
@@ -402,7 +402,7 @@ unsafe fn setup_macos_main_menubar(delegate: id) {
 
     let quit_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("Quit SIMP"),
+            ns_string("Quit IMP"),
             sel!(onMenuQuitSimp:),
             ns_string("q"),
         )
@@ -448,7 +448,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
         } else {
             let _: () = msg_send![button, setTitle: ns_string("🎵")];
         }
-        let _: () = msg_send![button, setToolTip: ns_string("SIMP Media Player — Left-click to toggle window, Right-click for menu")];
+        let _: () = msg_send![button, setToolTip: ns_string("IMP Media Player — Left-click to toggle window, Right-click for menu")];
         let _: () = msg_send![button, setTarget: delegate];
         let _: () = msg_send![button, setAction: sel!(onStatusBarClick:)];
         let _: () = msg_send![
@@ -457,9 +457,9 @@ unsafe fn setup_status_bar_tray(delegate: id) {
         ];
     }
 
-    let menu = NSMenu::alloc(nil).initWithTitle_(ns_string("SIMP"));
+    let menu = NSMenu::alloc(nil).initWithTitle_(ns_string("IMP"));
     let header_item = NSMenuItem::new(nil);
-    let _: () = msg_send![header_item, setTitle: ns_string("🎵 SIMP Media Player")];
+    let _: () = msg_send![header_item, setTitle: ns_string("🎵 IMP Media Player")];
     let _: () = msg_send![header_item, setEnabled: NO];
     STATUS_HEADER_ITEM_PTR.store(header_item as usize, Ordering::SeqCst);
     menu.addItem_(header_item);
@@ -481,7 +481,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
 
     let toggle_win_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("↗ Show / Hide SIMP Window"),
+            ns_string("↗ Show / Hide IMP Window"),
             sel!(onMenuToggleWindow:),
             ns_string(""),
         )
@@ -491,7 +491,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
 
     let quit_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("⏻ Quit SIMP"),
+            ns_string("⏻ Quit IMP"),
             sel!(onMenuQuitSimp:),
             ns_string("q"),
         )
@@ -503,7 +503,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
 }
 
 /// Ensures the SIMP daemon is running on `127.0.0.1:18888`.
-/// On macOS, spawns `simp_daemon::run_daemon()` in-process on a background Tokio runtime
+/// On macOS, spawns `imp_daemon::run_daemon()` in-process on a background Tokio runtime
 /// if port 18888 is not already bound, unifying `SIMP.app` into a single native process.
 pub fn ensure_inprocess_or_existing_daemon() {
     let addr = SocketAddr::from(([127, 0, 0, 1], 18888));
@@ -514,16 +514,16 @@ pub fn ensure_inprocess_or_existing_daemon() {
     let _ = std::thread::Builder::new()
         .name("simp-macos-daemon".to_string())
         .spawn(|| {
-            simp_core::prefer_efficiency_core_for_current_thread();
+            imp_core::prefer_efficiency_core_for_current_thread();
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
                 .on_thread_start(|| {
-                    simp_core::prefer_efficiency_core_for_current_thread();
+                    imp_core::prefer_efficiency_core_for_current_thread();
                 })
                 .enable_all()
                 .build()
                 .expect("Failed to build Tokio runtime for in-process macOS daemon");
-            let _ = rt.block_on(simp_daemon::run_daemon());
+            let _ = rt.block_on(imp_daemon::run_daemon());
         });
 
     for _ in 0..30 {
@@ -537,14 +537,14 @@ pub fn ensure_inprocess_or_existing_daemon() {
 /// Launches the native macOS Cocoa (`NSApplication` + `NSStatusItem` + `NSWindow` + `WKWebView`) UI.
 pub fn run_macos_native_app(ui_url: &str) {
     ensure_inprocess_or_existing_daemon();
-    simp_core::mpris::set_native_window_raiser(show_simp_macos_window);
-    simp_core::restore_foreground_priority_for_macos_process();
+    imp_core::mpris::set_native_window_raiser(show_simp_macos_window);
+    imp_core::restore_foreground_priority_for_macos_process();
 
     unsafe {
         let _pool = NSAutoreleasePool::new(nil);
         let app = NSApp();
         app.setActivationPolicy_(NSApplicationActivationPolicyRegular);
-        simp_core::restore_foreground_priority_for_macos_process();
+        imp_core::restore_foreground_priority_for_macos_process();
 
         let delegate_cls = register_delegate_class();
         let delegate: id = msg_send![delegate_cls, new];
@@ -568,7 +568,7 @@ pub fn run_macos_native_app(ui_url: &str) {
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
         let _: () = msg_send![window, setDelegate: delegate];
         window.center();
-        window.setTitle_(ns_string("SIMP"));
+        window.setTitle_(ns_string("IMP"));
 
         // Apply Dark Aqua appearance and #08080c background color so startup never flashes white
         let dark_appearance: id = msg_send![
@@ -625,7 +625,7 @@ pub fn run_macos_native_app(ui_url: &str) {
 
         window.makeKeyAndOrderFront_(nil);
         app.activateIgnoringOtherApps_(YES);
-        simp_core::restore_foreground_priority_for_macos_process();
+        imp_core::restore_foreground_priority_for_macos_process();
         app.run();
     }
 }

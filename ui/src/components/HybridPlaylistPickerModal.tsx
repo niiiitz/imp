@@ -295,7 +295,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
     try {
       const created = await createAppleCloudPlaylist(
         trimmed,
-        'Created from SIMP',
+        'Created from IMP',
         job.uris
       );
       setCloudPlaylists?.((prev) => [created, ...prev]);
@@ -443,7 +443,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
               </span>
               <span style={{ fontSize: 11, color: '#cbd5e1' }}>
                 Write directly to "{onlineChoice.title}" on{' '}
-                {onlineChoice.provider === 'apple' ? 'Apple Music' : 'SoundCloud'} (re-syncs SIMP if pinned)
+                {onlineChoice.provider === 'apple' ? 'Apple Music' : 'SoundCloud'} (re-syncs IMP if pinned)
               </span>
             </button>
 

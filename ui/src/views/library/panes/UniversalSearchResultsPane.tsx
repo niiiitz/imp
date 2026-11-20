@@ -227,7 +227,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           {filteredAlbums.length > 0 && (
                             <>
                               <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
-                                💿 MATCHING SIMP LIBRARY ALBUMS ({filteredAlbums.length})
+                                💿 MATCHING IMP LIBRARY ALBUMS ({filteredAlbums.length})
                               </div>
                               <div style={tileGridStyle}>
                                 {filteredAlbums.slice(0, 24).map(renderSimpAlbumCard)}

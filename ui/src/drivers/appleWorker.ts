@@ -134,7 +134,7 @@ export function useAppleMusicWorker(): void {
           const hasDrm = await checkWidevineDrm();
           if (!hasDrm && !isDedicatedWorker && cfg.headless_worker_active) {
             console.info(
-              '[SIMP AppleMusicDriver] Browser lacks EME CDM; delegating audio to headless worker.'
+              '[IMP AppleMusicDriver] Browser lacks EME CDM; delegating audio to headless worker.'
             );
             return null;
           }
@@ -307,7 +307,7 @@ export function useAppleMusicWorker(): void {
                 );
                 break;
               }
-              console.warn('[SIMP AppleMusicDriver] First setQueue/play attempt failed, checking catalog fallback:', firstErr);
+              console.warn('[IMP AppleMusicDriver] First setQueue/play attempt failed, checking catalog fallback:', firstErr);
               if (mySeq !== loadSeqRef.current) return;
               const replacementId = await resolveReplacementCatalogSongId(rawId);
               const retryId = replacementId || rawId;

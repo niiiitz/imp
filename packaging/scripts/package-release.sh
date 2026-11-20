@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # ==============================================================================
-# SIMP (org.simp.player) — Self-Contained SteamOS Release Bundle Packager
+# IMP (org.imp.player) — Self-Contained SteamOS Release Bundle Packager
 # Produces:
-#   dist/simp-steamos-userland/
-#   dist/simp-steamos-userland.tar.gz
+#   dist/imp-steamos-userland/
+#   dist/imp-steamos-userland.tar.gz
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,27 +16,27 @@ CARGO_BIN="${CARGO_BIN:-$(command -v cargo || echo "${HOME}/.cargo/bin/cargo")}"
 HOST_OS="$(uname -s)"
 HOST_ARCH="$(uname -m)"
 if [[ "${HOST_OS}" == "Darwin" ]]; then
-  ARCH="${SIMP_TARGET_ARCH:-x86_64}"
+  ARCH="${IMP_TARGET_ARCH:-${SIMP_TARGET_ARCH:-x86_64}}"
 else
-  ARCH="${SIMP_TARGET_ARCH:-${HOST_ARCH}}"
+  ARCH="${IMP_TARGET_ARCH:-${SIMP_TARGET_ARCH:-${HOST_ARCH}}}"
 fi
-OUT_DIR="${REPO_ROOT}/dist/simp-steamos-userland"
-ARCHIVE="${REPO_ROOT}/dist/simp-steamos-userland.tar.gz"
-ARCH_ARCHIVE="${REPO_ROOT}/dist/simp-steamos-userland-${ARCH}.tar.gz"
-DECKY_ZIP="${REPO_ROOT}/dist/simp-decky.zip"
+OUT_DIR="${REPO_ROOT}/dist/imp-steamos-userland"
+ARCHIVE="${REPO_ROOT}/dist/imp-steamos-userland.tar.gz"
+ARCH_ARCHIVE="${REPO_ROOT}/dist/imp-steamos-userland-${ARCH}.tar.gz"
+DECKY_ZIP="${REPO_ROOT}/dist/imp-decky.zip"
 # Default to Decky-free on Steam Frame (aarch64); optional separate artifact on x86_64
 if [[ "${ARCH}" == "aarch64" ]]; then
-  WITH_DECKY="${SIMP_WITH_DECKY:-0}"
+  WITH_DECKY="${IMP_WITH_DECKY:-${SIMP_WITH_DECKY:-0}}"
 else
-  WITH_DECKY="${SIMP_WITH_DECKY:-1}"
+  WITH_DECKY="${IMP_WITH_DECKY:-${SIMP_WITH_DECKY:-1}}"
 fi
 
 echo "============================================================"
-echo " Building SIMP Release Package (Arch: ${ARCH}, Decky Add-On: ${WITH_DECKY})"
+echo " Building IMP Release Package (Arch: ${ARCH}, Decky Add-On: ${WITH_DECKY})"
 echo "============================================================"
 
 # Automatically synchronize release version across Cargo.toml, Cargo.lock, package.json files, decky-plugin/src/index.tsx, and README.md
-TARGET_VERSION="${1:-${SIMP_VERSION:-}}"
+TARGET_VERSION="${1:-${IMP_VERSION:-${SIMP_VERSION:-}}}"
 SYNCED_VERSION="$(TARGET_VERSION="${TARGET_VERSION}" python3 - <<'PY'
 import json, os, re
 
@@ -80,7 +80,7 @@ if os.path.isfile(cargo_lock):
     with open(cargo_lock, "r", encoding="utf-8") as f:
         cl_src = f.read()
     cl_next = re.sub(
-        r'(name = "(?:simp|simp-core|simp-daemon|simp-protocol)"\nversion = )"[^"]+"',
+        r'(name = "(?:imp|imp-core|imp-daemon|imp-protocol|simp|simp-core|simp-daemon|simp-protocol)"\nversion = )"[^"]+"',
         rf'\1"{raw_ver}"',
         cl_src,
     )
@@ -88,14 +88,14 @@ if os.path.isfile(cargo_lock):
         with open(cargo_lock, "w", encoding="utf-8") as f:
             f.write(cl_next)
 
-# 4. Sync decky-plugin/src/index.tsx SIMP_VERSION constant
+# 4. Sync decky-plugin/src/index.tsx IMP_VERSION constant
 idx_path = "decky-plugin/src/index.tsx"
 if os.path.isfile(idx_path):
     with open(idx_path, "r", encoding="utf-8") as f:
         idx_src = f.read()
     idx_next = re.sub(
-        r"const SIMP_VERSION = 'v[^']+';",
-        f"const SIMP_VERSION = 'v{raw_ver}';",
+        r"const (?:IMP|SIMP)_VERSION = 'v[^']+';",
+        f"const IMP_VERSION = 'v{raw_ver}';",
         idx_src,
     )
     if idx_next != idx_src:
@@ -110,12 +110,12 @@ if os.path.isfile(readme_path):
     shield_ver = raw_ver.replace("-", "--")
     readme_next = re.sub(
         r"\[!\[Status: v[^\]]+\]\(https://img\.shields\.io/badge/status-v[^)]+\)\]\([^)]+\)",
-        f"[![Status: v{raw_ver}](https://img.shields.io/badge/status-v{shield_ver}-ff6a00?style=flat-square)](https://github.com/niiiitz/simp/releases)",
+        f"[![Status: v{raw_ver}](https://img.shields.io/badge/status-v{shield_ver}-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)",
         readme_src,
     )
     readme_next = re.sub(
-        r"## ⬇️ Download SIMP \(`v[^`]+`([^)]*)\)",
-        f"## ⬇️ Download SIMP (`v{raw_ver}`\\1)",
+        r"## ⬇️ Download (?:IMP|SIMP) \(`v[^`]+`([^)]*)\)",
+        f"## ⬇️ Download IMP (`v{raw_ver}`\\1)",
         readme_next,
     )
     readme_next = re.sub(
@@ -197,7 +197,7 @@ else
   echo "2/4 Skipping Decky QAM plugin build (Decky-free ${ARCH} target)..."
 fi
 
-echo "3/4 Building release Rust binary (simp for ${ARCH})..."
+echo "3/4 Building release Rust binary (imp for ${ARCH})..."
 ENV_FILE="${REPO_ROOT}/.env"
 if [[ ! -f "${ENV_FILE}" ]]; then
   COMMON_GIT_DIR="$(git -C "${REPO_ROOT}" rev-parse --git-common-dir 2>/dev/null || true)"
@@ -303,14 +303,14 @@ if [[ "${HOST_OS}" != "Linux" || "${ARCH}" != "${HOST_ARCH}" ]]; then
     export PKG_CONFIG_PATH_x86_64_unknown_linux_gnu="${TOOLCHAIN_LIB}/pkgconfig"
     export PKG_CONFIG_LIBDIR_x86_64_unknown_linux_gnu="${TOOLCHAIN_LIB}/pkgconfig"
   fi
-  "${CARGO_BIN}" build --release -p simp --target "${RUST_TARGET}" --offline
-  BUILT_BIN="${REPO_ROOT}/target/${RUST_TARGET}/release/simp"
+  "${CARGO_BIN}" build --release -p imp --target "${RUST_TARGET}" --offline
+  BUILT_BIN="${REPO_ROOT}/target/${RUST_TARGET}/release/imp"
 else
-  "${CARGO_BIN}" build --release -p simp --offline
-  BUILT_BIN="${REPO_ROOT}/target/release/simp"
+  "${CARGO_BIN}" build --release -p imp --offline
+  BUILT_BIN="${REPO_ROOT}/target/release/imp"
 fi
 
-echo "4/4 Assembling dist/simp-steamos-userland/..."
+echo "4/4 Assembling dist/imp-steamos-userland/..."
 rm -rf "${OUT_DIR}"
 mkdir -p \
   "${OUT_DIR}/bin" \
@@ -320,35 +320,35 @@ mkdir -p \
   "${OUT_DIR}/desktop" \
   "${OUT_DIR}/openvr"
 
-cp "${BUILT_BIN}" "${OUT_DIR}/bin/simp"
+cp "${BUILT_BIN}" "${OUT_DIR}/bin/imp"
 if [[ "${ARCH}" == "aarch64" && -f "${HOME}/.cache/simp-toolchain/lib-aarch64/libnspr4.so" ]]; then
   cp "${HOME}/.cache/simp-toolchain/lib-aarch64/libnspr4.so" "${OUT_DIR}/lib/libnspr4.so"
 fi
 cp -r "${REPO_ROOT}/ui/dist/"* "${OUT_DIR}/ui/"
-cp "${REPO_ROOT}/packaging/systemd/simp.service" "${OUT_DIR}/systemd/simp.service"
-cp "${REPO_ROOT}/packaging/desktop/org.simp.player.desktop" "${OUT_DIR}/desktop/org.simp.player.desktop"
+cp "${REPO_ROOT}/packaging/systemd/imp.service" "${OUT_DIR}/systemd/imp.service"
+cp "${REPO_ROOT}/packaging/desktop/org.imp.player.desktop" "${OUT_DIR}/desktop/org.imp.player.desktop"
 cp "${REPO_ROOT}/packaging/openvr/"* "${OUT_DIR}/openvr/"
 
-# On x86_64 (Steam Deck / gamescope), bundle `simp-decky/` (~65 KB) inside `simp-steamos-userland`
-# so both `install-steamos.sh` and 1-touch `simp update` install/update the Decky QAM plugin automatically!
+# On x86_64 (Steam Deck / gamescope), bundle `imp-decky/` (~65 KB) inside `imp-steamos-userland`
+# so both `install-steamos.sh` and 1-touch `imp update` install/update the Decky QAM plugin automatically!
 if [[ "${WITH_DECKY}" == "1" ]]; then
-  mkdir -p "${OUT_DIR}/simp-decky/dist"
-  cp "${REPO_ROOT}/decky-plugin/plugin.json" "${OUT_DIR}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/package.json" "${OUT_DIR}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/main.py" "${OUT_DIR}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/dist/"* "${OUT_DIR}/simp-decky/dist/"
+  mkdir -p "${OUT_DIR}/imp-decky/dist"
+  cp "${REPO_ROOT}/decky-plugin/plugin.json" "${OUT_DIR}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/package.json" "${OUT_DIR}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/main.py" "${OUT_DIR}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/dist/"* "${OUT_DIR}/imp-decky/dist/"
 fi
 
 cp "${REPO_ROOT}/packaging/scripts/install-steamos.sh" "${OUT_DIR}/install-steamos.sh"
 cp "${REPO_ROOT}/packaging/scripts/uninstall-steamos.sh" "${OUT_DIR}/uninstall-steamos.sh"
 cp "${REPO_ROOT}/packaging/scripts/uninstall-steamos.sh" "${OUT_DIR}/bin/uninstall-steamos.sh"
-chmod +x "${OUT_DIR}/install-steamos.sh" "${OUT_DIR}/uninstall-steamos.sh" "${OUT_DIR}/bin/uninstall-steamos.sh" "${OUT_DIR}/bin/simp"
+chmod +x "${OUT_DIR}/install-steamos.sh" "${OUT_DIR}/uninstall-steamos.sh" "${OUT_DIR}/bin/uninstall-steamos.sh" "${OUT_DIR}/bin/imp"
 
 if [[ "${HOST_OS}" == "Darwin" ]]; then
   xattr -cr "${OUT_DIR}" 2>/dev/null || true
-  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "${REPO_ROOT}/dist" -czf "${ARCH_ARCHIVE}" "simp-steamos-userland"
+  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C "${REPO_ROOT}/dist" -czf "${ARCH_ARCHIVE}" "imp-steamos-userland"
 else
-  tar --no-xattrs -C "${REPO_ROOT}/dist" -czf "${ARCH_ARCHIVE}" "simp-steamos-userland"
+  tar --no-xattrs -C "${REPO_ROOT}/dist" -czf "${ARCH_ARCHIVE}" "imp-steamos-userland"
 fi
 if [[ "${ARCH}" == "x86_64" ]]; then
   cp "${ARCH_ARCHIVE}" "${ARCHIVE}"
@@ -357,15 +357,15 @@ fi
 if [[ "${WITH_DECKY}" == "1" ]]; then
   DECKY_STAGE="${REPO_ROOT}/dist/decky-staging"
   rm -rf "${DECKY_STAGE}"
-  mkdir -p "${DECKY_STAGE}/simp-decky/dist" "${DECKY_STAGE}/simp-decky/bin" "${DECKY_STAGE}/simp-decky/ui"
-  cp "${REPO_ROOT}/decky-plugin/plugin.json" "${DECKY_STAGE}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/package.json" "${DECKY_STAGE}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/main.py" "${DECKY_STAGE}/simp-decky/"
-  cp "${REPO_ROOT}/decky-plugin/dist/"* "${DECKY_STAGE}/simp-decky/dist/"
-  cp "${OUT_DIR}/bin/simp" "${DECKY_STAGE}/simp-decky/bin/simp"
-  cp -r "${OUT_DIR}/ui/"* "${DECKY_STAGE}/simp-decky/ui/"
-  chmod +x "${DECKY_STAGE}/simp-decky/bin/simp"
-  (cd "${DECKY_STAGE}" && python3 -m zipfile -c "${DECKY_ZIP}" simp-decky)
+  mkdir -p "${DECKY_STAGE}/imp-decky/dist" "${DECKY_STAGE}/imp-decky/bin" "${DECKY_STAGE}/imp-decky/ui"
+  cp "${REPO_ROOT}/decky-plugin/plugin.json" "${DECKY_STAGE}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/package.json" "${DECKY_STAGE}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/main.py" "${DECKY_STAGE}/imp-decky/"
+  cp "${REPO_ROOT}/decky-plugin/dist/"* "${DECKY_STAGE}/imp-decky/dist/"
+  cp "${OUT_DIR}/bin/imp" "${DECKY_STAGE}/imp-decky/bin/imp"
+  cp -r "${OUT_DIR}/ui/"* "${DECKY_STAGE}/imp-decky/ui/"
+  chmod +x "${DECKY_STAGE}/imp-decky/bin/imp"
+  (cd "${DECKY_STAGE}" && python3 -m zipfile -c "${DECKY_ZIP}" imp-decky)
   rm -rf "${DECKY_STAGE}"
 fi
 

@@ -35,6 +35,7 @@ export interface SimpUpdateStatus {
   latest_version?: string;
   latest_tag?: string;
   update_available?: boolean;
+  channel_switch_available?: boolean;
   target_arch?: string;
   channel?: string;
   checking?: boolean;
@@ -1494,7 +1495,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 disabled={Boolean(updateStatus.checking || updateStatus.applying)}
                 onClick={() => {
-                  if (updateStatus.update_available) {
+                  if (updateStatus.update_available || updateStatus.channel_switch_available) {
                     applySimpUpdate();
                   } else {
                     checkSimpUpdates(false);
@@ -1504,11 +1505,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   minHeight: 42,
                   padding: '0 12px',
                   borderRadius: 12,
-                  background: updateStatus.update_available ? '#0f2936' : '#0f222a',
+                  background:
+                    updateStatus.update_available || updateStatus.channel_switch_available
+                      ? '#0f2936'
+                      : '#0f222a',
                   border: updateStatus.update_available
                     ? '1px solid #6ee7b7'
-                    : '1px solid #2aa3c4',
-                  color: updateStatus.update_available ? '#6ee7b7' : '#bfeaf5',
+                    : updateStatus.channel_switch_available
+                      ? '1px solid #f59e0b'
+                      : '1px solid #2aa3c4',
+                  color: updateStatus.update_available
+                    ? '#6ee7b7'
+                    : updateStatus.channel_switch_available
+                      ? '#fcd34d'
+                      : '#bfeaf5',
                   fontSize: 11.5,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -1524,7 +1534,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ? 'Checking...'
                     : updateStatus.update_available
                       ? `⬆️ Update (${updateStatus.latest_tag})`
-                      : `Update${updateStatus.current_version ? ` (v${updateStatus.current_version})` : ''}`}
+                      : updateStatus.channel_switch_available
+                        ? `⬇ Switch to Stable (${updateStatus.latest_tag})`
+                        : `Update${updateStatus.current_version ? ` (v${updateStatus.current_version})` : ''}`}
               </button>
             </div>
             {updateStatus.error && (

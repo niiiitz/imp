@@ -274,8 +274,8 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   const starZRef = useRef<Float32Array>(new Float32Array(starCount));
 
   // Demoscene DYCP Scroller text & live typography strip
-  const scrollerTextRef = useRef<string>('SIMP DEMOSCENE ENGINE // READY ');
-  const glyphTextStripRef = useRef<string>('SIMP');
+  const scrollerTextRef = useRef<string>('IMP DEMOSCENE ENGINE // READY ');
+  const glyphTextStripRef = useRef<string>('IMP');
 
   const waveformBarsRef = useRef<number[] | null | undefined>(waveformBars);
   waveformBarsRef.current = waveformBars;
@@ -303,7 +303,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
     const seed = glitchSeedRef.current;
 
     const lyric = (activeLyricRef.current || '').trim().toUpperCase();
-    const titleUpper = (trackRef.current?.title || 'SIMP').trim().toUpperCase();
+    const titleUpper = (trackRef.current?.title || 'IMP').trim().toUpperCase();
     const sourceText =
       preferLyric && lyric.length > 0
         ? lyric
@@ -391,8 +391,8 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   // Update typography & DYCP Greetz Scroller string when track / comments / chapter / lyrics change
   useEffect(() => {
     if (!track) {
-      scrollerTextRef.current = 'SIMP AUDIO ENGINE // INSERT MEDIA ';
-      glyphTextStripRef.current = 'SIMP // READY   ';
+      scrollerTextRef.current = 'IMP AUDIO ENGINE // INSERT MEDIA ';
+      glyphTextStripRef.current = 'IMP // READY   ';
       return;
     }
     const titleUpper = (track.title || 'UNTITLED').toUpperCase();

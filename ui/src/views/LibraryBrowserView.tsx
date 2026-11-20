@@ -2605,7 +2605,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${item.title}" (${tracksToPin.length} ${
             tracksToPin.length === 1 ? 'item' : 'items'
-          }) to SIMP`
+          }) to IMP`
         );
       } catch {
         showToast('Could not pin Internet Archive item');
@@ -2674,7 +2674,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           playlist: record,
           tracks: tracksToPin,
         });
-        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to SIMP`);
+        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to IMP`);
       } catch {
         showToast('Could not pin Internet Archive collection');
       } finally {
@@ -2855,10 +2855,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${cleanTitle}" (${items.length} ${
             items.length === 1 ? 'track' : 'tracks'
-          }) to SIMP Library`
+          }) to IMP Library`
         );
       } catch {
-        showToast('Could not pin local album to SIMP Library');
+        showToast('Could not pin local album to IMP Library');
       }
     },
     [playlists, handleDeletePlaylist, showToast]
@@ -3707,7 +3707,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
                 ? 'Search SoundCloud Tracks, Sets & DJ Mixes...'
                 : browserSourceFilter === 'internet_archive'
                 ? 'Search Internet Archive Films, TV & Audio...'
-                : 'Search SIMP Library, Apple Music, SoundCloud & Archive...'
+                : 'Search IMP Library, Apple Music, SoundCloud & Archive...'
             }
             value={browserSearch}
             onChange={(e) => {

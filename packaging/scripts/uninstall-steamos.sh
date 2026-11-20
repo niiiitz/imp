@@ -47,47 +47,53 @@ run_user_systemctl() {
   fi
 }
 
-INSTALL_ROOT="${HOME}/.local/share/simp"
+INSTALL_ROOT="${HOME}/.local/share/imp"
 BIN_DEST="${INSTALL_ROOT}/bin"
 UI_DEST="${INSTALL_ROOT}/ui"
-LOCAL_BIN_LINK="${HOME}/.local/bin/simp"
-SERVICE_FILE="${HOME}/.config/systemd/user/simp.service"
-DESKTOP_FILE="${HOME}/.local/share/applications/org.simp.player.desktop"
-DECKY_TARGET="${HOME}/homebrew/plugins/simp-decky"
+LOCAL_BIN_LINK="${HOME}/.local/bin/imp"
+SERVICE_FILE="${HOME}/.config/systemd/user/imp.service"
+DESKTOP_FILE="${HOME}/.local/share/applications/org.imp.player.desktop"
+DECKY_TARGET="${HOME}/homebrew/plugins/imp-decky"
 
 echo "============================================================"
-echo " Uninstalling SIMP (org.simp.player) from Userland"
+echo " Uninstalling IMP (org.imp.player) from Userland"
 echo "============================================================"
 
-# 1. Stop and disable systemd user service
+# 1. Stop and disable systemd user service (and any legacy simp.service)
 if command -v systemctl >/dev/null 2>&1; then
-  run_user_systemctl stop simp.service >/dev/null 2>&1 || true
-  run_user_systemctl disable simp.service >/dev/null 2>&1 || true
+  run_user_systemctl stop imp.service simp.service >/dev/null 2>&1 || true
+  run_user_systemctl disable imp.service simp.service >/dev/null 2>&1 || true
 fi
 
-# Also terminate any manually-spawned simp --daemon process or orphaned headless Widevine worker
+# Also terminate any manually-spawned daemon process or orphaned headless Widevine worker
+pkill -f "imp --daemon" >/dev/null 2>&1 || true
 pkill -f "simp --daemon" >/dev/null 2>&1 || true
 pkill -f "simp-widevine-worker" >/dev/null 2>&1 || true
 pkill -f "18888/?worker=apple" >/dev/null 2>&1 || true
 
-if [[ -f "${SERVICE_FILE}" ]]; then
-  rm -f "${SERVICE_FILE}"
-  if command -v systemctl >/dev/null 2>&1; then
-    run_user_systemctl daemon-reload >/dev/null 2>&1 || true
+for legacy_srv in "${HOME}/.config/systemd/user/simp.service" "${SERVICE_FILE}"; do
+  if [[ -f "${legacy_srv}" ]]; then
+    rm -f "${legacy_srv}"
+    if command -v systemctl >/dev/null 2>&1; then
+      run_user_systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    echo "✓ Removed systemd unit: ${legacy_srv}"
   fi
-  echo "✓ Removed systemd unit: ${SERVICE_FILE}"
-fi
+done
 
 # 2. Remove binary, UI bundle, staged Decky bundle, and CLI symlinks
 rm -rf "${BIN_DEST}" "${UI_DEST}" "${INSTALL_ROOT}/decky-staged"
-rm -f "${LOCAL_BIN_LINK}"
-if [[ -L "/usr/local/bin/simp" && -w "/usr/local/bin" ]]; then
-  rm -f "/usr/local/bin/simp" >/dev/null 2>&1 || true
-fi
+rm -f "${LOCAL_BIN_LINK}" "${HOME}/.local/bin/simp"
+for bin_link in "/usr/local/bin/imp" "/usr/local/bin/simp"; do
+  if [[ -L "${bin_link}" && -w "/usr/local/bin" ]]; then
+    rm -f "${bin_link}" >/dev/null 2>&1 || true
+  fi
+done
 echo "✓ Removed binary & UI:  ${BIN_DEST}, ${UI_DEST}"
 
 # 3. Remove Desktop shortcut & Wayland app_id alias
-rm -f "${HOME}/.local/share/applications/chrome-127.0.0.1__-Default.desktop"
+rm -f "${HOME}/.local/share/applications/chrome-127.0.0.1__-Default.desktop" \
+      "${HOME}/.local/share/applications/org.simp.player.desktop"
 if [[ -f "${DESKTOP_FILE}" ]]; then
   rm -f "${DESKTOP_FILE}"
   if command -v update-desktop-database >/dev/null 2>&1; then
@@ -97,10 +103,10 @@ if [[ -f "${DESKTOP_FILE}" ]]; then
 fi
 
 # 4. Remove Decky plugin if present
-# Note: on POSIX/Linux, removing `~/homebrew/plugins/simp-decky` requires write permission on the
-# parent directory `~/homebrew/plugins` (which Decky Loader creates as `root:root`), NOT just on `simp-decky`!
+# Note: on POSIX/Linux, removing `~/homebrew/plugins/imp-decky` requires write permission on the
+# parent directory `~/homebrew/plugins` (which Decky Loader creates as `root:root`), NOT just on `imp-decky`!
 # Never run non-sudo `rm -rf "${DECKY_TARGET}"` when `~/homebrew/plugins` is root-owned, or `rm -rf` will
-# delete the files inside `simp-decky/` and then fail on `rmdir`, leaving an empty broken folder in Decky!
+# delete the files inside `imp-decky/` and then fail on `rmdir`, leaving an empty broken folder in Decky!
 if [[ -d "${DECKY_TARGET}" ]]; then
   if [[ -w "$(dirname "${DECKY_TARGET}")" ]]; then
     rm -rf "${DECKY_TARGET}"
@@ -121,14 +127,14 @@ fi
 
 # 5. Handle user data (preserve by default, or wipe on --purge)
 if [[ "${PURGE}" -eq 1 ]]; then
-  rm -rf "${INSTALL_ROOT}" "${HOME}/.config/simp" "${HOME}/.cache/simp"
-  echo "✓ Purged all user data: ~/.local/share/simp, ~/.config/simp, ~/.cache/simp"
+  rm -rf "${INSTALL_ROOT}" "${HOME}/.config/imp" "${HOME}/.cache/imp"
+  echo "✓ Purged all user data: ~/.local/share/imp, ~/.config/imp, ~/.cache/imp"
 else
-  echo "ℹ Preserved user library & settings (~/.config/simp/settings.vdf, ~/.local/share/simp/library.db)."
+  echo "ℹ Preserved user library & settings (~/.config/imp/settings.vdf, ~/.local/share/imp/library.db)."
   echo "  (Run with --purge to delete all databases, caches, and settings.)"
 fi
 
 echo "============================================================"
-echo "✅ SIMP cleanly uninstalled."
+echo "✅ IMP cleanly uninstalled."
 echo "============================================================"
 

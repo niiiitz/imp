@@ -5,29 +5,29 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>SIMP</string>
+  <string>IMP</string>
   <key>CFBundleExecutable</key>
-  <string>simp</string>
+  <string>imp</string>
   <key>CFBundleIconFile</key>
-  <string>SIMP.icns</string>
+  <string>IMP.icns</string>
   <key>CFBundleIdentifier</key>
   <string>org.simp.player</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>SIMP</string>
+  <string>IMP</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>__SIMP_VERSION__</string>
+  <string>__IMP_VERSION__</string>
   <key>CFBundleVersion</key>
-  <string>__SIMP_VERSION__</string>
+  <string>__IMP_VERSION__</string>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>SIMP uses local audio loopback to apply its 10-band Equalizer, Vocal Isolation DSP, and real-time 16-band spectrum visualizer to Apple Music playback.</string>
+  <string>IMP uses local audio loopback to apply its 10-band Equalizer, Vocal Isolation DSP, and real-time 16-band spectrum visualizer to Apple Music playback.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
   <key>NSAppTransportSecurity</key>

@@ -12,8 +12,8 @@ import {
  */
 const SP_REACT: typeof ReactTypes = (window as any).SP_REACT || (globalThis as any).SP_REACT || (window as any).React;
 
-const SIMP_VERSION = 'v0.8.2';
-let cachedLiveDaemonVersion = SIMP_VERSION;
+const IMP_VERSION = 'v0.9.0-alpha.1';
+let cachedLiveDaemonVersion = IMP_VERSION;
 const SIMP_CONSOLE_ROUTE = '/simp-console';
 
 let cachedSteamFocusable: any = null;
@@ -56,7 +56,7 @@ function getSteamWebpackModules(): any[] {
       }
     }
   } catch (err) {
-    console.warn('[SIMP Decky] Failed to inspect webpackChunksteamui:', err);
+    console.warn('[IMP Decky] Failed to inspect webpackChunksteamui:', err);
   }
   return modules;
 }
@@ -509,7 +509,7 @@ const SimpNativeConsoleRoute: ReactTypes.FC<{ onExit?: () => void }> = ({ onExit
         <iframe
           ref={iframeRef}
           src={`http://127.0.0.1:18888/?v=${encodeURIComponent(cachedLiveDaemonVersion)}&t=${mountTsRef.current}`}
-          title="SIMP Console"
+          title="IMP Console"
           allow="autoplay; encrypted-media; clipboard-write"
           style={{
             width: '100%',
@@ -718,7 +718,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
 
       const prev = focusedIdxRef.current;
       if (prev < 0 || prev >= nodes.length) {
-        // When focus is outside the SIMP drawer (e.g. on Decky's `< SIMP Audio Player` header),
+        // When focus is outside the SIMP drawer (e.g. on Decky's `< IMP Audio Player` header),
         // only enter the SIMP drawer when the user presses D-Pad Down from the header column.
         if (dir !== 'down' || isFocusInRightQamStrip()) {
           return false;
@@ -1072,7 +1072,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
             ) : (
               <img
                 src="http://127.0.0.1:18888/simp-icon-dark.png"
-                alt="SIMP"
+                alt="IMP"
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             )}
@@ -1087,7 +1087,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
                 textOverflow: 'ellipsis',
               }}
             >
-              {track?.title || 'SIMP Ready'}
+              {track?.title || 'IMP Ready'}
             </div>
             <div
               style={{
@@ -1458,7 +1458,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
             color: '#a1a1aa',
           }}
         >
-          ↗ Console ({liveVersion || SIMP_VERSION})
+          ↗ Console ({liveVersion || IMP_VERSION})
         </Focusable>
         <Focusable
           onActivate={handleSelfUpdate}
@@ -1471,7 +1471,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
             color: updating ? '#34d399' : updateAvailableTag ? '#34d399' : '#5bc0de',
             borderColor: updating ? '#34d399' : updateAvailableTag ? '#10b981' : '#262630',
           }}
-          title="1-Click Self-Update SIMP Daemon + Decky Plugin from GitHub Releases"
+          title="1-Click Self-Update IMP Daemon + Decky Plugin from GitHub Releases"
         >
           {updateLabel}
         </Focusable>
@@ -1486,7 +1486,7 @@ const SimpDeckyDrawer: ReactTypes.FC<{ serverApi?: any }> = ({ serverApi }) => {
             color: reloading ? '#5bc0de' : '#a1a1aa',
             borderColor: reloading ? '#2aa3c4' : '#262630',
           }}
-          title="Restart SIMP Background Daemon & Widevine Worker"
+          title="Restart IMP Background Daemon & Widevine Worker"
         >
           {reloading ? '⏳' : '🔄 BG'}
         </Focusable>
@@ -1509,11 +1509,11 @@ export default function defineSimpDeckyPlugin(serverApi?: any) {
       isSimpRouteRegistered = true;
     }
   } catch (err) {
-    console.warn('[SIMP Decky] Failed to register /simp-console route:', err);
+    console.warn('[IMP Decky] Failed to register /simp-console route:', err);
   }
 
   return {
-    title: <div style={{ fontWeight: 800 }}>SIMP Audio Player</div>,
+    title: <div style={{ fontWeight: 800 }}>IMP Audio Player</div>,
     content: <SimpDeckyDrawer serverApi={serverApi} />,
     icon: <span>🎵</span>,
     onDismount() {

@@ -564,7 +564,7 @@ export async function pinSoundCloudPlaylistToSimp(
   preloadedTracks?: TrackMetadata[],
   onToast?: (msg: string) => void
 ): Promise<number> {
-  onToast?.(`Pinning "${playlist.name}" to SIMP...`);
+  onToast?.(`Pinning "${playlist.name}" to IMP...`);
   let tracks =
     preloadedTracks && preloadedTracks.length > 0
       ? preloadedTracks
@@ -600,7 +600,7 @@ export async function pinSoundCloudPlaylistToSimp(
   // Also sync as a Liked Set on SoundCloud (`POST /likes/playlists/{id}`) if signed in
   setSoundCloudPlaylistLiked(playlist.id, true).catch(() => {});
 
-  onToast?.(`📌 Pinned "${playlist.name}" (${tracks.length} tracks) to SIMP Library`);
+  onToast?.(`📌 Pinned "${playlist.name}" (${tracks.length} tracks) to IMP Library`);
   return tracks.length;
 }
 

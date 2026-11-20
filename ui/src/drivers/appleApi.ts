@@ -251,7 +251,7 @@ export async function ensureMusicKitConfigured(
         text.includes('NotAllowedError') ||
         text.includes('play() failed')
       ) {
-        console.warn('[SIMP MusicKit] Suppressed blocking autoplay alert:', text);
+        console.warn('[IMP MusicKit] Suppressed blocking autoplay alert:', text);
         return;
       }
       origAlert(msg);
@@ -263,7 +263,7 @@ export async function ensureMusicKitConfigured(
       ...(musicUserToken ? { musicUserToken } : {}),
       suppressErrorDialog: true,
       app: {
-        name: 'SIMP Media Player',
+        name: 'IMP Media Player',
         build: '0.1.0-alpha',
       },
     });
@@ -342,7 +342,7 @@ export async function authorizeAppleMusic(
 
   defaultSimpClient.setAppleMusicUserToken(userToken);
   defaultSimpClient.reportAppleWorkerEvent('authorized', 0, null, null);
-  onToast?.('Apple Music connected! Browse Cloud Playlists, Radio, or Search to Pin to SIMP.');
+  onToast?.('Apple Music connected! Browse Cloud Playlists, Radio, or Search to Pin to IMP.');
   return true;
 }
 
@@ -483,7 +483,7 @@ export async function pinApplePlaylistToSimp(
     playlist: record,
     tracks,
   });
-  onToast?.(`Pinned "${pl.name}" (${tracks.length} tracks) to SIMP!`);
+  onToast?.(`Pinned "${pl.name}" (${tracks.length} tracks) to IMP!`);
   return record;
 }
 
@@ -526,7 +526,7 @@ export async function pinAppleAlbumToSimp(
     album: record,
     tracks: tracks.map((t) => ({ ...t, album_id: albId })),
   });
-  onToast?.(`Pinned full album "${album.title}" (${tracks.length} tracks) to SIMP!`);
+  onToast?.(`Pinned full album "${album.title}" (${tracks.length} tracks) to IMP!`);
   return record;
 }
 

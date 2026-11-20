@@ -11,15 +11,15 @@ export PATH="/usr/local/opt/node@24/bin:/opt/homebrew/opt/node@24/bin:${HOME}/.c
 REPO_ROOT="$(cd "${SRCROOT}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
-# Build dist/SIMP.app using the canonical macOS packaging script
+# Build dist/IMP.app using the canonical macOS packaging script
 "${REPO_ROOT}/packaging/scripts/package-macos.sh"
 
 # Populate Xcode's target bundle so Xcode's native code signing, LLDB, and Archive work seamlessly
 DEST_APP="${TARGET_BUILD_DIR}/${WRAPPER_NAME}"
 mkdir -p "${DEST_APP}/Contents/MacOS" "${DEST_APP}/Contents/Resources/ui"
 
-cp "${REPO_ROOT}/dist/SIMP.app/Contents/MacOS/simp" "${DEST_APP}/Contents/MacOS/simp"
-chmod +x "${DEST_APP}/Contents/MacOS/simp"
-cp "${REPO_ROOT}/dist/SIMP.app/Contents/Resources/SIMP.icns" "${DEST_APP}/Contents/Resources/SIMP.icns"
-cp -R "${REPO_ROOT}/dist/SIMP.app/Contents/Resources/ui/"* "${DEST_APP}/Contents/Resources/ui/"
+cp "${REPO_ROOT}/dist/IMP.app/Contents/MacOS/imp" "${DEST_APP}/Contents/MacOS/imp"
+chmod +x "${DEST_APP}/Contents/MacOS/imp"
+cp "${REPO_ROOT}/dist/IMP.app/Contents/Resources/IMP.icns" "${DEST_APP}/Contents/Resources/IMP.icns"
+cp -R "${REPO_ROOT}/dist/IMP.app/Contents/Resources/ui/"* "${DEST_APP}/Contents/Resources/ui/"
 

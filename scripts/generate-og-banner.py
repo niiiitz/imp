@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate the 1280x640 GitHub Open Graph social preview & README hero banner for IMP (SIMP).
+Generate the 1280x640 GitHub Open Graph social preview & README hero banner for IMP.
 Uses librsvg + libcairo via ctypes to render crisp anti-aliased vector graphics
 matching the live PlayerView UI design language (`Demoscene 64K` backdrop, top pill bar,
 tight chest-up crop of the IMP mascot in the left artwork square, amber waveform capsule
@@ -319,7 +319,7 @@ def generate_svg() -> str:
           font-size="31" font-weight="900" letter-spacing="-0.4">IMP</text>
     <text x="176" y="167" fill="#9ca3af"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="19" font-weight="700">— Interactive Media Player (SIMP)</text>
+          font-size="19" font-weight="700">— Interactive Media Player (IMP)</text>
 
     <text x="104" y="198" fill="#d4d4dc"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
@@ -462,7 +462,7 @@ def generate_svg() -> str:
           font-size="14.5" font-weight="800">Controller-First Console &amp; Desktop Media Player</text>
     <text x="640" y="562" text-anchor="middle" fill="#9ca3af"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="12" font-weight="600">github.com/niiiitz/simp • GPL-3.0</text>
+          font-size="12" font-weight="600">github.com/niiiitz/imp • GPL-3.0</text>
   </g>
 
   <!-- Outer Console Frame Border -->

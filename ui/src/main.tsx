@@ -10,12 +10,12 @@ const isDedicatedAppleWorker =
     window.location.pathname.startsWith('/apple-worker'));
 
 if (isDedicatedAppleWorker && typeof document !== 'undefined') {
-  document.title = 'SIMP Headless Audio Worker';
+  document.title = 'IMP Headless Audio Worker';
 }
 
 const HeadlessAppleWorker: React.FC = () => {
   useEffect(() => {
-    document.title = 'SIMP Headless Audio Worker';
+    document.title = 'IMP Headless Audio Worker';
     defaultSimpClient.connect();
   }, []);
   return <AppleMusicDriver />;

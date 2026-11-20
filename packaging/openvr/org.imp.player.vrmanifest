@@ -1,0 +1,20 @@
+{
+  "source": "builtin",
+  "applications": [
+    {
+      "app_key": "org.imp.player",
+      "launch_type": "binary",
+      "binary_path_linux": "__IMP_BIN__",
+      "action_manifest_path": "__IMP_ACTIONS__",
+      "is_dashboard_overlay": true,
+      "image_path": "__IMP_ICON__",
+      "strings": {
+        "en_us": {
+          "name": "IMP Media Player",
+          "description": "Integrated Media Player — Native Console & SteamVR Audio Hub"
+        }
+      }
+    }
+  ]
+}
+

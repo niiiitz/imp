@@ -2,12 +2,12 @@
 set -euo pipefail
 
 # ==============================================================================
-# IMP / SIMP — itch.io Multi-Channel Butler Publisher
+# IMP — itch.io Multi-Channel Butler Publisher
 # Pushes platform-tagged release builds to itch.io via `butler`:
-#   - linux-amd64     (dist/simp-steamos-userland-x86_64.tar.gz)
-#   - linux-arm64     (dist/simp-steamos-userland-aarch64.tar.gz)
-#   - windows-amd64   (dist/simp-windows-portable-x86_64.zip)
-#   - macos-universal (dist/SIMP-macos-arm64.zip)
+#   - linux-amd64     (dist/imp-steamos-userland-x86_64.tar.gz)
+#   - linux-arm64     (dist/imp-steamos-userland-aarch64.tar.gz)
+#   - windows-amd64   (dist/imp-windows-portable-x86_64.zip)
+#   - macos-universal (dist/IMP-macos-arm64.zip)
 #
 # Usage:
 #   ./packaging/scripts/publish-itch.sh [version]
@@ -26,7 +26,7 @@ RAW_VERSION="${1:-$(python3 -c 'import json; print(json.load(open("package.json"
 VERSION="${RAW_VERSION#v}"
 
 echo "============================================================"
-echo " Publishing IMP (SIMP) v${VERSION} to itch.io (${ITCH_TARGET})"
+echo " Publishing IMP v${VERSION} to itch.io (${ITCH_TARGET})"
 echo "============================================================"
 
 if [[ -z "${BUTLER_BIN}" && "${ITCH_DRY_RUN:-0}" != "1" ]]; then
@@ -51,11 +51,11 @@ push_channel() {
   fi
 }
 
-push_channel "${REPO_ROOT}/dist/simp-steamos-userland-x86_64.tar.gz" "linux-amd64"
-push_channel "${REPO_ROOT}/dist/simp-steamos-userland-aarch64.tar.gz" "linux-arm64"
-push_channel "${REPO_ROOT}/dist/simp-windows-portable-x86_64.zip" "windows-amd64"
-push_channel "${REPO_ROOT}/dist/SIMP-macos-arm64.zip" "macos-universal"
-push_channel "${REPO_ROOT}/dist/simp-decky.zip" "steamos-decky"
+push_channel "${REPO_ROOT}/dist/imp-steamos-userland-x86_64.tar.gz" "linux-amd64"
+push_channel "${REPO_ROOT}/dist/imp-steamos-userland-aarch64.tar.gz" "linux-arm64"
+push_channel "${REPO_ROOT}/dist/imp-windows-portable-x86_64.zip" "windows-amd64"
+push_channel "${REPO_ROOT}/dist/IMP-macos-arm64.zip" "macos-universal"
+push_channel "${REPO_ROOT}/dist/imp-decky.zip" "steamos-decky"
 
 echo "============================================================"
 echo "✅ itch.io channel push complete for v${VERSION}"

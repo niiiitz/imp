@@ -4,8 +4,8 @@
 	"ContentRoot" "."
 	"FileMapping"
 	{
-		"LocalPath" "SIMP.app/*"
-		"DepotPath" "SIMP.app"
+		"LocalPath" "IMP.app/*"
+		"DepotPath" "IMP.app"
 		"recursive" "1"
 	}
 }

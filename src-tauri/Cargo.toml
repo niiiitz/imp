@@ -1,21 +1,21 @@
 [package]
-name = "simp"
+name = "imp"
 version.workspace = true
 edition.workspace = true
-default-run = "simp"
+default-run = "imp"
 
 [lib]
-name = "simp_ui_lib"
+name = "imp_ui_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "simp"
+name = "imp"
 path = "src/main.rs"
 
 [dependencies]
-simp-protocol = { path = "../crates/simp-protocol" }
-simp-core = { path = "../crates/simp-core" }
-simp-daemon = { path = "../crates/simp-daemon" }
+imp-protocol = { path = "../crates/imp-protocol" }
+imp-core = { path = "../crates/imp-core" }
+imp-daemon = { path = "../crates/imp-daemon" }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true

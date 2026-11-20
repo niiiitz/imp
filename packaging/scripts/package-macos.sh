@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # ==============================================================================
-# SIMP (org.simp.player) — Native macOS .app Bundle & Signed Release Packager
+# IMP (org.simp.player) — Native macOS .app Bundle & Signed Release Packager
 # Produces:
-#   dist/SIMP.app
-#   dist/SIMP-macos-arm64.zip (or dist/SIMP-macos-x86_64.zip)
+#   dist/IMP.app
+#   dist/IMP-macos-arm64.zip (or dist/IMP-macos-x86_64.zip)
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -26,15 +26,15 @@ else
   ARCH_SLUG="x86_64"
 fi
 
-APP_BUNDLE="${REPO_ROOT}/dist/SIMP.app"
-ZIP_ARCHIVE="${REPO_ROOT}/dist/SIMP-macos-${ARCH_SLUG}.zip"
+APP_BUNDLE="${REPO_ROOT}/dist/IMP.app"
+ZIP_ARCHIVE="${REPO_ROOT}/dist/IMP-macos-${ARCH_SLUG}.zip"
 
 echo "============================================================"
-echo " Building SIMP macOS Native Application Bundle (${ARCH_SLUG})"
+echo " Building IMP macOS Native Application Bundle (${ARCH_SLUG})"
 echo "============================================================"
 
 # 0. Determine and synchronize release version
-TARGET_VERSION="${1:-${SIMP_VERSION:-}}"
+TARGET_VERSION="${1:-${IMP_VERSION:-${SIMP_VERSION:-}}}"
 SYNCED_VERSION="$(TARGET_VERSION="${TARGET_VERSION}" "${PYTHON_BIN}" - <<'PY'
 import json, os, re
 
@@ -75,7 +75,7 @@ if os.path.isfile(cargo_lock):
     with open(cargo_lock, "r", encoding="utf-8") as f:
         cl_src = f.read()
     cl_next = re.sub(
-        r'(name = "(?:simp|simp-core|simp-daemon|simp-protocol)"\nversion = )"[^"]+"',
+        r'(name = "(?:imp|imp-core|imp-daemon|imp-protocol|simp|simp-core|simp-daemon|simp-protocol)"\nversion = )"[^"]+"',
         rf'\1"{raw_ver}"',
         cl_src,
     )
@@ -88,8 +88,8 @@ if os.path.isfile(idx_path):
     with open(idx_path, "r", encoding="utf-8") as f:
         idx_src = f.read()
     idx_next = re.sub(
-        r"const SIMP_VERSION = 'v[^']+';",
-        f"const SIMP_VERSION = 'v{raw_ver}';",
+        r"const (?:IMP|SIMP)_VERSION = 'v[^']+';",
+        f"const IMP_VERSION = 'v{raw_ver}';",
         idx_src,
     )
     if idx_next != idx_src:
@@ -103,12 +103,12 @@ if os.path.isfile(readme_path):
     shield_ver = raw_ver.replace("-", "--")
     readme_next = re.sub(
         r"\[!\[Status: v[^\]]+\]\(https://img\.shields\.io/badge/status-v[^)]+\)\]\([^)]+\)",
-        f"[![Status: v{raw_ver}](https://img.shields.io/badge/status-v{shield_ver}-ff6a00?style=flat-square)](https://github.com/niiiitz/simp/releases)",
+        f"[![Status: v{raw_ver}](https://img.shields.io/badge/status-v{shield_ver}-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)",
         readme_src,
     )
     readme_next = re.sub(
-        r"## ⬇️ Download SIMP \(`v[^`]+`([^)]*)\)",
-        f"## ⬇️ Download SIMP (`v{raw_ver}`\\1)",
+        r"## ⬇️ Download (?:IMP|SIMP) \(`v[^`]+`([^)]*)\)",
+        f"## ⬇️ Download IMP (`v{raw_ver}`\\1)",
         readme_next,
     )
     readme_next = re.sub(
@@ -219,17 +219,17 @@ if [[ -f "${ENV_FILE}" ]]; then
   fi
 fi
 
-"${CARGO_BIN}" build --release -p simp --offline
-BUILT_BIN="${REPO_ROOT}/target/release/simp"
+"${CARGO_BIN}" build --release -p imp --offline
+BUILT_BIN="${REPO_ROOT}/target/release/imp"
 
-echo "3/5 Generating macOS SIMP.icns icon set (Apple HIG 1024x1024 rounded-squircle master)..."
+echo "3/5 Generating macOS IMP.icns icon set (Apple HIG 1024x1024 rounded-squircle master)..."
 if [[ -f "${REPO_ROOT}/ui/public/simp-icon-macos-squircle.png" ]]; then
   ICON_SRC="${REPO_ROOT}/ui/public/simp-icon-macos-squircle.png"
 else
   ICON_SRC="${REPO_ROOT}/ui/public/simp-icon-dark.png"
 fi
-ICONSET_DIR="${REPO_ROOT}/dist/SIMP.iconset"
-PADDED_MASTER="${REPO_ROOT}/dist/.simp-macos-master-1024.png"
+ICONSET_DIR="${REPO_ROOT}/dist/IMP.iconset"
+PADDED_MASTER="${REPO_ROOT}/dist/.imp-macos-master-1024.png"
 rm -rf "${ICONSET_DIR}" "${PADDED_MASTER}" "${APP_BUNDLE}" "${ZIP_ARCHIVE}"
 mkdir -p "${ICONSET_DIR}" \
   "${APP_BUNDLE}/Contents/MacOS" \
@@ -324,18 +324,18 @@ for sz in 16 32 128 256 512; do
   sz2=$((sz * 2))
   sips -z "${sz2}" "${sz2}" "${PADDED_MASTER}" --out "${ICONSET_DIR}/icon_${sz}x${sz}@2x.png" >/dev/null
 done
-iconutil -c icns "${ICONSET_DIR}" -o "${APP_BUNDLE}/Contents/Resources/SIMP.icns"
+iconutil -c icns "${ICONSET_DIR}" -o "${APP_BUNDLE}/Contents/Resources/IMP.icns"
 rm -rf "${ICONSET_DIR}" "${PADDED_MASTER}"
 
-echo "4/5 Assembling dist/SIMP.app bundle..."
-sed "s/__SIMP_VERSION__/${SYNCED_VERSION}/g" \
+echo "4/5 Assembling dist/IMP.app bundle..."
+sed -e "s/__IMP_VERSION__/${SYNCED_VERSION}/g" -e "s/__SIMP_VERSION__/${SYNCED_VERSION}/g" \
   "${REPO_ROOT}/packaging/macos/Info.plist" > "${APP_BUNDLE}/Contents/Info.plist"
 
-cp "${BUILT_BIN}" "${APP_BUNDLE}/Contents/MacOS/simp"
-chmod +x "${APP_BUNDLE}/Contents/MacOS/simp"
+cp "${BUILT_BIN}" "${APP_BUNDLE}/Contents/MacOS/imp"
+chmod +x "${APP_BUNDLE}/Contents/MacOS/imp"
 cp -R "${REPO_ROOT}/ui/dist/"* "${APP_BUNDLE}/Contents/Resources/ui/"
 
-echo "5/5 Code signing dist/SIMP.app and creating dist/SIMP-macos-${ARCH_SLUG}.zip..."
+echo "5/5 Code signing dist/IMP.app and creating dist/IMP-macos-${ARCH_SLUG}.zip..."
 SIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-${EXPANDED_CODE_SIGN_IDENTITY:-}}"
 SIGN_LABEL="${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}"
 if [[ -z "${SIGN_IDENTITY}" ]]; then

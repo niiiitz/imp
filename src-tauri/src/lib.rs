@@ -32,13 +32,17 @@ pub fn ensure_daemon_running() {
         if let Ok(exe) = std::env::current_exe() {
             let _ = std::fs::remove_file(exe.with_extension("exe.old"));
             if let Some(dir) = exe.parent() {
+                let _ = std::fs::remove_file(dir.join("imp.exe.old"));
                 let _ = std::fs::remove_file(dir.join("simp.exe.old"));
+                let _ = std::fs::remove_file(dir.join("imp.ico"));
                 let _ = std::fs::remove_file(dir.join("simp.ico"));
                 if let Ok(entries) = std::fs::read_dir(dir) {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
-                        if name_str.starts_with("simp.exe.") && name_str.ends_with(".old") {
+                        if (name_str.starts_with("imp.exe.") || name_str.starts_with("simp.exe."))
+                            && name_str.ends_with(".old")
+                        {
                             let _ = std::fs::remove_file(entry.path());
                         }
                     }
@@ -54,14 +58,14 @@ pub fn ensure_daemon_running() {
         // A stale daemon from a previous version is listening on :18888 — replace it cleanly
         #[cfg(target_os = "windows")]
         {
-            simp_core::close_windows_headless_worker_windows();
+            imp_core::close_windows_headless_worker_windows();
             if let Some(pid) = running_pid {
                 let mut tk = Command::new("taskkill");
                 tk.args(["/F", "/PID", &pid.to_string()])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
-                simp_core::configure_background_command(&mut tk);
+                imp_core::configure_background_command(&mut tk);
                 let _ = tk.status();
             }
             std::thread::sleep(Duration::from_millis(250));
@@ -86,7 +90,7 @@ pub fn ensure_daemon_running() {
     #[cfg(target_os = "linux")]
     {
         let _ = Command::new("systemctl")
-            .args(["--user", "start", "simp.service"])
+            .args(["--user", "start", "imp.service"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -107,9 +111,9 @@ pub fn ensure_daemon_running() {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        simp_core::configure_background_command(&mut cmd);
+        imp_core::configure_background_command(&mut cmd);
         if let Ok(child) = cmd.spawn() {
-            simp_core::apply_windows_efficiency_mode_to_child(&child);
+            imp_core::apply_windows_efficiency_mode_to_child(&child);
         }
 
         // Wait up to 2.0s for the daemon socket to come online
@@ -127,7 +131,9 @@ pub fn run_ui() {
 
     #[cfg(target_os = "macos")]
     {
-        if std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1") {
+        if std::env::var("IMP_NO_WINDOW").ok().as_deref() == Some("1")
+            || std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1")
+        {
             ensure_daemon_running();
             return;
         }
@@ -137,21 +143,23 @@ pub fn run_ui() {
     #[cfg(not(target_os = "macos"))]
     {
         ensure_daemon_running();
-        println!("SIMP daemon verified online at {ui_url} (IPC: ws://127.0.0.1:18888/ws)");
+        println!("IMP daemon verified online at {ui_url} (IPC: ws://127.0.0.1:18888/ws)");
 
-        if std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1") {
+        if std::env::var("IMP_NO_WINDOW").ok().as_deref() == Some("1")
+            || std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1")
+        {
             return;
         }
 
         #[cfg(target_os = "windows")]
         {
-            let _ = simp_core::hide_windows_headless_worker_windows();
-            if simp_core::focus_existing_windows_ui_window() {
+            let _ = imp_core::hide_windows_headless_worker_windows();
+            if imp_core::focus_existing_windows_ui_window() {
                 return;
             }
         }
 
-        let profile_dir_path = simp_core::simp_data_dir().join("window-profile");
+        let profile_dir_path = imp_core::simp_data_dir().join("window-profile");
         let _ = std::fs::create_dir_all(&profile_dir_path);
         // Create the Chromium "First Run" sentinel file and clear any stale Crash/Singleton locks
         let _ = std::fs::File::create(profile_dir_path.join("First Run"));
@@ -171,17 +179,17 @@ pub fn run_ui() {
             // Ensure DISPLAY / WAYLAND_DISPLAY are populated even if invoked from a background D-Bus/systemd context
             let mut wmctrl = Command::new("wmctrl");
             wmctrl
-                .args(["-xa", "org.simp.player"])
+                .args(["-xa", "org.imp.player"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            simp_core::mpris::apply_desktop_display_env(&mut wmctrl);
+            imp_core::mpris::apply_desktop_display_env(&mut wmctrl);
             if wmctrl.status().map(|s| s.success()).unwrap_or(false) {
                 return;
             }
 
             // 1. Try native Chromium/Chrome/Edge/Brave in chromeless 1280x800 app mode
-            // Pass `--ozone-platform=x11` so `--class=org.simp.player` sets X11 `WM_CLASS="org.simp.player"`
-            // (preventing KWin Wayland's generic yellow "W" icon and allowing `wmctrl -xa org.simp.player` to raise it).
+            // Pass `--ozone-platform=x11` so `--class=org.imp.player` sets X11 `WM_CLASS="org.imp.player"`
+            // (preventing KWin Wayland's generic yellow "W" icon and allowing `wmctrl -xa org.imp.player` to raise it).
             let native_browsers = [
                 "chromium",
                 "chromium-browser",
@@ -196,7 +204,7 @@ pub fn run_ui() {
                 let mut cmd = Command::new(bin);
                 cmd.arg(format!("--app={ui_url}"))
                     .arg("--window-size=1280,800")
-                    .arg("--class=org.simp.player")
+                    .arg("--class=org.imp.player")
                     .arg("--ozone-platform=x11")
                     .arg("--no-first-run")
                     .arg("--no-default-browser-check")
@@ -205,7 +213,7 @@ pub fn run_ui() {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
-                simp_core::mpris::apply_desktop_display_env(&mut cmd);
+                imp_core::mpris::apply_desktop_display_env(&mut cmd);
                 if let Ok(mut child) = cmd.spawn() {
                     let _ = child.wait();
                     return;
@@ -232,12 +240,12 @@ pub fn run_ui() {
                 {
                     let mut cmd = Command::new("flatpak");
                     cmd.arg("run")
-                        .arg("--filesystem=xdg-data/simp:create")
+                        .arg("--filesystem=xdg-data/imp:create")
                         .arg("--device=all")
                         .arg(app_id)
                         .arg(format!("--app={ui_url}"))
                         .arg("--window-size=1280,800")
-                        .arg("--class=org.simp.player")
+                        .arg("--class=org.imp.player")
                         .arg("--ozone-platform=x11")
                         .arg("--no-first-run")
                         .arg("--no-default-browser-check")
@@ -246,7 +254,7 @@ pub fn run_ui() {
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null());
-                    simp_core::mpris::apply_desktop_display_env(&mut cmd);
+                    imp_core::mpris::apply_desktop_display_env(&mut cmd);
                     if let Ok(mut child) = cmd.spawn() {
                         let _ = child.wait();
                         return;
@@ -267,13 +275,13 @@ pub fn run_ui() {
 
 #[cfg(target_os = "windows")]
 fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &str) {
-    if simp_core::focus_existing_windows_ui_window() {
+    if imp_core::focus_existing_windows_ui_window() {
         return;
     }
 
-    simp_core::seed_windows_browser_widevine_profile(profile_dir);
+    imp_core::seed_windows_browser_widevine_profile(profile_dir);
 
-    for bin in simp_core::windows_browser_candidates() {
+    for bin in imp_core::windows_browser_candidates() {
         let mut cmd = Command::new(&bin);
         cmd.arg(format!("--app={ui_url}"))
             .arg("--window-size=1280,800")
@@ -285,9 +293,9 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        simp_core::configure_background_command(&mut cmd);
+        imp_core::configure_background_command(&mut cmd);
         if let Ok(child) = cmd.spawn() {
-            simp_core::apply_windows_efficiency_mode_to_child(&child);
+            imp_core::apply_windows_efficiency_mode_to_child(&child);
             return;
         }
     }
@@ -299,9 +307,9 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    simp_core::configure_background_command(&mut fallback);
+    imp_core::configure_background_command(&mut fallback);
     if let Ok(child) = fallback.spawn() {
-        simp_core::apply_windows_efficiency_mode_to_child(&child);
+        imp_core::apply_windows_efficiency_mode_to_child(&child);
     }
 }
 

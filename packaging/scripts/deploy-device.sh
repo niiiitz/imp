@@ -7,8 +7,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 "${REPO_ROOT}/packaging/scripts/package-release.sh"
 
-echo "Deploying SIMP bundle to ${TARGET}..."
-scp "${REPO_ROOT}/dist/simp-steamos-userland.tar.gz" "${TARGET}:/tmp/simp-steamos-userland.tar.gz"
-ssh "${TARGET}" "tar -xzf /tmp/simp-steamos-userland.tar.gz -C /tmp && /tmp/simp-steamos-userland/install-steamos.sh && rm -rf /tmp/simp-steamos-userland /tmp/simp-steamos-userland.tar.gz"
+echo "Deploying IMP bundle to ${TARGET}..."
+scp "${REPO_ROOT}/dist/imp-steamos-userland.tar.gz" "${TARGET}:/tmp/imp-steamos-userland.tar.gz"
+ssh "${TARGET}" "tar -xzf /tmp/imp-steamos-userland.tar.gz -C /tmp && /tmp/imp-steamos-userland/install-steamos.sh && rm -rf /tmp/imp-steamos-userland /tmp/imp-steamos-userland.tar.gz"
 
-echo "✅ SIMP deployed and running on ${TARGET}!"
+echo "✅ IMP deployed and running on ${TARGET}!"

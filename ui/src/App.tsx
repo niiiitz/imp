@@ -550,6 +550,15 @@ const ConsoleMainApp: React.FC = () => {
   }, [desktopMode]);
 
   const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>({ channel: 'stable' });
+  const updateChannelRef = useRef<string>('stable');
+  const notifiedUpdateTagRef = useRef<string | null>(null);
+  const startupUpdateCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (updateStatus.channel) {
+      updateChannelRef.current = updateStatus.channel;
+    }
+  }, [updateStatus.channel]);
 
   useEffect(() => {
     if (snap?.daemon_version) {
@@ -601,21 +610,37 @@ const ConsoleMainApp: React.FC = () => {
   const checkSimpUpdates = useCallback(async (_silent = false) => {
     setUpdateStatus((prev) => ({ ...prev, checking: true, error: undefined }));
     const base = resolveDaemonBaseUrl();
+    const maybeNotifyAvailableUpdate = (
+      available: boolean,
+      tag: string | undefined,
+      channelName: string
+    ) => {
+      if (!available || !tag || notifiedUpdateTagRef.current === tag) return;
+      notifiedUpdateTagRef.current = tag;
+      const chLabel = channelName.toLowerCase() === 'alpha' ? 'Alpha' : 'Stable';
+      showToast(`✨ IMP ${tag} available (${chLabel}) — open Settings to update`);
+    };
+
     try {
       const resp = await fetch(`${base}/api/update/check?t=${Date.now()}`, { cache: 'no-store' });
       const text = await resp.text();
       if (text.trim().startsWith('{')) {
         const data = JSON.parse(text);
         if (data.ok) {
+          const ch = String(data.channel || 'stable');
+          const available = Boolean(data.update_available);
+          updateChannelRef.current = ch;
           setUpdateStatus({
             current_version: data.current_version,
             latest_version: data.latest_version,
             latest_tag: data.latest_tag,
-            update_available: Boolean(data.update_available),
+            update_available: available,
+            channel_switch_available: Boolean(data.channel_switch_available),
             target_arch: data.target_arch,
-            channel: data.channel || 'stable',
+            channel: ch,
             checking: false,
           });
+          maybeNotifyAvailableUpdate(available, data.latest_tag, ch);
           return;
         } else if (data.error && !String(data.error).includes('<!DOCTYPE')) {
           setUpdateStatus((prev) => ({
@@ -631,7 +656,9 @@ const ConsoleMainApp: React.FC = () => {
       }
 
       // Fallback: query GitHub Releases API directly if the daemon endpoint returned HTML or was unreachable
-      const ghResp = await fetch('https://api.github.com/repos/niiiitz/simp/releases?per_page=10', {
+      const activeChannel =
+        updateChannelRef.current.toLowerCase() === 'alpha' ? 'alpha' : 'stable';
+      const ghResp = await fetch('https://api.github.com/repos/niiiitz/imp/releases?per_page=100', {
         headers: { Accept: 'application/vnd.github+json' },
         cache: 'no-store',
       });
@@ -639,26 +666,66 @@ const ConsoleMainApp: React.FC = () => {
       if (!ghText.trim().startsWith('[')) {
         throw new Error('Could not query GitHub Releases API');
       }
-      const releases = JSON.parse(ghText) as Array<{ tag_name?: string; draft?: boolean }>;
-      const valid = releases.filter((r) => !r.draft && r.tag_name);
+      const releases = JSON.parse(ghText) as Array<{
+        tag_name?: string;
+        draft?: boolean;
+        prerelease?: boolean;
+      }>;
+      const isPrereleaseTag = (t: string) => /-(alpha|beta|rc)\b/i.test(t);
+      const valid = releases.filter((r) => {
+        if (r.draft || !r.tag_name) return false;
+        if (activeChannel === 'stable') {
+          return !r.prerelease && !isPrereleaseTag(String(r.tag_name));
+        }
+        return true;
+      });
       if (valid.length === 0) {
+        if (activeChannel === 'stable') {
+          setUpdateStatus((prev) => ({
+            ...prev,
+            latest_tag: 'No stable release yet',
+            update_available: false,
+            channel_switch_available: false,
+            checking: false,
+            error: undefined,
+          }));
+          return;
+        }
         throw new Error('No published releases found on GitHub');
       }
-      const newestTag = String(valid[0].tag_name || '');
+      valid.sort((a, b) => {
+        const ta = String(a.tag_name || '').replace(/^v/i, '');
+        const tb = String(b.tag_name || '').replace(/^v/i, '');
+        if (compareSemverStrings(ta, tb)) return 1;
+        if (compareSemverStrings(tb, ta)) return -1;
+        return 0;
+      });
+      const newest = valid[valid.length - 1];
+      const newestTag = String(newest.tag_name || '');
       const latestVer = newestTag.replace(/^v/i, '');
+      const curVer = snapRef.current?.daemon_version || '';
+      const isNewer = curVer ? compareSemverStrings(curVer, latestVer) : false;
       setUpdateStatus((prev) => {
-        const curVer = prev.current_version || snap?.daemon_version || '';
-        const isNewer = curVer ? compareSemverStrings(curVer, latestVer) : false;
+        const effCur = curVer || prev.current_version || '';
+        const effNewer = effCur ? compareSemverStrings(effCur, latestVer) : false;
+        const effSwitchAvail =
+          activeChannel === 'stable' &&
+          Boolean(effCur) &&
+          isPrereleaseTag(effCur) &&
+          !isPrereleaseTag(latestVer) &&
+          !effNewer;
         return {
           ...prev,
-          current_version: curVer || undefined,
+          current_version: effCur || undefined,
           latest_version: latestVer,
           latest_tag: newestTag,
-          update_available: isNewer,
+          update_available: effNewer,
+          channel_switch_available: effSwitchAvail,
           checking: false,
           error: undefined,
         };
       });
+      maybeNotifyAvailableUpdate(isNewer, newestTag, activeChannel);
     } catch (e: any) {
       const rawMsg = String(e?.message || 'Could not reach update server');
       const cleanMsg =
@@ -671,7 +738,17 @@ const ConsoleMainApp: React.FC = () => {
         error: cleanMsg,
       }));
     }
-  }, [resolveDaemonBaseUrl, compareSemverStrings, snap?.daemon_version]);
+  }, [resolveDaemonBaseUrl, compareSemverStrings, showToast]);
+
+  // Background startup check (~3.5s after mount) so users get a toast when an update is available
+  useEffect(() => {
+    if (isDeckyEmbedded || startupUpdateCheckedRef.current) return;
+    startupUpdateCheckedRef.current = true;
+    const tid = window.setTimeout(() => {
+      checkSimpUpdates(true);
+    }, 3500);
+    return () => window.clearTimeout(tid);
+  }, [isDeckyEmbedded, checkSimpUpdates]);
 
   const applySimpUpdate = useCallback(async () => {
     setUpdateStatus((prev) => ({ ...prev, applying: true, error: undefined }));
@@ -681,7 +758,7 @@ const ConsoleMainApp: React.FC = () => {
       const resp = await fetch(`${base}/api/update/apply`, { method: 'POST', cache: 'no-store' });
       const text = await resp.text();
       if (!text.trim().startsWith('{')) {
-        throw new Error('Daemon binary does not support /api/update/apply yet — rebuild or restart simp --daemon');
+        throw new Error('Daemon binary does not support /api/update/apply yet — rebuild or restart imp --daemon');
       }
       const data = JSON.parse(text);
       if (data.ok) {

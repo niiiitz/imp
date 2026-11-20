@@ -547,7 +547,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                 ★ + Hybrid Playlist
                               </span>
                               <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                                Add track to SIMP Hybrid or Online Playlist
+                                Add track to IMP Hybrid or Online Playlist
                               </span>
                             </div>
                             <span
