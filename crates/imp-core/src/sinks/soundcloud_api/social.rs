@@ -848,3 +848,423 @@ pub fn add_tracks_to_soundcloud_set(
     super::catalog::fetch_playlist_tracks(settings, &playlist_id)
 }
 
+fn strip_bracketed_suffixes(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for ch in raw.chars() {
+        match ch {
+            '(' => paren_depth += 1,
+            ')' => paren_depth = paren_depth.saturating_sub(1),
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth = bracket_depth.saturating_sub(1),
+            _ if paren_depth == 0 && bracket_depth == 0 => out.push(ch),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn normalize_sc_match_text(raw: &str) -> String {
+    let stripped = strip_bracketed_suffixes(raw);
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for ch in stripped.chars() {
+        if ch.is_alphanumeric() {
+            for lc in ch.to_lowercase() {
+                cur.push(lc);
+            }
+        } else if !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words.join(" ")
+}
+
+fn contains_variant_phrase(haystack_lower: &str, phrase: &str) -> bool {
+    let mut search_from = 0usize;
+    while let Some(rel) = haystack_lower[search_from..].find(phrase) {
+        let start = search_from + rel;
+        let end = start + phrase.len();
+        let left_ok = start == 0
+            || !haystack_lower[..start]
+                .chars()
+                .next_back()
+                .map(|c| c.is_alphanumeric())
+                .unwrap_or(false);
+        let right_ok = end == haystack_lower.len()
+            || !haystack_lower[end..]
+                .chars()
+                .next()
+                .map(|c| c.is_alphanumeric())
+                .unwrap_or(false);
+        if left_ok && right_ok {
+            return true;
+        }
+        search_from = start + phrase.len();
+    }
+    false
+}
+
+fn has_mismatched_variant_token(target_raw: &str, candidate_raw: &str) -> bool {
+    const VARIANT_TOKENS: &[&str] = &[
+        "remix",
+        "karaoke",
+        "instrumental",
+        "sped up",
+        "slowed",
+        "nightcore",
+        "cover",
+        "live",
+        "8d",
+        "mashup",
+        "bootleg",
+        "acapella",
+        "tribute",
+    ];
+    let target_lower = target_raw.to_ascii_lowercase();
+    let candidate_lower = candidate_raw.to_ascii_lowercase();
+    VARIANT_TOKENS.iter().any(|tok| {
+        contains_variant_phrase(&candidate_lower, tok)
+            && !contains_variant_phrase(&target_lower, tok)
+    })
+}
+
+/// Scores a SoundCloud API `/tracks` candidate against local/catalog metadata for opt-in community attribution lookup.
+pub(crate) fn score_soundcloud_track_candidate(
+    item: &Value,
+    target_title: &str,
+    target_artist: &str,
+    target_duration_ms: Option<u32>,
+    target_isrc: Option<&str>,
+) -> Option<(u32, SoundCloudTrackMatch)> {
+    let obj = item.get("origin").unwrap_or(item);
+    if let Some(kind) = obj.get("kind").and_then(|v| v.as_str()) {
+        if kind != "track" {
+            return None;
+        }
+    }
+    let access = obj
+        .get("access")
+        .and_then(|v| v.as_str())
+        .unwrap_or("playable");
+    let policy = obj
+        .get("policy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("ALLOW");
+    if access.eq_ignore_ascii_case("blocked") || policy.eq_ignore_ascii_case("BLOCK") {
+        return None;
+    }
+
+    let id = if let Some(n) = obj.get("id").and_then(|v| v.as_u64()) {
+        n.to_string()
+    } else if let Some(s) = obj.get("urn").and_then(|v| v.as_str()) {
+        clean_soundcloud_id(s)
+    } else if let Some(s) = obj.get("id").and_then(|v| v.as_str()) {
+        clean_soundcloud_id(s)
+    } else {
+        String::new()
+    };
+    if id.is_empty() {
+        return None;
+    }
+
+    let cand_title = obj
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let permalink_url = obj
+        .get("permalink_url")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|u| {
+            u.starts_with("https://soundcloud.com/") || u.starts_with("http://soundcloud.com/")
+        })?
+        .to_string();
+
+    let uploader_name = obj
+        .pointer("/user/username")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    let metadata_artist = obj
+        .pointer("/metadata_artist")
+        .or_else(|| obj.pointer("/publisher_metadata/artist"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or("");
+    let display_artist = if !uploader_name.is_empty() {
+        uploader_name
+    } else if !metadata_artist.is_empty() {
+        metadata_artist
+    } else {
+        "SoundCloud Creator"
+    }
+    .to_string();
+
+    let cand_duration_ms = obj.get("duration").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let comment_count = obj
+        .get("comment_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let cand_isrc = obj
+        .pointer("/publisher_metadata/isrc")
+        .or_else(|| obj.get("isrc"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if let (Some(t_isrc), Some(c_isrc)) = (
+        target_isrc.map(str::trim).filter(|s| !s.is_empty()),
+        cand_isrc,
+    ) {
+        if t_isrc.eq_ignore_ascii_case(c_isrc) {
+            return Some((
+                100,
+                SoundCloudTrackMatch {
+                    id,
+                    title: cand_title,
+                    artist: display_artist,
+                    permalink_url,
+                    comment_count,
+                    duration_ms: cand_duration_ms,
+                    match_confidence: "high".to_string(),
+                    match_reason: "isrc_exact".to_string(),
+                },
+            ));
+        }
+    }
+
+    if has_mismatched_variant_token(target_title, &cand_title) {
+        return None;
+    }
+
+    let target_norm_title = normalize_sc_match_text(target_title);
+    let target_norm_artist = normalize_sc_match_text(target_artist);
+    if target_norm_title.is_empty() {
+        return None;
+    }
+
+    let cand_norm_title = normalize_sc_match_text(&cand_title);
+    let cand_norm_uploader = normalize_sc_match_text(uploader_name);
+    let cand_norm_meta_artist = normalize_sc_match_text(metadata_artist);
+
+    let (split_left_norm, split_right_norm) = match cand_title.split_once(" - ") {
+        Some((l, r)) => (
+            normalize_sc_match_text(l),
+            normalize_sc_match_text(r),
+        ),
+        None => (String::new(), String::new()),
+    };
+
+    let title_ok = cand_norm_title == target_norm_title
+        || split_right_norm == target_norm_title
+        || (target_norm_title.len() >= 4
+            && (cand_norm_title.contains(&target_norm_title)
+                || (!split_right_norm.is_empty()
+                    && split_right_norm.contains(&target_norm_title))));
+
+    let artist_matches = |cand_norm: &str| -> bool {
+        !cand_norm.is_empty()
+            && (cand_norm == target_norm_artist
+                || (target_norm_artist.len() >= 3
+                    && (cand_norm.contains(&target_norm_artist)
+                        || target_norm_artist.contains(cand_norm))))
+    };
+
+    let artist_ok = if target_norm_artist.is_empty() {
+        cand_norm_title == target_norm_title || split_right_norm == target_norm_title
+    } else {
+        artist_matches(&cand_norm_uploader)
+            || artist_matches(&cand_norm_meta_artist)
+            || artist_matches(&split_left_norm)
+            || (target_norm_artist.len() >= 3 && cand_norm_title.contains(&target_norm_artist))
+    };
+
+    if !title_ok || !artist_ok {
+        return None;
+    }
+
+    let (score, confidence, reason) = match (target_duration_ms.filter(|&d| d > 0), cand_duration_ms)
+    {
+        (Some(td), cd) if cd > 0 => {
+            let diff = cd.abs_diff(td);
+            if diff <= 6_000 {
+                (90u32, "high", "title_artist_duration")
+            } else if diff <= 15_000 {
+                (76u32, "medium", "title_artist")
+            } else {
+                return None;
+            }
+        }
+        _ => (76u32, "medium", "title_artist"),
+    };
+
+    if score < 75 {
+        return None;
+    }
+
+    Some((
+        score,
+        SoundCloudTrackMatch {
+            id,
+            title: cand_title,
+            artist: display_artist,
+            permalink_url,
+            comment_count,
+            duration_ms: cand_duration_ms,
+            match_confidence: confidence.to_string(),
+            match_reason: reason.to_string(),
+        },
+    ))
+}
+
+/// Opt-in official SoundCloud API track matcher used to open canonical `soundcloud.com` timed-comment pages
+/// for tracks playing on non-SoundCloud sources. Zero background calls; only runs when explicitly invoked.
+pub fn match_track_on_soundcloud(
+    settings: &SimpSettings,
+    title: &str,
+    artist: &str,
+    duration_ms: Option<u32>,
+    isrc: Option<&str>,
+) -> Result<Option<SoundCloudTrackMatch>> {
+    let clean_title = title.trim();
+    if clean_title.is_empty() {
+        return Ok(None);
+    }
+    let clean_artist = artist.trim();
+    let cache_key = format!(
+        "{}|{}|{}|{}",
+        normalize_sc_match_text(clean_title),
+        normalize_sc_match_text(clean_artist),
+        duration_ms.unwrap_or(0) / 5_000,
+        isrc.unwrap_or("").trim().to_ascii_uppercase()
+    );
+
+    if let Ok(guard) = match_cache().lock() {
+        if let Some((fetched_at, cached)) = guard.get(&cache_key) {
+            if fetched_at.elapsed() < Duration::from_secs(900) {
+                return Ok(cached.clone());
+            }
+        }
+    }
+
+    let query = format!("{clean_artist} {clean_title}").trim().to_string();
+    let url = format!(
+        "/tracks?q={}&access=playable&linked_partitioning=true&limit=10",
+        url_encode_component(&query)
+    );
+    let json = soundcloud_authed_get(settings, &url)?;
+    let best = extract_collection_items(&json)
+        .into_iter()
+        .filter_map(|item| {
+            score_soundcloud_track_candidate(item, clean_title, clean_artist, duration_ms, isrc)
+        })
+        .max_by(|(score_a, match_a), (score_b, match_b)| {
+            score_a
+                .cmp(score_b)
+                .then_with(|| match_a.comment_count.cmp(&match_b.comment_count))
+        })
+        .map(|(_, m)| m);
+
+    if let Ok(mut guard) = match_cache().lock() {
+        if guard.len() > 128 {
+            guard.clear();
+        }
+        guard.insert(cache_key, (Instant::now(), best.clone()));
+    }
+
+    Ok(best)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_score_soundcloud_track_candidate_isrc_title_duration_and_variant_guard() {
+        let isrc_candidate = serde_json::json!({
+            "id": 9001,
+            "kind": "track",
+            "title": "Sample Track (Album Version)",
+            "duration": 182000,
+            "comment_count": 42,
+            "permalink_url": "https://soundcloud.com/example-creator/sample-track",
+            "user": { "username": "Example Creator" },
+            "publisher_metadata": { "isrc": "USXYZ2600001" }
+        });
+        let (score, matched) = score_soundcloud_track_candidate(
+            &isrc_candidate,
+            "Completely Different Tag",
+            "Another Name",
+            Some(182_000),
+            Some("USXYZ2600001"),
+        )
+        .expect("exact ISRC should match");
+        assert_eq!(score, 100);
+        assert_eq!(matched.match_reason, "isrc_exact");
+        assert_eq!(matched.match_confidence, "high");
+
+        let split_title_candidate = serde_json::json!({
+            "id": 9002,
+            "kind": "track",
+            "title": "Example Artist - Demo Song (Official Audio)",
+            "duration": 211000,
+            "comment_count": 19,
+            "permalink_url": "https://soundcloud.com/label-uploader/demo-song",
+            "user": { "username": "Label Archive" }
+        });
+        let (score2, matched2) = score_soundcloud_track_candidate(
+            &split_title_candidate,
+            "Demo Song",
+            "Example Artist",
+            Some(210_000),
+            None,
+        )
+        .expect("Artist - Title upload within 6s should match high confidence");
+        assert_eq!(score2, 90);
+        assert_eq!(matched2.match_reason, "title_artist_duration");
+
+        let variant_candidate = serde_json::json!({
+            "id": 9003,
+            "kind": "track",
+            "title": "Demo Song (Club Remix)",
+            "duration": 210000,
+            "comment_count": 500,
+            "permalink_url": "https://soundcloud.com/remixer/demo-song-remix",
+            "user": { "username": "Example Artist" }
+        });
+        assert!(score_soundcloud_track_candidate(
+            &variant_candidate,
+            "Demo Song",
+            "Example Artist",
+            Some(210_000),
+            None,
+        )
+        .is_none());
+
+        let duration_mismatch = serde_json::json!({
+            "id": 9004,
+            "kind": "track",
+            "title": "Demo Song",
+            "duration": 245000,
+            "comment_count": 5,
+            "permalink_url": "https://soundcloud.com/example/demo-song-extended",
+            "user": { "username": "Example Artist" }
+        });
+        assert!(score_soundcloud_track_candidate(
+            &duration_mismatch,
+            "Demo Song",
+            "Example Artist",
+            Some(210_000),
+            None,
+        )
+        .is_none());
+    }
+}
+

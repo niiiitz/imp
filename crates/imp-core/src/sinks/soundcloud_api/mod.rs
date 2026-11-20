@@ -274,6 +274,20 @@ static TRACK_HINTS: OnceLock<Mutex<HashMap<String, TrackHintEntry>>> = OnceLock:
 static WAVEFORM_CACHE: OnceLock<Mutex<HashMap<String, SoundCloudWaveform>>> = OnceLock::new();
 static COMMENTS_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<SoundCloudComment>)>>> =
     OnceLock::new();
+static MATCH_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Option<SoundCloudTrackMatch>)>>> =
+    OnceLock::new();
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SoundCloudTrackMatch {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub permalink_url: String,
+    pub comment_count: u64,
+    pub duration_ms: u32,
+    pub match_confidence: String,
+    pub match_reason: String,
+}
 
 pub(crate) fn token_cache() -> &'static Mutex<Option<SoundCloudTokenBundle>> {
     TOKEN_CACHE.get_or_init(|| Mutex::new(None))
@@ -299,11 +313,18 @@ pub(crate) fn comments_cache() -> &'static Mutex<HashMap<String, (Instant, Vec<S
     COMMENTS_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+pub(crate) fn match_cache() -> &'static Mutex<HashMap<String, (Instant, Option<SoundCloudTrackMatch>)>> {
+    MATCH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 pub fn clear_cached_soundcloud_state() {
     if let Ok(mut g) = token_cache().lock() {
         *g = None;
     }
     if let Ok(mut g) = comments_cache().lock() {
+        g.clear();
+    }
+    if let Ok(mut g) = match_cache().lock() {
         g.clear();
     }
     if let Ok(mut g) = track_hints().lock() {

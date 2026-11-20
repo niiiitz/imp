@@ -99,6 +99,17 @@ export interface SoundCloudPaginateResponse {
   next_href: string | null;
 }
 
+export interface SoundCloudTrackMatch {
+  id: string;
+  title: string;
+  artist: string;
+  permalink_url: string;
+  comment_count: number;
+  duration_ms: number;
+  match_confidence: string;
+  match_reason: string;
+}
+
 export interface SoundCloudWaveform {
   track_id: string;
   bars: number[];
@@ -615,4 +626,31 @@ export function startSoundCloudTrackRadio(
     `📻 Starting SoundCloud Track Radio${trackTitle ? `: ${trackTitle}` : ''}...`
   );
   defaultSimpClient.loadUri(`soundcloud:station:track:${clean}`);
+}
+
+export async function matchTrackOnSoundCloud(
+  title: string,
+  artist: string,
+  durationMs?: number,
+  isrc?: string
+): Promise<SoundCloudTrackMatch | null> {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return null;
+  const base = resolveDaemonHttpBase();
+  const params = new URLSearchParams({
+    title: cleanTitle,
+    artist: artist.trim(),
+  });
+  if (typeof durationMs === 'number' && durationMs > 0) {
+    params.set('duration_ms', String(Math.round(durationMs)));
+  }
+  if (isrc && isrc.trim()) {
+    params.set('isrc', isrc.trim());
+  }
+  const r = await fetch(`${base}/api/soundcloud/match-track?${params.toString()}`);
+  const j = await r.json().catch(() => ({ ok: false, match: null }));
+  if (!r.ok || !j.ok) {
+    throw new Error(j.error || 'SoundCloud track lookup failed');
+  }
+  return (j.match as SoundCloudTrackMatch | null) || null;
 }

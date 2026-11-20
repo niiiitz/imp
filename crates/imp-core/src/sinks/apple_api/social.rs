@@ -589,31 +589,54 @@ pub fn fetch_new_feed(settings: &SimpSettings) -> Result<AppleNewFeedResponse> {
     let mut seen_playlists = HashSet::new();
     let mut seen_songs = HashSet::new();
 
-    // 1. Personalized "New Releases For You" / "Recent Releases" from `/v1/me/recommendations`
-    if let Ok(rec_json) = apple_get_json("/v1/me/recommendations?limit=12", &dev_token, &user_token)
-    {
-        if let Some(arr) = rec_json.get("data").and_then(|v| v.as_array()) {
-            for rec in arr {
-                let title = rec
-                    .pointer("/attributes/title/stringForDisplay")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if title.contains("new release")
-                    || title.contains("recent release")
-                    || title == "new music"
-                {
-                    if let Some(contents) = rec
-                        .pointer("/relationships/contents/data")
-                        .and_then(|v| v.as_array())
+    // 1. Fetch Personalized "New Releases For You" & Catalog Charts concurrently so partial failure never blocks the other
+    let (rec_res, charts_res) = std::thread::scope(|s| {
+        let d1 = &dev_token;
+        let u1 = &user_token;
+        let sf1 = &storefront;
+        let h_rec = s.spawn(move || {
+            apple_get_json("/v1/me/recommendations?limit=10", d1, u1)
+        });
+        let d2 = &dev_token;
+        let u2 = &user_token;
+        let h_charts = s.spawn(move || {
+            apple_get_json(
+                &format!("/v1/catalog/{sf1}/charts?types=albums,playlists,songs&limit=15"),
+                d2,
+                u2,
+            )
+        });
+        (
+            h_rec.join().unwrap_or_else(|_| Err(anyhow!("Recommendations thread panicked"))),
+            h_charts.join().unwrap_or_else(|_| Err(anyhow!("Charts thread panicked"))),
+        )
+    });
+
+    match rec_res {
+        Ok(rec_json) => {
+            if let Some(arr) = rec_json.get("data").and_then(|v| v.as_array()) {
+                for rec in arr {
+                    let title = rec
+                        .pointer("/attributes/title/stringForDisplay")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if title.contains("new release")
+                        || title.contains("recent release")
+                        || title == "new music"
                     {
-                        for item in contents {
-                            let item_type =
-                                item.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                            if item_type == "albums" || item_type == "library-albums" {
-                                if let Some(alb) = parse_apple_album_summary(item, "catalog") {
-                                    if seen_recent_releases.insert(alb.id.clone()) {
-                                        recent_releases.push(alb);
+                        if let Some(contents) = rec
+                            .pointer("/relationships/contents/data")
+                            .and_then(|v| v.as_array())
+                        {
+                            for item in contents {
+                                let item_type =
+                                    item.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                if item_type == "albums" || item_type == "library-albums" {
+                                    if let Some(alb) = parse_apple_album_summary(item, "catalog") {
+                                        if seen_recent_releases.insert(alb.id.clone()) {
+                                            recent_releases.push(alb);
+                                        }
                                     }
                                 }
                             }
@@ -622,60 +645,64 @@ pub fn fetch_new_feed(settings: &SimpSettings) -> Result<AppleNewFeedResponse> {
                 }
             }
         }
+        Err(e) => {
+            tracing::warn!("Apple new feed shelf 'recommendations' unavailable: {e:#}");
+        }
     }
 
-    if let Ok(json) = apple_get_json(
-        &format!("/v1/catalog/{storefront}/charts?types=albums,playlists,songs&limit=15"),
-        &dev_token,
-        &user_token,
-    ) {
-        if let Some(alb_charts) = json.pointer("/results/albums").and_then(|v| v.as_array()) {
-            for chart in alb_charts {
-                if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
-                    for alb in arr {
-                        let Some(id) = alb.get("id").and_then(|v| v.as_str()) else { continue };
-                        if !seen_albums.insert(id.to_string()) { continue; }
-                        let attrs = alb.get("attributes").unwrap_or(alb);
-                        albums.push(AppleCloudAlbumSummary {
-                            id: id.to_string(),
-                            title: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("New Album").to_string(),
-                            artist: attrs.get("artistName").and_then(|v| v.as_str()).unwrap_or("Apple Music").to_string(),
-                            art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
-                            track_count: attrs.get("trackCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-                            release_year: attrs.get("releaseDate").and_then(|v| v.as_str()).and_then(|s| s.get(0..4)).and_then(|y| y.parse::<u32>().ok()),
-                            kind: "catalog".to_string(),
-                            date_added: None,
-                            content_rating: extract_apple_content_rating(alb),
-                        });
+    match charts_res {
+        Ok(json) => {
+            if let Some(alb_charts) = json.pointer("/results/albums").and_then(|v| v.as_array()) {
+                for chart in alb_charts {
+                    if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
+                        for alb in arr {
+                            let Some(id) = alb.get("id").and_then(|v| v.as_str()) else { continue };
+                            if !seen_albums.insert(id.to_string()) { continue; }
+                            let attrs = alb.get("attributes").unwrap_or(alb);
+                            albums.push(AppleCloudAlbumSummary {
+                                id: id.to_string(),
+                                title: attrs.get("name").and_then(|v| v.as_str()).unwrap_or("New Album").to_string(),
+                                artist: attrs.get("artistName").and_then(|v| v.as_str()).unwrap_or("Apple Music").to_string(),
+                                art_url: format_apple_art_url(attrs.pointer("/artwork/url").and_then(|v| v.as_str()), 300),
+                                track_count: attrs.get("trackCount").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                                release_year: attrs.get("releaseDate").and_then(|v| v.as_str()).and_then(|s| s.get(0..4)).and_then(|y| y.parse::<u32>().ok()),
+                                kind: "catalog".to_string(),
+                                date_added: None,
+                                content_rating: extract_apple_content_rating(alb),
+                            });
+                        }
                     }
                 }
             }
-        }
-        if let Some(pl_charts) = json.pointer("/results/playlists").and_then(|v| v.as_array()) {
-            for chart in pl_charts {
-                if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
-                    for pl in arr {
-                        if let Some(parsed) = super::catalog::parse_apple_playlist_summary(pl, "Apple Music New & Featured") {
-                            if seen_playlists.insert(parsed.id.clone()) {
-                                playlists.push(parsed);
+            if let Some(pl_charts) = json.pointer("/results/playlists").and_then(|v| v.as_array()) {
+                for chart in pl_charts {
+                    if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
+                        for pl in arr {
+                            if let Some(parsed) = super::catalog::parse_apple_playlist_summary(pl, "Apple Music New & Featured") {
+                                if seen_playlists.insert(parsed.id.clone()) {
+                                    playlists.push(parsed);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(song_charts) = json.pointer("/results/songs").and_then(|v| v.as_array()) {
+                for chart in song_charts {
+                    if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
+                        for item in arr {
+                            if let Some(tr) = map_apple_item_to_track(item) {
+                                if seen_songs.insert(tr.uri.clone()) {
+                                    songs.push(tr);
+                                }
                             }
                         }
                     }
                 }
             }
         }
-        if let Some(song_charts) = json.pointer("/results/songs").and_then(|v| v.as_array()) {
-            for chart in song_charts {
-                if let Some(arr) = chart.get("data").and_then(|v| v.as_array()) {
-                    for item in arr {
-                        if let Some(tr) = map_apple_item_to_track(item) {
-                            if seen_songs.insert(tr.uri.clone()) {
-                                songs.push(tr);
-                            }
-                        }
-                    }
-                }
-            }
+        Err(e) => {
+            tracing::warn!("Apple new feed shelf 'charts' unavailable: {e:#}");
         }
     }
 

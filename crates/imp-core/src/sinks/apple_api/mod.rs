@@ -229,23 +229,26 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
         return None;
     }
 
-    let title = attrs
-        .get("name")
-        .or_else(|| attrs.get("title"))
-        .or_else(|| item.get("title"))
-        .and_then(|v| v.as_str())
+    let rel_catalog_attrs = item.pointer("/relationships/catalog/data/0/attributes");
+    fn non_empty_str(v: Option<&Value>) -> Option<&str> {
+        v.and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+    let title = non_empty_str(attrs.get("name"))
+        .or_else(|| non_empty_str(attrs.get("title")))
+        .or_else(|| non_empty_str(item.get("title")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("name"))))
         .unwrap_or("Unknown Track")
         .to_string();
-    let artist_name = attrs
-        .get("artistName")
-        .or_else(|| item.get("artistName"))
-        .and_then(|v| v.as_str())
+    let artist_name = non_empty_str(attrs.get("artistName"))
+        .or_else(|| non_empty_str(item.get("artistName")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("artistName"))))
         .unwrap_or("Unknown Artist")
         .to_string();
-    let album_name = attrs
-        .get("albumName")
-        .or_else(|| item.get("albumName"))
-        .and_then(|v| v.as_str())
+    let album_name = non_empty_str(attrs.get("albumName"))
+        .or_else(|| non_empty_str(item.get("albumName")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("albumName"))))
         .unwrap_or("Apple Music")
         .to_string();
 
@@ -253,6 +256,13 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
         .get("durationInMillis")
         .or_else(|| item.get("durationInMillis"))
         .and_then(|v| v.as_u64())
+        .filter(|&d| d > 0)
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("durationInMillis"))
+                .and_then(|v| v.as_u64())
+                .filter(|&d| d > 0)
+        })
         .unwrap_or(0) as u32;
 
     let rel_catalog_art = item
@@ -273,10 +283,20 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
     let track_number = attrs
         .get("trackNumber")
         .and_then(|v| v.as_u64())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("trackNumber"))
+                .and_then(|v| v.as_u64())
+        })
         .map(|n| n as u32);
     let disc_number = attrs
         .get("discNumber")
         .and_then(|v| v.as_u64())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("discNumber"))
+                .and_then(|v| v.as_u64())
+        })
         .map(|n| n as u32)
         .or(Some(1));
 
@@ -287,9 +307,19 @@ pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
         .and_then(|arr| arr.first())
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("genreNames"))
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
     let release_year = attrs
         .get("releaseDate")
+        .or_else(|| rel_catalog_attrs.and_then(|c| c.get("releaseDate")))
         .and_then(|v| v.as_str())
         .and_then(|s| s.get(0..4))
         .and_then(|y| y.parse::<i32>().ok())
@@ -336,6 +366,34 @@ pub(crate) fn resolve_tokens(settings: &SimpSettings) -> Result<(String, String)
     Ok((dev_token, user_token))
 }
 
+pub(crate) fn is_transient_apple_http_error(err_msg: &str) -> bool {
+    let lower = err_msg.to_ascii_lowercase();
+    if lower.contains("http 400")
+        || lower.contains("http 401")
+        || lower.contains("http 403")
+        || lower.contains("http 404")
+    {
+        return false;
+    }
+    const TRANSIENT_MARKERS: &[&str] = &[
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "empty reply",
+        "curle_28",
+        "curle_52",
+        "curle_56",
+        "broken pipe",
+        "unexpected eof",
+    ];
+    TRANSIENT_MARKERS.iter().any(|m| lower.contains(m))
+}
+
 /// Executes an authenticated `GET` request against `api.music.apple.com` using the in-process
 /// `http_pool` (`libcurl.so.4` HTTP/2 connection pool, with `curl --config -` fallback)
 /// so TLS/HTTP2 connections are reused across calls and tokens never appear in `/proc/<pid>/cmdline`.
@@ -357,8 +415,31 @@ pub(crate) fn apple_get_json(url: &str, dev_token: &str, user_token: &str) -> Re
         ("Referer", "https://music.apple.com/"),
     ];
 
-    let bytes = crate::http_pool::http_get_bytes(&full_url, &headers, None, 12)
-        .with_context(|| format!("Apple Music API GET failed ({full_url})"))?;
+    const BACKOFF_MS: &[u64] = &[250, 600];
+    let mut attempt = 0usize;
+    let bytes = loop {
+        match crate::http_pool::http_get_bytes(&full_url, &headers, None, 12)
+            .with_context(|| format!("Apple Music API GET failed ({full_url})"))
+        {
+            Ok(b) => break b,
+            Err(err) => {
+                let err_chain = format!("{err:#}");
+                if attempt < BACKOFF_MS.len() && is_transient_apple_http_error(&err_chain) {
+                    let wait_ms = BACKOFF_MS[attempt];
+                    tracing::warn!(
+                        "Transient Apple Music API error (attempt {}): {} — retrying in {}ms",
+                        attempt + 1,
+                        err_chain,
+                        wait_ms
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                    attempt += 1;
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    };
 
     serde_json::from_slice(&bytes).context("Invalid JSON from Apple Music API")
 }
@@ -424,16 +505,30 @@ pub(crate) fn urlencode(s: &str) -> String {
     out
 }
 
-/// Ensures Apple Music pagination `next` cursor URLs retain `limit=100` (Apple strips `limit` on page 2+
-/// and falls back to `limit=25`, which previously capped 3-page fetches at `100 + 25 + 25 = 150`).
-pub(crate) fn with_limit_100(url: &str) -> String {
-    if url.contains("limit=") {
+/// Ensures Apple Music pagination `next` cursor URLs retain `limit=100` (and optionally `include=catalog`),
+/// since Apple's `next` links strip query options on page 2+ and fall back to `limit=25`.
+pub(crate) fn with_limit_and_catalog(url: &str, include_catalog: bool) -> String {
+    let mut out = if url.contains("limit=") {
         url.to_string()
     } else if url.contains('?') {
         format!("{url}&limit=100")
     } else {
         format!("{url}?limit=100")
+    };
+    if include_catalog && !out.contains("include=") {
+        if out.contains('?') {
+            out.push_str("&include=catalog");
+        } else {
+            out.push_str("?include=catalog");
+        }
     }
+    out
+}
+
+/// Ensures Apple Music pagination `next` cursor URLs retain `limit=100` (Apple strips `limit` on page 2+
+/// and falls back to `limit=25`, which previously capped 3-page fetches at `100 + 25 + 25 = 150`).
+pub(crate) fn with_limit_100(url: &str) -> String {
+    with_limit_and_catalog(url, false)
 }
 
 
@@ -708,5 +803,96 @@ mod tests {
             parsed_cat.last_modified_date.as_deref(),
             Some("2026-11-01T00:00:00Z")
         );
+    }
+
+    #[test]
+    fn test_is_transient_apple_http_error() {
+        assert!(is_transient_apple_http_error(
+            "Apple Music API GET failed: HTTP 429 Too Many Requests"
+        ));
+        assert!(is_transient_apple_http_error("HTTP 503 Service Unavailable"));
+        assert!(is_transient_apple_http_error("CURLE_28 Operation timed out"));
+        assert!(is_transient_apple_http_error("Connection reset by peer"));
+        assert!(!is_transient_apple_http_error("HTTP 401 Unauthorized"));
+        assert!(!is_transient_apple_http_error("HTTP 403 Forbidden"));
+        assert!(!is_transient_apple_http_error("HTTP 404 Not Found"));
+        assert!(!is_transient_apple_http_error("HTTP 400 Bad Request"));
+    }
+
+    #[test]
+    fn test_with_limit_and_catalog_preserves_include_and_limit() {
+        assert_eq!(
+            with_limit_and_catalog("/v1/me/library/playlists?offset=100", true),
+            "/v1/me/library/playlists?offset=100&limit=100&include=catalog"
+        );
+        assert_eq!(
+            with_limit_and_catalog("/v1/catalog/us/albums/1/tracks?offset=100", false),
+            "/v1/catalog/us/albums/1/tracks?offset=100&limit=100"
+        );
+        assert_eq!(
+            with_limit_and_catalog(
+                "/v1/me/library/playlists?offset=200&limit=100&include=catalog",
+                true
+            ),
+            "/v1/me/library/playlists?offset=200&limit=100&include=catalog"
+        );
+    }
+
+    #[test]
+    fn test_map_apple_item_heals_missing_metadata_from_catalog_relationship() {
+        let raw_item = serde_json::json!({
+            "id": "i.healTest01",
+            "type": "library-songs",
+            "attributes": {
+                "name": " ",
+                "artistName": "",
+                "durationInMillis": 0,
+                "artwork": {
+                    "url": "https://blobstore.apple.com/temp/{w}x{h}bb.jpg"
+                },
+                "playParams": {
+                    "id": "i.healTest01",
+                    "isLibrary": true
+                }
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [
+                        {
+                            "id": "99887766",
+                            "type": "songs",
+                            "attributes": {
+                                "name": "Demo Healed Track",
+                                "artistName": "Example Artist",
+                                "albumName": "Sample Album",
+                                "durationInMillis": 205000,
+                                "trackNumber": 4,
+                                "discNumber": 2,
+                                "releaseDate": "2025-05-01",
+                                "genreNames": ["Electronic"],
+                                "artwork": {
+                                    "url": "https://is1-ssl.mzstatic.com/image/thumb/healed/{w}x{h}bb.jpg"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let mapped = map_apple_item_to_track(&raw_item).expect("should map and heal track");
+        assert_eq!(mapped.uri, "applemusic:song:99887766");
+        assert_eq!(mapped.title, "Demo Healed Track");
+        assert_eq!(mapped.artists, vec!["Example Artist".to_string()]);
+        assert_eq!(mapped.album, "Sample Album");
+        assert_eq!(mapped.duration_ms, 205000);
+        assert_eq!(mapped.track_number, Some(4));
+        assert_eq!(mapped.disc_number, Some(2));
+        assert_eq!(mapped.release_year, Some(2025));
+        assert_eq!(mapped.genre.as_deref(), Some("Electronic"));
+        assert!(mapped
+            .art_url
+            .as_deref()
+            .unwrap_or("")
+            .contains("mzstatic.com"));
     }
 }

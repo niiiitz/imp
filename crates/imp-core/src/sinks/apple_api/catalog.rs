@@ -71,23 +71,37 @@ pub(crate) fn parse_apple_playlist_summary(
 /// instead of throttled/expiring `blobstore.apple.com` URLs.
 pub fn fetch_cloud_playlists(settings: &SimpSettings) -> Result<Vec<AppleCloudPlaylistSummary>> {
     let (dev_token, user_token) = resolve_tokens(settings)?;
+    let mut use_include_catalog = true;
     let mut next_url: Option<String> =
         Some("/v1/me/library/playlists?include=catalog&limit=100".to_string());
     let mut items = Vec::new();
     let mut seen_ids = HashSet::new();
+    let mut seen_next_urls = HashSet::new();
 
-    for page_idx in 0..25 {
+    for page_idx in 0..50 {
         let Some(ref url) = next_url else { break };
+        if !seen_next_urls.insert(url.clone()) {
+            break;
+        }
         let json = match apple_get_json(url, &dev_token, &user_token) {
             Ok(j) => j,
-            Err(_) if page_idx == 0 && url.contains("include=catalog") => {
+            Err(e) if page_idx == 0 && use_include_catalog && url.contains("include=catalog") => {
+                use_include_catalog = false;
                 match apple_get_json("/v1/me/library/playlists?limit=100", &dev_token, &user_token)
                 {
                     Ok(j) => j,
-                    Err(_) => break,
+                    Err(fallback_err) => {
+                        tracing::warn!(
+                            "Apple fetch_cloud_playlists failed on initial page (even without include=catalog): {fallback_err:#} (original: {e:#})"
+                        );
+                        break;
+                    }
                 }
             }
-            Err(_) => break,
+            Err(e) => {
+                tracing::warn!("Apple fetch_cloud_playlists pagination stopped at page {page_idx}: {e:#}");
+                break;
+            }
         };
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for pl in arr {
@@ -101,7 +115,7 @@ pub fn fetch_cloud_playlists(settings: &SimpSettings) -> Result<Vec<AppleCloudPl
         next_url = json
             .get("next")
             .and_then(|v| v.as_str())
-            .map(with_limit_100);
+            .map(|u| with_limit_and_catalog(u, use_include_catalog));
     }
 
     Ok(items)
@@ -156,6 +170,7 @@ pub fn fetch_playlist_tracks(
         .unwrap_or(playlist_id);
     let is_catalog = kind == Some("catalog") || clean_id.starts_with("pl.");
 
+    let mut use_include_catalog = !is_catalog;
     let mut next_url: Option<String> = Some(if is_catalog {
         format!(
             "/v1/catalog/{}/playlists/{}/tracks?limit=100",
@@ -170,10 +185,36 @@ pub fn fetch_playlist_tracks(
     });
 
     let mut tracks = Vec::new();
-    for _ in 0..10 {
+    let mut seen_next_urls = HashSet::new();
+    for page_idx in 0..50 {
         let Some(ref url) = next_url else { break };
-        let Ok(json) = apple_get_json(url, &dev_token, &user_token) else {
+        if !seen_next_urls.insert(url.clone()) {
             break;
+        }
+        let json = match apple_get_json(url, &dev_token, &user_token) {
+            Ok(j) => j,
+            Err(e) if page_idx == 0 && use_include_catalog && url.contains("include=catalog") => {
+                use_include_catalog = false;
+                let fallback_url = format!(
+                    "/v1/me/library/playlists/{}/tracks?limit=100",
+                    urlencode(clean_id)
+                );
+                match apple_get_json(&fallback_url, &dev_token, &user_token) {
+                    Ok(j) => j,
+                    Err(fallback_err) => {
+                        tracing::warn!(
+                            "Apple fetch_playlist_tracks failed on playlist {clean_id}: {fallback_err:#} (original: {e:#})"
+                        );
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Apple fetch_playlist_tracks pagination stopped on playlist {clean_id} page {page_idx}: {e:#}"
+                );
+                break;
+            }
         };
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for item in arr {
@@ -185,7 +226,7 @@ pub fn fetch_playlist_tracks(
         next_url = json
             .get("next")
             .and_then(|v| v.as_str())
-            .map(with_limit_100);
+            .map(|u| with_limit_and_catalog(u, use_include_catalog));
     }
 
     Ok(tracks)
@@ -310,26 +351,42 @@ pub(crate) fn fetch_library_album_with_tracks(
         || (summary.track_count > tracks.len() && summary.track_count > 0);
 
     if tracks.is_empty() || has_more_tracks {
+        let mut use_include_catalog = true;
         let mut next_url: Option<String> = Some(format!(
             "/v1/me/library/albums/{}/tracks?include=catalog&limit=100",
             urlencode(lib_album_id)
         ));
         let mut paginated = Vec::new();
-        for page_idx in 0..6 {
+        let mut seen_next_urls = HashSet::new();
+        for page_idx in 0..20 {
             let Some(ref url) = next_url else { break };
+            if !seen_next_urls.insert(url.clone()) {
+                break;
+            }
             let page_json = match apple_get_json(url, dev_token, user_token) {
                 Ok(j) => j,
-                Err(_) if page_idx == 0 && url.contains("include=catalog") => {
+                Err(e) if page_idx == 0 && use_include_catalog && url.contains("include=catalog") => {
+                    use_include_catalog = false;
                     match apple_get_json(
                         &format!("/v1/me/library/albums/{}/tracks?limit=100", urlencode(lib_album_id)),
                         dev_token,
                         user_token,
                     ) {
                         Ok(j) => j,
-                        Err(_) => break,
+                        Err(fallback_err) => {
+                            tracing::warn!(
+                                "Apple fetch_library_album_with_tracks failed on {lib_album_id}: {fallback_err:#} (original: {e:#})"
+                            );
+                            break;
+                        }
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    tracing::warn!(
+                        "Apple fetch_library_album_with_tracks pagination stopped on {lib_album_id} page {page_idx}: {e:#}"
+                    );
+                    break;
+                }
             };
             if let Some(arr) = page_json.get("data").and_then(|v| v.as_array()) {
                 for item in arr {
@@ -341,7 +398,7 @@ pub(crate) fn fetch_library_album_with_tracks(
             next_url = page_json
                 .get("next")
                 .and_then(|v| v.as_str())
-                .map(with_limit_100);
+                .map(|u| with_limit_and_catalog(u, use_include_catalog));
         }
         if paginated.len() >= tracks.len() {
             tracks = paginated;
@@ -366,14 +423,20 @@ pub(crate) fn fetch_library_album_with_tracks(
             summary.art_url = tracks.first().and_then(|t| t.art_url.clone());
         }
     }
-    if let Some(ref album_art) = summary.art_url {
+    let summary_year_i32 = summary.release_year.map(|y| y as i32);
+    if summary.art_url.is_some() || summary_year_i32.is_some() {
         let shared_db = shared_library_db();
         for tr in &mut tracks {
-            tr.art_url = Some(album_art.clone());
-            remember_track_metadata_hint(tr);
-            if let Some(ref db) = shared_db {
-                let _ = db.set_track_art_url(&tr.uri, Some(album_art));
+            if tr.release_year.is_none() {
+                tr.release_year = summary_year_i32;
             }
+            if let Some(ref album_art) = summary.art_url {
+                tr.art_url = Some(album_art.clone());
+                if let Some(ref db) = shared_db {
+                    let _ = db.set_track_art_url(&tr.uri, Some(album_art));
+                }
+            }
+            remember_track_metadata_hint(tr);
         }
     }
     if !tracks.is_empty() {
@@ -515,11 +578,46 @@ pub fn fetch_full_album(
         .pointer("/data/0")
         .ok_or_else(|| anyhow!("Catalog album not found"))?;
     let attrs = alb_data.get("attributes").unwrap_or(alb_data);
-    let tracks: Vec<TrackMetadata> = alb_data
+    let mut tracks: Vec<TrackMetadata> = alb_data
         .pointer("/relationships/tracks/data")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(map_apple_item_to_track).collect())
         .unwrap_or_default();
+
+    let mut seen_track_uris: HashSet<String> = tracks.iter().map(|t| t.uri.clone()).collect();
+    let mut next_tracks_url = alb_data
+        .pointer("/relationships/tracks/next")
+        .and_then(|v| v.as_str())
+        .map(with_limit_100);
+    let mut seen_next_urls = HashSet::new();
+    for page_idx in 0..20 {
+        let Some(ref url) = next_tracks_url else { break };
+        if !seen_next_urls.insert(url.clone()) {
+            break;
+        }
+        let page_json = match apple_get_json(url, &dev_token, &user_token) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::warn!(
+                    "Apple fetch_full_album pagination stopped on catalog album {cat_id} page {page_idx}: {e:#}"
+                );
+                break;
+            }
+        };
+        if let Some(arr) = page_json.get("data").and_then(|v| v.as_array()) {
+            for item in arr {
+                if let Some(tr) = map_apple_item_to_track(item) {
+                    if seen_track_uris.insert(tr.uri.clone()) {
+                        tracks.push(tr);
+                    }
+                }
+            }
+        }
+        next_tracks_url = page_json
+            .get("next")
+            .and_then(|v| v.as_str())
+            .map(with_limit_100);
+    }
 
     let release_year = attrs
         .get("releaseDate")

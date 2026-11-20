@@ -258,6 +258,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/soundcloud/discover", get(soundcloud_discover_handler))
         .route("/api/soundcloud/paginate", get(soundcloud_paginate_handler))
         .route("/api/soundcloud/search", get(soundcloud_search_handler))
+        .route("/api/soundcloud/match-track", get(soundcloud_match_track_handler))
         .route("/api/soundcloud/comments", get(soundcloud_comments_handler))
         .route("/api/soundcloud/waveform", get(soundcloud_waveform_handler))
         .route("/api/audio/waveform", get(audio_waveform_handler))

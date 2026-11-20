@@ -314,19 +314,23 @@ pub(super) async fn soundcloud_discover_handler(
         .get("mixes_only")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
+    let rotation = params
+        .get("rotation")
+        .and_then(|v| v.parse::<u64>().ok());
     let seed_uris: Vec<String> = state
         .db
-        .get_play_history(Some("soundcloud"), 6)
+        .get_play_history(Some("soundcloud"), 12)
         .unwrap_or_default()
         .into_iter()
         .map(|t| t.uri)
         .collect();
     let res = tokio::task::spawn_blocking(move || {
-        imp_core::sinks::soundcloud_api::fetch_trending_and_mixes_with_seeds(
+        imp_core::sinks::soundcloud_api::fetch_trending_and_mixes_with_seeds_and_rotation(
             &cfg,
             genre.as_deref(),
             mixes_only,
             &seed_uris,
+            rotation,
         )
     })
     .await;
@@ -565,6 +569,39 @@ pub(super) async fn soundcloud_open_handler(
     .await
     .unwrap_or_else(|_| "https://soundcloud.com".to_string());
     axum::response::Redirect::temporary(&target_url)
+}
+
+pub(super) async fn soundcloud_match_track_handler(
+    State(state): State<DaemonIpcState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap().clone();
+    let title = params.get("title").cloned().unwrap_or_default();
+    let artist = params.get("artist").cloned().unwrap_or_default();
+    let duration_ms = params
+        .get("duration_ms")
+        .and_then(|v| v.parse::<u32>().ok());
+    let isrc = params
+        .get("isrc")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let res = tokio::task::spawn_blocking(move || {
+        imp_core::sinks::soundcloud_api::match_track_on_soundcloud(
+            &cfg,
+            &title,
+            &artist,
+            duration_ms,
+            isrc.as_deref(),
+        )
+    })
+    .await;
+    sync_soundcloud_tokens_into_daemon_state(&state);
+    match res {
+        Ok(Ok(matched)) => Json(serde_json::json!({ "ok": true, "match": matched })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string(), "match": null })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string(), "match": null })),
+    }
 }
 
 #[derive(serde::Deserialize)]

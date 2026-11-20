@@ -103,10 +103,86 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
         }
     };
 
+    fn fetch_shelf_tolerant(label: &str, url: &str, dev_token: &str, user_token: &str) -> Option<Value> {
+        match apple_get_json(url, dev_token, user_token) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::warn!("Apple discover shelf '{label}' unavailable: {e:#}");
+                None
+            }
+        }
+    }
+
+    fn current_year_approx() -> u32 {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let year = 1970 + (secs / 31_557_600) as u32;
+        year.max(2024)
+    }
+
     let mut shelves: Vec<AppleRecommendationShelf> = Vec::new();
     let mut recently_played: Vec<TrackMetadata> = Vec::new();
 
-    if let Ok(json) = apple_get_json("/v1/me/recent/radio-stations?limit=12", &dev_token, &user_token) {
+    let live_radio_url =
+        format!("/v1/catalog/{storefront}/stations?filter[featured]=apple-music-live-radio");
+
+    let (
+        recent_radio_json,
+        recent_played_json,
+        heavy_rotation_json,
+        recommendations_json,
+        recent_tracks_json,
+        live_radio_json,
+    ) = std::thread::scope(|s| {
+        let d = &dev_token;
+        let u = &user_token;
+        let live_url_ref = &live_radio_url;
+        let h1 = s.spawn(move || {
+            fetch_shelf_tolerant(
+                "recent-radio-stations",
+                "/v1/me/recent/radio-stations?limit=10",
+                d,
+                u,
+            )
+        });
+        let h2 = s.spawn(move || {
+            fetch_shelf_tolerant("recent-played", "/v1/me/recent/played?limit=10", d, u)
+        });
+        let h3 = s.spawn(move || {
+            fetch_shelf_tolerant(
+                "heavy-rotation",
+                "/v1/me/history/heavy-rotation?limit=10",
+                d,
+                u,
+            )
+        });
+        let h4 = s.spawn(move || {
+            fetch_shelf_tolerant("recommendations", "/v1/me/recommendations?limit=10", d, u)
+        });
+        let h5 = s.spawn(move || {
+            fetch_shelf_tolerant(
+                "recent-played-tracks",
+                "/v1/me/recent/played/tracks?limit=24",
+                d,
+                u,
+            )
+        });
+        let h6 = s.spawn(move || {
+            fetch_shelf_tolerant("featured-live-radio", live_url_ref, d, u)
+        });
+        (
+            h1.join().ok().flatten(),
+            h2.join().ok().flatten(),
+            h3.join().ok().flatten(),
+            h4.join().ok().flatten(),
+            h5.join().ok().flatten(),
+            h6.join().ok().flatten(),
+        )
+    });
+
+    if let Some(json) = recent_radio_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for st in arr {
                 push_classified_station(st, "Recent Radio Station");
@@ -114,8 +190,8 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
         }
     }
 
-    // Recently Played Albums / Playlists / Stations (`/v1/me/recent/played?limit=12`)
-    if let Ok(json) = apple_get_json("/v1/me/recent/played?limit=12", &dev_token, &user_token) {
+    // Recently Played Albums / Playlists / Stations (`/v1/me/recent/played?limit=10`)
+    if let Some(json) = recent_played_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             let mut recent_shelf = AppleRecommendationShelf {
                 id: "recently-played-items".to_string(),
@@ -126,19 +202,23 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                 stations: Vec::new(),
             };
             let mut shelf_seen_st = HashSet::new();
+            let mut shelf_seen_pl = HashSet::new();
+            let mut shelf_seen_alb = HashSet::new();
             for item in arr {
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
                 match item_type {
                     "stations" => {
                         push_classified_station(item, "Recently Played");
-                        if ! is_live_broadcast_station(item, "Recently Played") {
+                        if !is_live_broadcast_station(item, "Recently Played") {
                             push_station_to(&mut recent_shelf.stations, &mut shelf_seen_st, item, "Recently Played");
                         }
                     }
                     "playlists" | "library-playlists" => {
                         if let Some(parsed) = super::catalog::parse_apple_playlist_summary(item, "Recently Played") {
-                            recent_shelf.playlists.push(parsed);
+                            if shelf_seen_pl.insert(parsed.id.clone()) {
+                                recent_shelf.playlists.push(parsed);
+                            }
                         }
                     }
                     "albums" | "library-albums" => {
@@ -146,7 +226,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                             item,
                             if id.starts_with("l.") { "library" } else { "catalog" },
                         ) {
-                            recent_shelf.albums.push(alb);
+                            if shelf_seen_alb.insert(alb.id.clone()) {
+                                recent_shelf.albums.push(alb);
+                            }
                         }
                     }
                     _ => {}
@@ -161,7 +243,7 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
         }
     }
 
-    if let Ok(json) = apple_get_json("/v1/me/history/heavy-rotation?limit=15", &dev_token, &user_token) {
+    if let Some(json) = heavy_rotation_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             let mut heavy_shelf = AppleRecommendationShelf {
                 id: "heavy-rotation".to_string(),
@@ -172,6 +254,8 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                 stations: Vec::new(),
             };
             let mut shelf_seen_stations = HashSet::new();
+            let mut shelf_seen_playlists = HashSet::new();
+            let mut shelf_seen_albums = HashSet::new();
             for item in arr {
                 let item_type = item.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let Some(id) = item.get("id").and_then(|v| v.as_str()) else { continue };
@@ -192,7 +276,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                             if seen_playlists.insert(pl.id.clone()) {
                                 playlists.push(pl.clone());
                             }
-                            heavy_shelf.playlists.push(pl);
+                            if shelf_seen_playlists.insert(pl.id.clone()) {
+                                heavy_shelf.playlists.push(pl);
+                            }
                         }
                     }
                     "albums" | "library-albums" => {
@@ -203,7 +289,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                             if seen_albums.insert(id.to_string()) {
                                 albums.push(alb.clone());
                             }
-                            heavy_shelf.albums.push(alb);
+                            if shelf_seen_albums.insert(alb.id.clone()) {
+                                heavy_shelf.albums.push(alb);
+                            }
                         }
                     }
                     _ => {}
@@ -218,7 +306,7 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
         }
     }
 
-    if let Ok(json) = apple_get_json("/v1/me/recommendations?limit=12", &dev_token, &user_token) {
+    if let Some(json) = recommendations_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for (idx, rec) in arr.iter().enumerate() {
                 let rec_id = rec
@@ -250,6 +338,8 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                     stations: Vec::new(),
                 };
                 let mut shelf_seen_stations = HashSet::new();
+                let mut shelf_seen_playlists = HashSet::new();
+                let mut shelf_seen_albums = HashSet::new();
                 if let Some(contents) = rec
                     .pointer("/relationships/contents/data")
                     .and_then(|v| v.as_array())
@@ -274,7 +364,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                                     if seen_playlists.insert(pl.id.clone()) {
                                         playlists.push(pl.clone());
                                     }
-                                    shelf.playlists.push(pl);
+                                    if shelf_seen_playlists.insert(pl.id.clone()) {
+                                        shelf.playlists.push(pl);
+                                    }
                                 }
                             }
                             "albums" | "library-albums" => {
@@ -290,7 +382,9 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                                     if seen_albums.insert(id.to_string()) {
                                         albums.push(alb.clone());
                                     }
-                                    shelf.albums.push(alb);
+                                    if shelf_seen_albums.insert(alb.id.clone()) {
+                                        shelf.albums.push(alb);
+                                    }
                                 }
                             }
                             _ => {}
@@ -307,7 +401,7 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
         }
     }
 
-    if let Ok(json) = apple_get_json("/v1/me/recent/played/tracks?limit=24", &dev_token, &user_token) {
+    if let Some(json) = recent_tracks_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             let mut seen_recent = HashSet::new();
             for item in arr {
@@ -323,6 +417,8 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
     // If `/v1/me/recommendations` didn't include a dedicated "New Releases For You" shelf (or had very few items),
     // also surface the newest releases from the user's top/recently played artists!
     if new_releases.len() < 4 {
+        let min_recent_year = current_year_approx().saturating_sub(1);
+        let mut fallback_new_releases = Vec::new();
         let mut seed_artists = Vec::new();
         let mut seen_seed_artists = HashSet::new();
         for alb in albums.iter().take(6) {
@@ -353,23 +449,21 @@ pub fn fetch_radio_and_for_you(settings: &SimpSettings) -> Result<AppleRadioAndF
                 {
                     for alb_val in arr {
                         if let Some(alb) = parse_apple_album_summary(alb_val, "catalog") {
-                            if alb.release_year.unwrap_or(0) >= 2024
+                            if alb.release_year.unwrap_or(0) >= min_recent_year
                                 && seen_new_releases.insert(alb.id.clone())
                             {
-                                new_releases.push(alb);
+                                fallback_new_releases.push(alb);
                             }
                         }
                     }
                 }
             }
         }
+        fallback_new_releases.sort_by(|a, b| b.release_year.cmp(&a.release_year));
+        new_releases.extend(fallback_new_releases);
     }
 
-    if let Ok(json) = apple_get_json(
-        &format!("/v1/catalog/{storefront}/stations?filter[featured]=apple-music-live-radio"),
-        &dev_token,
-        &user_token,
-    ) {
+    if let Some(json) = live_radio_json {
         if let Some(arr) = json.get("data").and_then(|v| v.as_array()) {
             for st in arr {
                 push_classified_station(st, "Live Global Radio");

@@ -1,7 +1,8 @@
 use super::*;
 use anyhow::{anyhow, Result};
 use imp_protocol::{SimpSettings, TrackMetadata};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Fetches the user's `❤️ Liked Tracks` virtual playlist, created sets (`/me/playlists`), and liked sets (`/me/likes/playlists`).
 pub fn fetch_user_playlists_and_likes(
@@ -335,8 +336,11 @@ pub fn fetch_stream_and_stations(settings: &SimpSettings) -> Result<SoundCloudSt
         }
     }
 
+    let stream_tracks = apply_uploader_diversity_and_dedup(stream_tracks, 3, &HashSet::new(), 60);
+    let station_seeds =
+        apply_uploader_diversity_and_dedup(stream_tracks.clone(), 1, &HashSet::new(), 8);
     let mut stations = Vec::new();
-    for seed in stream_tracks.iter().take(8) {
+    for seed in station_seeds {
         let seed_id = clean_soundcloud_id(&seed.uri);
         stations.push(SoundCloudStationSummary {
             id: format!("soundcloud:station:track:{seed_id}"),
@@ -354,13 +358,170 @@ pub fn fetch_stream_and_stations(settings: &SimpSettings) -> Result<SoundCloudSt
     })
 }
 
+fn current_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn normalized_primary_uploader(track: &TrackMetadata) -> String {
+    let artist = track
+        .artists
+        .first()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    if artist.is_empty() {
+        track.uri.to_ascii_lowercase()
+    } else {
+        artist
+    }
+}
+
+/// Enforces `max_per_artist` uploader diversity, removes excluded/duplicate URIs, and falls back to overflow if fewer than `min(limit, 4)` items would remain.
+pub(crate) fn apply_uploader_diversity_and_dedup(
+    tracks: Vec<TrackMetadata>,
+    max_per_artist: usize,
+    exclude_uris: &HashSet<String>,
+    limit: usize,
+) -> Vec<TrackMetadata> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let cap = max_per_artist.max(1);
+    let mut seen_uris: HashSet<String> = HashSet::new();
+    let mut uploader_counts: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<TrackMetadata> = Vec::with_capacity(limit.min(tracks.len()));
+    let mut overflow: Vec<TrackMetadata> = Vec::new();
+
+    for track in tracks {
+        if exclude_uris.contains(&track.uri) || !seen_uris.insert(track.uri.clone()) {
+            continue;
+        }
+        let uploader = normalized_primary_uploader(&track);
+        let count = uploader_counts.entry(uploader).or_insert(0);
+        if *count < cap {
+            *count += 1;
+            if out.len() < limit {
+                out.push(track);
+            }
+        } else {
+            overflow.push(track);
+        }
+    }
+
+    let min_target = limit.min(4);
+    if out.len() < min_target {
+        for track in overflow {
+            if out.len() >= min_target {
+                break;
+            }
+            out.push(track);
+        }
+    }
+
+    out
+}
+
+/// Deduplicates sets by ID and caps each creator to `max_per_creator` sets, overflowing only below `min(limit, 4)` items.
+fn cap_playlists_by_creator(
+    playlists: Vec<SoundCloudPlaylistSummary>,
+    max_per_creator: usize,
+    limit: usize,
+) -> Vec<SoundCloudPlaylistSummary> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let cap = max_per_creator.max(1);
+    let mut seen_ids = HashSet::new();
+    let mut creator_counts: HashMap<String, usize> = HashMap::new();
+    let mut out = Vec::with_capacity(limit.min(playlists.len()));
+    let mut overflow = Vec::new();
+
+    for pl in playlists {
+        if !seen_ids.insert(pl.id.clone()) {
+            continue;
+        }
+        let creator_key = {
+            let trimmed = pl.creator.trim().to_ascii_lowercase();
+            if trimmed.is_empty() {
+                pl.id.to_ascii_lowercase()
+            } else {
+                trimmed
+            }
+        };
+        let count = creator_counts.entry(creator_key).or_insert(0);
+        if *count < cap {
+            *count += 1;
+            if out.len() < limit {
+                out.push(pl);
+            }
+        } else {
+            overflow.push(pl);
+        }
+    }
+
+    let min_target = limit.min(4);
+    if out.len() < min_target {
+        for pl in overflow {
+            if out.len() >= min_target {
+                break;
+            }
+            out.push(pl);
+        }
+    }
+
+    out
+}
+
+/// Deduplicates cleaned seed IDs and rotates the starting offset by `rotation_bucket` so shelves refresh smoothly over time.
+pub(crate) fn select_rotated_seed_ids(
+    candidates: &[String],
+    rotation_bucket: u64,
+    max_seeds: usize,
+) -> Vec<String> {
+    if max_seeds == 0 {
+        return Vec::new();
+    }
+    let mut seen = HashSet::new();
+    let mut unique = Vec::new();
+    for raw in candidates {
+        let clean = clean_soundcloud_id(raw);
+        if !clean.is_empty() && seen.insert(clean.clone()) {
+            unique.push(clean);
+        }
+    }
+    if unique.is_empty() {
+        return Vec::new();
+    }
+    let start = (rotation_bucket as usize) % unique.len();
+    let take_len = max_seeds.min(unique.len());
+    (0..take_len)
+        .map(|i| unique[(start + i) % unique.len()].clone())
+        .collect()
+}
+
+/// Round-robin interleaves tracks across per-seed buckets so multiple recommendation seeds blend evenly.
+pub(crate) fn interleave_seed_buckets(buckets: Vec<Vec<TrackMetadata>>) -> Vec<TrackMetadata> {
+    let max_len = buckets.iter().map(|b| b.len()).max().unwrap_or(0);
+    let mut out = Vec::new();
+    for idx in 0..max_len {
+        for bucket in &buckets {
+            if let Some(item) = bucket.get(idx) {
+                out.push(item.clone());
+            }
+        }
+    }
+    out
+}
+
 /// Fetches Trending tracks, long-form DJ Mixes (`20m+`), sets, and personalized discovery shelves for a genre/vibe filter.
 pub fn fetch_trending_and_mixes(
     settings: &SimpSettings,
     genre: Option<&str>,
     mixes_only: bool,
 ) -> Result<SoundCloudDiscoverResponse> {
-    fetch_trending_and_mixes_with_seeds(settings, genre, mixes_only, &[])
+    fetch_trending_and_mixes_with_seeds_and_rotation(settings, genre, mixes_only, &[], None)
 }
 
 pub fn fetch_trending_and_mixes_with_seeds(
@@ -368,6 +529,22 @@ pub fn fetch_trending_and_mixes_with_seeds(
     genre: Option<&str>,
     mixes_only: bool,
     seed_track_ids: &[String],
+) -> Result<SoundCloudDiscoverResponse> {
+    fetch_trending_and_mixes_with_seeds_and_rotation(
+        settings,
+        genre,
+        mixes_only,
+        seed_track_ids,
+        None,
+    )
+}
+
+pub fn fetch_trending_and_mixes_with_seeds_and_rotation(
+    settings: &SimpSettings,
+    genre: Option<&str>,
+    mixes_only: bool,
+    seed_track_ids: &[String],
+    rotation_bucket: Option<u64>,
 ) -> Result<SoundCloudDiscoverResponse> {
     let signed_in = is_soundcloud_user_signed_in(settings);
     let access_q = access_param_for_session(settings);
@@ -387,8 +564,8 @@ pub fn fetch_trending_and_mixes_with_seeds(
         tracks_url.push_str("&duration%5Bfrom%5D=1200000");
     }
 
-    let mut tracks = Vec::new();
-    let mut mixes = Vec::new();
+    let mut raw_tracks = Vec::new();
+    let mut raw_mixes = Vec::new();
     let mut recommended_artists = Vec::new();
     let mut seen_artist_ids = std::collections::HashSet::new();
     let mut next_tracks_href = None;
@@ -406,15 +583,15 @@ pub fn fetch_trending_and_mixes_with_seeds(
                     continue;
                 }
                 if t.duration_ms >= 20 * 60 * 1000 {
-                    mixes.push(t.clone());
+                    raw_mixes.push(t.clone());
                 }
-                tracks.push(t);
+                raw_tracks.push(t);
             }
         }
     }
 
-    // Also fetch dedicated 20m+ DJ Mixes if `mixes` is sparse
-    if mixes.len() < 6 {
+    // Also fetch dedicated 20m+ DJ Mixes if `raw_mixes` is sparse
+    if raw_mixes.len() < 6 {
         let mut mix_url = format!(
             "/tracks?access={access_q}&linked_partitioning=true&duration%5Bfrom%5D=1200000&limit=20",
         );
@@ -427,16 +604,16 @@ pub fn fetch_trending_and_mixes_with_seeds(
             for item in extract_collection_items(&mix_json) {
                 if let Some(t) = map_soundcloud_item_to_track(item) {
                     if should_keep_track_for_session(&t, signed_in)
-                        && !mixes.iter().any(|m| m.uri == t.uri)
+                        && !raw_mixes.iter().any(|m| m.uri == t.uri)
                     {
-                        mixes.push(t);
+                        raw_mixes.push(t);
                     }
                 }
             }
         }
     }
 
-    let mut playlists = Vec::new();
+    let mut raw_playlists = Vec::new();
     let pl_query = clean_genre.unwrap_or("electronic underground");
     let pl_url = format!(
         "/playlists?q={}&show_tracks=true&access={access_q}&linked_partitioning=true&limit=20",
@@ -446,46 +623,49 @@ pub fn fetch_trending_and_mixes_with_seeds(
         for item in extract_collection_items(&pl_json) {
             if let Some(mut pl) = map_soundcloud_item_to_playlist(item, "catalog_set") {
                 if should_keep_playlist_for_session(&mut pl, signed_in) {
-                    playlists.push(pl);
+                    raw_playlists.push(pl);
                 }
             }
         }
     }
 
-    // Build "More of What You Like" shelf seeded from recent SIMP history or user Likes
-    let mut more_of_what_you_like = Vec::new();
-    let mut seed_ids: Vec<String> = seed_track_ids
+    // Build "More of What You Like" shelf seeded from rotated SIMP history, user Likes, or top feed tracks
+    let effective_bucket = rotation_bucket.unwrap_or_else(|| current_unix_secs() / 1800);
+    let mut seed_candidates: Vec<String> = seed_track_ids
         .iter()
         .map(|s| clean_soundcloud_id(s))
         .filter(|s| !s.is_empty())
-        .take(2)
         .collect();
-    if seed_ids.is_empty() && signed_in {
+    if seed_candidates.len() < 3 && signed_in {
         if let Ok(likes_json) = soundcloud_authed_get(
             settings,
-            &format!("/me/likes/tracks?limit=4&access={access_q}&linked_partitioning=true"),
+            &format!("/me/likes/tracks?limit=10&access={access_q}&linked_partitioning=true"),
         ) {
-            for item in extract_collection_items(&likes_json).into_iter().take(2) {
+            for item in extract_collection_items(&likes_json) {
                 if let Some(t) = map_soundcloud_item_to_track(item) {
                     let cid = clean_soundcloud_id(&t.uri);
-                    if !cid.is_empty() && !seed_ids.contains(&cid) {
-                        seed_ids.push(cid);
+                    if !cid.is_empty() && !seed_candidates.contains(&cid) {
+                        seed_candidates.push(cid);
                     }
                 }
             }
         }
     }
-    if seed_ids.is_empty() {
-        if let Some(first_t) = tracks.first() {
+    if seed_candidates.is_empty() {
+        for first_t in raw_tracks.iter().take(4) {
             let cid = clean_soundcloud_id(&first_t.uri);
-            if !cid.is_empty() {
-                seed_ids.push(cid);
+            if !cid.is_empty() && !seed_candidates.contains(&cid) {
+                seed_candidates.push(cid);
             }
         }
     }
-    for sid in seed_ids.iter().take(2) {
+
+    let seed_ids = select_rotated_seed_ids(&seed_candidates, effective_bucket, 3);
+    let mut seed_buckets: Vec<Vec<TrackMetadata>> = Vec::with_capacity(seed_ids.len());
+    for sid in &seed_ids {
+        let mut bucket = Vec::new();
         let rel_url = format!(
-            "/tracks/{}/related?access={access_q}&linked_partitioning=true&limit=12",
+            "/tracks/{}/related?access={access_q}&linked_partitioning=true&limit=10",
             url_encode_component(sid)
         );
         if let Ok(rel_json) = soundcloud_authed_get(settings, &rel_url) {
@@ -496,23 +676,50 @@ pub fn fetch_trending_and_mixes_with_seeds(
                     }
                 }
                 if let Some(t) = map_soundcloud_item_to_track(item) {
-                    if should_keep_track_for_session(&t, signed_in)
-                        && !more_of_what_you_like.iter().any(|m: &TrackMetadata| m.uri == t.uri)
-                    {
-                        more_of_what_you_like.push(t);
+                    if should_keep_track_for_session(&t, signed_in) {
+                        bucket.push(t);
                     }
                 }
             }
         }
+        if !bucket.is_empty() {
+            seed_buckets.push(bucket);
+        }
     }
 
-    // Build "Fresh Uploads" shelf (shorter tracks < 12m that aren't already in mixes)
-    let fresh_uploads: Vec<TrackMetadata> = tracks
+    let interleaved_related = interleave_seed_buckets(seed_buckets);
+    let seed_exclude_uris: HashSet<String> = seed_ids
+        .iter()
+        .map(|sid| format!("soundcloud:track:{sid}"))
+        .collect();
+    let more_of_what_you_like =
+        apply_uploader_diversity_and_dedup(interleaved_related, 2, &seed_exclude_uris, 24);
+
+    let mixes = apply_uploader_diversity_and_dedup(raw_mixes, 2, &HashSet::new(), 24);
+    let mix_uris: HashSet<String> = mixes.iter().map(|t| t.uri.clone()).collect();
+
+    let mut fresh_exclude: HashSet<String> = mix_uris.clone();
+    fresh_exclude.extend(more_of_what_you_like.iter().map(|t| t.uri.clone()));
+    let short_tracks: Vec<TrackMetadata> = raw_tracks
         .iter()
         .filter(|t| t.duration_ms > 0 && t.duration_ms < 12 * 60 * 1000)
-        .take(16)
         .cloned()
         .collect();
+    let mut fresh_uploads =
+        apply_uploader_diversity_and_dedup(short_tracks.clone(), 2, &fresh_exclude, 18);
+    if fresh_uploads.len() < 6 {
+        fresh_uploads = apply_uploader_diversity_and_dedup(short_tracks, 2, &mix_uris, 18);
+    }
+
+    let mut tracks_exclude: HashSet<String> = mix_uris.clone();
+    tracks_exclude.extend(fresh_uploads.iter().map(|t| t.uri.clone()));
+    let mut tracks =
+        apply_uploader_diversity_and_dedup(raw_tracks.clone(), 2, &tracks_exclude, 36);
+    if tracks.len() < 8 {
+        tracks = apply_uploader_diversity_and_dedup(raw_tracks, 2, &mix_uris, 36);
+    }
+
+    let playlists = cap_playlists_by_creator(raw_playlists, 2, 20);
 
     Ok(SoundCloudDiscoverResponse {
         tracks,
@@ -538,23 +745,32 @@ pub fn fetch_related_station_tracks(
     }
 
     let mut out = Vec::new();
+    let mut seed_exclude = HashSet::new();
+    seed_exclude.insert(format!("soundcloud:track:{seed_id}"));
     if let Some(seed_meta) = resolve_track_metadata_by_uri(settings, &seed_id) {
+        seed_exclude.insert(seed_meta.uri.clone());
         out.push(seed_meta);
     }
 
+    let capped_limit = limit.clamp(5, 50);
     let url = format!(
         "/tracks/{}/related?access=playable&linked_partitioning=true&limit={}",
         url_encode_component(&seed_id),
-        limit.clamp(5, 50)
+        capped_limit
     );
     let json = soundcloud_authed_get(settings, &url)?;
+    let mut related_candidates = Vec::new();
     for item in extract_collection_items(&json) {
         if let Some(t) = map_soundcloud_item_to_track(item) {
-            if !out.iter().any(|existing| existing.uri == t.uri) {
-                out.push(t);
-            }
+            related_candidates.push(t);
         }
     }
+    out.extend(apply_uploader_diversity_and_dedup(
+        related_candidates,
+        2,
+        &seed_exclude,
+        capped_limit,
+    ));
 
     if out.is_empty() {
         return Err(anyhow!(
@@ -762,5 +978,109 @@ pub fn search_catalog(settings: &SimpSettings, query: &str) -> Result<SoundCloud
         users,
         next_tracks_href,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_track(uri: &str, title: &str, artist: &str, duration_ms: u32) -> TrackMetadata {
+        TrackMetadata {
+            uri: uri.to_string(),
+            title: title.to_string(),
+            artists: vec![artist.to_string()],
+            album: "SoundCloud".to_string(),
+            album_id: None,
+            track_number: None,
+            disc_number: None,
+            art_url: None,
+            duration_ms,
+            source: "soundcloud".to_string(),
+            mount_root: None,
+            content_rating: None,
+            genre: None,
+            release_year: None,
+            parent_folder: None,
+        }
+    }
+
+    #[test]
+    fn test_apply_uploader_diversity_and_dedup_caps_per_artist_and_excludes() {
+        let input = vec![
+            mk_track("soundcloud:track:1", "Track 1", "Creator A", 180_000),
+            mk_track("soundcloud:track:2", "Track 2", "Creator A", 180_000),
+            mk_track("soundcloud:track:3", "Track 3", "Creator A", 180_000),
+            mk_track("soundcloud:track:3", "Track 3 Dup", "Creator A", 180_000),
+            mk_track("soundcloud:track:4", "Track 4", "Creator B", 180_000),
+            mk_track("soundcloud:track:5", "Track 5", "Creator C", 180_000),
+            mk_track("soundcloud:track:6", "Track 6", "Creator D", 180_000),
+        ];
+        let mut exclude = HashSet::new();
+        exclude.insert("soundcloud:track:4".to_string());
+
+        let filtered = apply_uploader_diversity_and_dedup(input, 2, &exclude, 10);
+        let uris: Vec<&str> = filtered.iter().map(|t| t.uri.as_str()).collect();
+        assert_eq!(
+            uris,
+            vec![
+                "soundcloud:track:1",
+                "soundcloud:track:2",
+                "soundcloud:track:5",
+                "soundcloud:track:6",
+            ]
+        );
+
+        let single_creator = vec![
+            mk_track("soundcloud:track:10", "Solo 1", "Solo Artist", 180_000),
+            mk_track("soundcloud:track:11", "Solo 2", "Solo Artist", 180_000),
+            mk_track("soundcloud:track:12", "Solo 3", "Solo Artist", 180_000),
+            mk_track("soundcloud:track:13", "Solo 4", "Solo Artist", 180_000),
+        ];
+        let overflowed = apply_uploader_diversity_and_dedup(single_creator, 1, &HashSet::new(), 6);
+        assert_eq!(overflowed.len(), 4);
+    }
+
+    #[test]
+    fn test_select_rotated_seed_ids_and_interleave() {
+        let candidates = vec![
+            "soundcloud:track:101".to_string(),
+            "102".to_string(),
+            "101".to_string(),
+            "103".to_string(),
+            "104".to_string(),
+        ];
+        assert_eq!(
+            select_rotated_seed_ids(&candidates, 0, 3),
+            vec!["101", "102", "103"]
+        );
+        assert_eq!(
+            select_rotated_seed_ids(&candidates, 2, 3),
+            vec!["103", "104", "101"]
+        );
+
+        let b1 = vec![
+            mk_track("soundcloud:track:a1", "A1", "Creator A", 120_000),
+            mk_track("soundcloud:track:a2", "A2", "Creator A", 120_000),
+        ];
+        let b2 = vec![
+            mk_track("soundcloud:track:b1", "B1", "Creator B", 120_000),
+        ];
+        let b3 = vec![
+            mk_track("soundcloud:track:c1", "C1", "Creator C", 120_000),
+            mk_track("soundcloud:track:c2", "C2", "Creator C", 120_000),
+        ];
+        let interleaved = interleave_seed_buckets(vec![b1, b2, b3]);
+        let uris: Vec<&str> = interleaved.iter().map(|t| t.uri.as_str()).collect();
+        assert_eq!(
+            uris,
+            vec![
+                "soundcloud:track:a1",
+                "soundcloud:track:b1",
+                "soundcloud:track:c1",
+                "soundcloud:track:a2",
+                "soundcloud:track:c2",
+            ]
+        );
+    }
 }
 
