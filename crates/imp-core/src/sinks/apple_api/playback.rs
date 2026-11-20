@@ -2,7 +2,8 @@ use super::*;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use imp_protocol::{SimpSettings, TrackMetadata};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 static SHARED_APPLE_DB: std::sync::OnceLock<
     std::sync::Mutex<Option<crate::library::db::LibraryDatabase>>,
@@ -674,6 +675,246 @@ pub(crate) fn has_playable_cloud_or_widevine_asset(json: &Value) -> bool {
         .unwrap_or(false)
 }
 
+pub fn extract_clean_apple_song_id(raw: &str) -> &str {
+    raw.strip_prefix("applemusic:song:")
+        .or_else(|| raw.strip_prefix("applemusic:track:"))
+        .or_else(|| raw.strip_prefix("applemusic:"))
+        .unwrap_or(raw)
+        .trim()
+}
+
+/// Detects unencrypted audio container formats (or legacy FairPlay `drm_m4p`) from the leading
+/// bytes (`Range: bytes=0-511`) of an asset response. Returns `None` for HLS playlists (`#EXTM3U`)
+/// or unrecognized binary payloads.
+pub fn detect_audio_container_from_magic(head: &[u8]) -> Option<&'static str> {
+    let trimmed_bom = head.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(head);
+    if let Ok(text) = std::str::from_utf8(trimmed_bom) {
+        if text
+            .trim_start()
+            .get(..7)
+            .map(|p| p.eq_ignore_ascii_case("#EXTM3U"))
+            .unwrap_or(false)
+        {
+            return None;
+        }
+    }
+    if head.len() >= 12 && &head[4..8] == b"ftyp" {
+        if &head[8..12] == b"M4P " {
+            return Some("drm_m4p");
+        }
+        return Some("m4a");
+    }
+    if head.starts_with(b"ID3") {
+        return Some("mp3");
+    }
+    if head.len() >= 2 && head[0] == 0xFF && (head[1] & 0xE0) == 0xE0 {
+        if (head[1] & 0x06) == 0x00 {
+            return Some("aac");
+        }
+        return Some("mp3");
+    }
+    if head.starts_with(b"fLaC") {
+        return Some("flac");
+    }
+    if head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == b"WAVE" {
+        return Some("wav");
+    }
+    if head.len() >= 12
+        && head.starts_with(b"FORM")
+        && (&head[8..12] == b"AIFF" || &head[8..12] == b"AIFC")
+    {
+        return Some("aiff");
+    }
+    if head.starts_with(b"OggS") {
+        return Some("ogg");
+    }
+    None
+}
+
+pub(crate) fn is_direct_unencrypted_audio_asset(asset: &Value) -> bool {
+    let Some(url) = asset
+        .get("URL")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
+    let flavor_lower = asset
+        .get("flavor")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if flavor_lower.contains("ctrp") || flavor_lower.contains("cbcp") {
+        return false;
+    }
+    let (url_path, url_query) = match url.split_once('?') {
+        Some((p, q)) => (p.to_ascii_lowercase(), q.to_ascii_lowercase()),
+        None => (url.to_ascii_lowercase(), String::new()),
+    };
+    if url_path.ends_with(".m3u8") || url_path.ends_with(".m4p") {
+        return false;
+    }
+    let ext_lower = asset
+        .get("fileExtension")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    url_path.ends_with(".m4a")
+        || url_path.ends_with(".mp3")
+        || url_path.ends_with(".aac")
+        || url_path.ends_with(".flac")
+        || url_path.ends_with(".wav")
+        || url_path.ends_with(".aiff")
+        || url_path.ends_with(".aif")
+        || url_path.ends_with(".ogg")
+        || url_path.ends_with("/audio")
+        || matches!(
+            ext_lower.as_str(),
+            "m4a" | "mp3" | "aac" | "flac" | "wav" | "aiff" | "aif" | "ogg"
+        )
+        || url_query.contains("response-content-disposition=")
+        || url_query.contains("response-content-type=audio")
+        || flavor_lower.contains("itemdownload")
+}
+
+/// Selects the optimal playback asset from a single Apple `webPlayback` `songList[0]` object,
+/// prioritizing unencrypted DRM-free assets (`itemDownload`, direct `.m4a`/`.mp3`, and unkeyed `plus256`)
+/// ahead of Widevine CTR (`28:ctrp256` / `ctrp`) streams.
+pub fn select_web_playback_asset(
+    song_obj: &Value,
+    fallback_song_id: &str,
+) -> Result<AppleWebPlaybackAsset> {
+    let canonical_song_id = song_obj
+        .get("songId")
+        .and_then(|v| {
+            v.as_str()
+                .map(|s| s.to_string())
+                .or_else(|| v.as_u64().map(|n| n.to_string()))
+                .or_else(|| v.as_i64().map(|n| n.to_string()))
+        })
+        .unwrap_or_else(|| fallback_song_id.to_string());
+
+    let key_server_url = song_obj
+        .get("hls-key-server-url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let key_cert_url = song_obj
+        .get("hls-key-cert-url")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let assets = song_obj
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| anyhow!("No HLS assets in webPlayback response"))?;
+
+    let asset_has_url = |a: &&Value| -> bool {
+        a.get("URL")
+            .and_then(|v| v.as_str())
+            .map(|u| !u.trim().is_empty())
+            .unwrap_or(false)
+    };
+    let flavor_lower = |a: &&Value| -> String {
+        a.get("flavor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+
+    // Priority:
+    // 1. Direct unencrypted audio downloads (`itemDownload` / direct `.m4a`/`.mp3`)
+    // 2. Unkeyed DRM-free HLS (`plus256` / non-DRM `256` when `hls-key-server-url` is absent)
+    // 3. Widevine CTR (`28:ctrp256` -> other `ctrp` -> `plus`/`itemDownload` -> `256` -> first)
+    let chosen = assets
+        .iter()
+        .find(|a| is_direct_unencrypted_audio_asset(a))
+        .or_else(|| {
+            if key_server_url.is_none() {
+                assets
+                    .iter()
+                    .find(|a| {
+                        asset_has_url(a) && {
+                            let f = flavor_lower(a);
+                            f.contains("plus") && !f.contains("ctrp") && !f.contains("cbcp")
+                        }
+                    })
+                    .or_else(|| {
+                        assets.iter().find(|a| {
+                            asset_has_url(a) && {
+                                let f = flavor_lower(a);
+                                f.contains("256") && !f.contains("ctrp") && !f.contains("cbcp")
+                            }
+                        })
+                    })
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            assets.iter().find(|a| {
+                asset_has_url(a) && {
+                    let f = flavor_lower(a);
+                    f == "28:ctrp256" || f.contains("ctrp256")
+                }
+            })
+        })
+        .or_else(|| {
+            assets
+                .iter()
+                .find(|a| asset_has_url(a) && flavor_lower(a).contains("ctrp"))
+        })
+        .or_else(|| {
+            assets.iter().find(|a| {
+                asset_has_url(a) && {
+                    let f = flavor_lower(a);
+                    f.contains("plus") || f.contains("itemdownload")
+                }
+            })
+        })
+        .or_else(|| {
+            assets
+                .iter()
+                .find(|a| asset_has_url(a) && flavor_lower(a).contains("256"))
+        })
+        .or_else(|| assets.first())
+        .ok_or_else(|| anyhow!("Empty assets list in webPlayback response"))?;
+
+    let hls_playlist_url = chosen
+        .get("URL")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("Missing URL in webPlayback asset"))?
+        .to_string();
+    let flavor = chosen
+        .get("flavor")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default")
+        .to_string();
+    let chosen_flavor_lower = flavor.to_ascii_lowercase();
+
+    let encryption_kind = if is_direct_unencrypted_audio_asset(chosen) {
+        AppleAssetEncryptionKind::ClearDirectAudio
+    } else if key_server_url.is_none()
+        && (chosen_flavor_lower.contains("plus")
+            || (!chosen_flavor_lower.contains("ctrp") && !chosen_flavor_lower.contains("cbcp")))
+    {
+        AppleAssetEncryptionKind::ClearHlsFmp4
+    } else {
+        AppleAssetEncryptionKind::WidevineCenc
+    };
+
+    Ok(AppleWebPlaybackAsset {
+        song_id: canonical_song_id,
+        flavor,
+        hls_playlist_url,
+        key_server_url,
+        key_cert_url,
+        encryption_kind,
+    })
+}
+
 /// Stage C Browserless Foundation: Queries Apple's `webPlayback` endpoint directly from Rust
 /// to retrieve the encrypted HLS `.m3u8` asset stream URL and Widevine license server URLs
 /// (or DRM-free `plus256` / `itemDownload` / clear HLS assets for uploaded & iTunes Match Cloud Locker tracks).
@@ -682,12 +923,7 @@ pub fn fetch_web_playback_manifest(
     song_id: &str,
 ) -> Result<AppleWebPlaybackAsset> {
     let (dev_token, user_token) = resolve_tokens(settings)?;
-    let clean_id = song_id
-        .strip_prefix("applemusic:song:")
-        .or_else(|| song_id.strip_prefix("applemusic:track:"))
-        .or_else(|| song_id.strip_prefix("applemusic:"))
-        .unwrap_or(song_id)
-        .trim();
+    let clean_id = extract_clean_apple_song_id(song_id);
 
     let mut active_id = if let Ok(guard) = catalog_id_cache().lock() {
         guard
@@ -790,107 +1026,728 @@ pub fn fetch_web_playback_manifest(
         .pointer("/songList/0")
         .ok_or_else(|| anyhow!("No songList entry returned by Apple webPlayback endpoint (raw response: {json})"))?;
 
-    let canonical_song_id = song_obj
-        .get("songId")
-        .and_then(|v| {
-            v.as_str()
-                .map(|s| s.to_string())
-                .or_else(|| v.as_u64().map(|n| n.to_string()))
-                .or_else(|| v.as_i64().map(|n| n.to_string()))
-        })
-        .unwrap_or_else(|| active_id.clone());
+    select_web_playback_asset(song_obj, &active_id)
+}
+
+static CLEAR_LIBRARY_MANIFEST_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<String, (Instant, Option<AppleWebPlaybackAsset>)>>,
+> = std::sync::OnceLock::new();
+
+fn clear_library_manifest_cache(
+) -> &'static std::sync::Mutex<HashMap<String, (Instant, Option<AppleWebPlaybackAsset>)>> {
+    CLEAR_LIBRARY_MANIFEST_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+const CLEAR_LIBRARY_MANIFEST_TTL: Duration = Duration::from_secs(15 * 60);
+const CLEAR_LIBRARY_MANIFEST_MAX_ENTRIES: usize = 256;
+
+/// Queries Apple `webPlayback` strictly with `{ "universalLibraryId": "i.xxxx" }` (never substituting
+/// a catalog `salableAdamId`) and returns `Some(asset)` ONLY if the returned stream is verified DRM-free
+/// (`ClearDirectAudio` or an `.m3u8` `ClearHlsFmp4` verified to contain zero `EXT-X-KEY` directives).
+pub fn try_fetch_clear_library_playback_manifest(
+    settings: &SimpSettings,
+    song_uri_or_id: &str,
+) -> Result<Option<AppleWebPlaybackAsset>> {
+    let clean_id = extract_clean_apple_song_id(song_uri_or_id);
+    if !clean_id.starts_with("i.") {
+        return Ok(None);
+    }
+
+    if let Ok(mut guard) = clear_library_manifest_cache().lock() {
+        if let Some((cached_at, cached_val)) = guard.get(clean_id) {
+            if cached_at.elapsed() < CLEAR_LIBRARY_MANIFEST_TTL {
+                return Ok(cached_val.clone());
+            }
+            guard.remove(clean_id);
+        }
+    }
+
+    let (dev_token, user_token) = resolve_tokens(settings)?;
+    let json = apple_post_json(
+        "https://play.music.apple.com/WebObjects/MZPlay.woa/wa/webPlayback",
+        &dev_token,
+        &user_token,
+        &serde_json::json!({ "universalLibraryId": clean_id }),
+    )?;
+
+    let resolved: Option<AppleWebPlaybackAsset> = match json.pointer("/songList/0") {
+        Some(song_obj) => {
+            match select_web_playback_asset(song_obj, clean_id) {
+                Ok(asset) => match asset.encryption_kind {
+                    AppleAssetEncryptionKind::ClearDirectAudio => Some(asset),
+                    AppleAssetEncryptionKind::ClearHlsFmp4 => {
+                        match crate::sinks::apple_native::hls::fetch_and_verify_clear_apple_hls(
+                            &asset.hls_playlist_url,
+                        )? {
+                            Ok(_) => Some(asset),
+                            Err(_) => None,
+                        }
+                    }
+                    AppleAssetEncryptionKind::WidevineCenc => None,
+                },
+                Err(_) => None,
+            }
+        }
+        None => None,
+    };
+
+    if let Ok(mut guard) = clear_library_manifest_cache().lock() {
+        if guard.len() >= CLEAR_LIBRARY_MANIFEST_MAX_ENTRIES {
+            guard.retain(|_, (ts, _)| ts.elapsed() < CLEAR_LIBRARY_MANIFEST_TTL);
+            if guard.len() >= CLEAR_LIBRARY_MANIFEST_MAX_ENTRIES {
+                if let Some(oldest_key) = guard
+                    .iter()
+                    .min_by_key(|(_, (ts, _))| *ts)
+                    .map(|(k, _)| k.clone())
+                {
+                    guard.remove(&oldest_key);
+                }
+            }
+        }
+        guard.insert(clean_id.to_string(), (Instant::now(), resolved.clone()));
+    }
+
+    Ok(resolved)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LiberationOwnershipClass {
+    Pending,
+    ReclaimableDirect,
+    ReclaimableClearHls,
+    SubscriptionDrmExcluded,
+    Unavailable,
+    Error,
+}
+
+impl LiberationOwnershipClass {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::ReclaimableDirect => "reclaimable_direct",
+            Self::ReclaimableClearHls => "reclaimable_clear_hls",
+            Self::SubscriptionDrmExcluded => "subscription_drm_excluded",
+            Self::Unavailable => "unavailable",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn from_str(raw: &str) -> Self {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "reclaimable_direct" => Self::ReclaimableDirect,
+            "reclaimable_clear_hls" => Self::ReclaimableClearHls,
+            "subscription_drm_excluded" => Self::SubscriptionDrmExcluded,
+            "unavailable" => Self::Unavailable,
+            "error" => Self::Error,
+            _ => Self::Pending,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OwnedAssetProbeResult {
+    pub library_song_id: String,
+    pub ownership_class: LiberationOwnershipClass,
+    pub asset_flavor: Option<String>,
+    pub asset_url_kind: Option<String>,
+    pub all_observed_flavors: Vec<String>,
+    pub content_length_bytes: Option<u64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnedWebPlaybackInspection {
+    DirectClear {
+        flavor: String,
+        url: String,
+        size_hint: Option<u64>,
+        observed_flavors: Vec<String>,
+    },
+    ClearHlsCandidate {
+        flavor: String,
+        playlist_url: String,
+        observed_flavors: Vec<String>,
+    },
+    DrmExcluded {
+        flavor: Option<String>,
+        reason: String,
+        observed_flavors: Vec<String>,
+    },
+    Unavailable {
+        reason: String,
+        observed_flavors: Vec<String>,
+    },
+}
+
+fn extract_asset_size_hint(asset: &Value) -> Option<u64> {
+    for key in ["file-size", "fileSize", "downloadSize", "size"] {
+        if let Some(n) = asset.get(key).and_then(|v| v.as_u64()) {
+            if n > 0 {
+                return Some(n);
+            }
+        }
+    }
+    asset
+        .pointer("/metadata/fileSize")
+        .and_then(|v| v.as_u64())
+        .filter(|n| *n > 0)
+}
+
+/// Strictly inspects a raw Apple `webPlayback` JSON payload (queried with `universalLibraryId`)
+/// to classify whether any returned asset is potentially DRM-free or is DRM-protected.
+pub fn inspect_owned_web_playback_response(
+    library_song_id: &str,
+    json: &Value,
+) -> OwnedWebPlaybackInspection {
+    let Some(song_obj) = json.pointer("/songList/0") else {
+        let status_msg = json
+            .get("failureType")
+            .or_else(|| json.get("customerMessage"))
+            .or_else(|| json.get("status"))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "No songList entry returned".to_string());
+        return OwnedWebPlaybackInspection::Unavailable {
+            reason: format!("Library ID {library_song_id}: {status_msg}"),
+            observed_flavors: Vec::new(),
+        };
+    };
+
+    let mut observed_flavors: Vec<String> = Vec::new();
+    let Some(assets) = song_obj.get("assets").and_then(|v| v.as_array()) else {
+        return OwnedWebPlaybackInspection::Unavailable {
+            reason: "No assets array in webPlayback songList[0]".to_string(),
+            observed_flavors,
+        };
+    };
+
+    for a in assets {
+        let f = a
+            .get("flavor")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "unknown".to_string());
+        if !observed_flavors.contains(&f) {
+            observed_flavors.push(f);
+        }
+    }
+
+    if assets.is_empty() {
+        return OwnedWebPlaybackInspection::Unavailable {
+            reason: "Empty assets list in webPlayback songList[0]".to_string(),
+            observed_flavors,
+        };
+    }
+
+    // 1. Direct unencrypted audio file (`itemDownload` or non-HLS `.m4a`/`.mp3`/etc.)
+    if let Some(direct) = assets.iter().find(|a| is_direct_unencrypted_audio_asset(a)) {
+        let flavor = direct
+            .get("flavor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("direct_audio")
+            .to_string();
+        let url = direct
+            .get("URL")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        return OwnedWebPlaybackInspection::DirectClear {
+            flavor,
+            url,
+            size_hint: extract_asset_size_hint(direct),
+            observed_flavors,
+        };
+    }
 
     let key_server_url = song_obj
         .get("hls-key-server-url")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let key_cert_url = song_obj
-        .get("hls-key-cert-url")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty());
 
-    let assets = song_obj
-        .get("assets")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow!("No HLS assets in webPlayback response"))?;
+    // 2. If there is no `hls-key-server-url`, look for an unkeyed HLS candidate (`plus` or non-ctrp/cbcp)
+    if key_server_url.is_none() {
+        let is_clear_hls_candidate = |a: &&Value, require_plus: bool| -> bool {
+            let has_url = a
+                .get("URL")
+                .and_then(|v| v.as_str())
+                .map(|u| !u.trim().is_empty())
+                .unwrap_or(false);
+            if !has_url {
+                return false;
+            }
+            let f = a
+                .get("flavor")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if f.contains("ctrp") || f.contains("cbcp") {
+                return false;
+            }
+            !require_plus || f.contains("plus")
+        };
 
-    // Prefer:
-    // 1. DRM-free `plus256` / `itemDownload` assets when playing user-uploaded / iTunes Match Cloud Locker tracks without `hls-key-server-url`
-    // 2. 256kbps Widevine CTR (`28:ctrp256`) or 64kbps Widevine CTR (`28:ctrp64`) ahead of FairPlay-only (`30:cbcp256`)
-    let chosen = assets
+        if let Some(hls_asset) = assets
+            .iter()
+            .find(|a| is_clear_hls_candidate(a, true))
+            .or_else(|| assets.iter().find(|a| is_clear_hls_candidate(a, false)))
+        {
+            let flavor = hls_asset
+                .get("flavor")
+                .and_then(|v| v.as_str())
+                .unwrap_or("clear_hls")
+                .to_string();
+            let playlist_url = hls_asset
+                .get("URL")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            return OwnedWebPlaybackInspection::ClearHlsCandidate {
+                flavor,
+                playlist_url,
+                observed_flavors,
+            };
+        }
+    }
+
+    let primary_flavor = assets
         .iter()
-        .find(|a| {
+        .find_map(|a| {
             a.get("flavor")
                 .and_then(|v| v.as_str())
-                .map(|f| f == "28:ctrp256" || f.contains("ctrp256"))
-                .unwrap_or(false)
+                .map(|s| s.to_string())
         })
-        .or_else(|| {
-            assets.iter().find(|a| {
-                a.get("flavor")
-                    .and_then(|v| v.as_str())
-                    .map(|f| f.contains("ctrp"))
-                    .unwrap_or(false)
-            })
-        })
-        .or_else(|| {
-            assets.iter().find(|a| {
-                a.get("flavor")
-                    .and_then(|v| v.as_str())
-                    .map(|f| f.contains("plus") || f.contains("itemDownload"))
-                    .unwrap_or(false)
-            })
-        })
-        .or_else(|| {
-            assets.iter().find(|a| {
-                a.get("flavor")
-                    .and_then(|v| v.as_str())
-                    .map(|f| f.contains("256"))
-                    .unwrap_or(false)
-            })
-        })
-        .or_else(|| assets.first())
-        .ok_or_else(|| anyhow!("Empty assets list in webPlayback response"))?;
+        .or_else(|| observed_flavors.first().cloned());
 
-    let hls_playlist_url = chosen
-        .get("URL")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow!("Missing URL in webPlayback asset"))?
-        .to_string();
-    let flavor = chosen
-        .get("flavor")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default")
-        .to_string();
-
-    let url_path_lower = hls_playlist_url
-        .split('?')
-        .next()
-        .unwrap_or(&hls_playlist_url)
-        .to_lowercase();
-    let is_direct_audio_file = !url_path_lower.ends_with(".m3u8")
-        && (url_path_lower.ends_with(".m4a")
-            || url_path_lower.ends_with(".mp3")
-            || url_path_lower.ends_with(".aac")
-            || url_path_lower.ends_with(".flac")
-            || url_path_lower.ends_with(".wav")
-            || flavor.contains("itemDownload"));
-
-    let encryption_kind = if is_direct_audio_file {
-        AppleAssetEncryptionKind::ClearDirectAudio
-    } else if flavor.contains("plus") || (key_server_url.is_none() && !flavor.contains("ctrp") && !flavor.contains("cbcp")) {
-        AppleAssetEncryptionKind::ClearHlsFmp4
+    let reason = if key_server_url.is_some() {
+        "Stream requires DRM license server (hls-key-server-url present)".to_string()
     } else {
-        AppleAssetEncryptionKind::WidevineCenc
+        "Only encrypted DRM flavors returned by webPlayback".to_string()
     };
 
-    Ok(AppleWebPlaybackAsset {
-        song_id: canonical_song_id,
-        flavor,
-        hls_playlist_url,
-        key_server_url,
-        key_cert_url,
-        encryption_kind,
-    })
+    OwnedWebPlaybackInspection::DrmExcluded {
+        flavor: primary_flavor,
+        reason,
+        observed_flavors,
+    }
+}
+
+fn peek_url_magic(url: &str) -> Result<Vec<u8>> {
+    crate::http_pool::http_get_bytes(url, &[], Some((0, 511)), 12)
+}
+
+fn is_m3u8_magic_header(head: &[u8]) -> bool {
+    let trimmed_bom = head.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(head);
+    std::str::from_utf8(trimmed_bom)
+        .map(|s| {
+            s.trim_start()
+                .get(..7)
+                .map(|p| p.eq_ignore_ascii_case("#EXTM3U"))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+fn classify_detected_container(
+    clean_id: &str,
+    container: &str,
+    raw_flavor: &str,
+    size_hint: Option<u64>,
+    observed_flavors: &mut Vec<String>,
+) -> OwnedAssetProbeResult {
+    if container == "drm_m4p" {
+        return OwnedAssetProbeResult {
+            library_song_id: clean_id.to_string(),
+            ownership_class: LiberationOwnershipClass::SubscriptionDrmExcluded,
+            asset_flavor: Some(raw_flavor.to_string()),
+            asset_url_kind: Some("drm_m4p".to_string()),
+            all_observed_flavors: observed_flavors.clone(),
+            content_length_bytes: None,
+            reason: Some("Legacy FairPlay M4P container detected".to_string()),
+        };
+    }
+
+    let resolved_flavor = if raw_flavor == "unknown" || raw_flavor == "direct_audio" {
+        let labeled = format!("cloud_locker_{container}");
+        for slot in observed_flavors.iter_mut() {
+            if slot == "unknown" {
+                *slot = labeled.clone();
+            }
+        }
+        labeled
+    } else {
+        raw_flavor.to_string()
+    };
+
+    OwnedAssetProbeResult {
+        library_song_id: clean_id.to_string(),
+        ownership_class: LiberationOwnershipClass::ReclaimableDirect,
+        asset_flavor: Some(resolved_flavor),
+        asset_url_kind: Some(format!("direct_{container}")),
+        all_observed_flavors: observed_flavors.clone(),
+        content_length_bytes: size_hint,
+        reason: None,
+    }
+}
+
+fn verify_clear_hls_probe_result(
+    clean_id: &str,
+    flavor: String,
+    playlist_url: &str,
+    observed_flavors: Vec<String>,
+) -> OwnedAssetProbeResult {
+    match crate::sinks::apple_native::hls::fetch_and_verify_clear_apple_hls(playlist_url) {
+        Ok(Ok(playlist)) => {
+            let init_len = playlist.init_byte_range.map(|b| b.length).unwrap_or(0);
+            let seg_len_sum: u64 = playlist
+                .segments
+                .iter()
+                .filter_map(|s| s.byte_range.map(|b| b.length))
+                .sum();
+            let estimated_bytes = if seg_len_sum > 0 {
+                Some(init_len + seg_len_sum)
+            } else {
+                None
+            };
+            OwnedAssetProbeResult {
+                library_song_id: clean_id.to_string(),
+                ownership_class: LiberationOwnershipClass::ReclaimableClearHls,
+                asset_flavor: Some(flavor),
+                asset_url_kind: Some("clear_hls_fmp4".to_string()),
+                all_observed_flavors: observed_flavors,
+                content_length_bytes: estimated_bytes,
+                reason: None,
+            }
+        }
+        Ok(Err(drm_reason)) => OwnedAssetProbeResult {
+            library_song_id: clean_id.to_string(),
+            ownership_class: LiberationOwnershipClass::SubscriptionDrmExcluded,
+            asset_flavor: Some(flavor),
+            asset_url_kind: Some("drm_hls".to_string()),
+            all_observed_flavors: observed_flavors,
+            content_length_bytes: None,
+            reason: Some(drm_reason),
+        },
+        Err(err) => OwnedAssetProbeResult {
+            library_song_id: clean_id.to_string(),
+            ownership_class: LiberationOwnershipClass::Error,
+            asset_flavor: Some(flavor),
+            asset_url_kind: None,
+            all_observed_flavors: observed_flavors,
+            content_length_bytes: None,
+            reason: Some(format!("HLS verification failed: {err}")),
+        },
+    }
+}
+
+/// Strictly read-only Stage 1 Project LIBERATION probe using pre-resolved tokens:
+/// Queries Apple `webPlayback` with `{ "universalLibraryId": library_song_id }` ONLY (never substituting
+/// a catalog `salableAdamId`), and verifies direct containers via a 512-byte Range magic-byte peek
+/// or HLS playlists for zero `EXT-X-KEY` / PSSH tags.
+pub fn probe_owned_library_asset_with_tokens(
+    dev_token: &str,
+    user_token: &str,
+    library_song_id: &str,
+) -> Result<OwnedAssetProbeResult> {
+    let clean_id = extract_clean_apple_song_id(library_song_id).to_string();
+
+    let json = apple_post_json(
+        "https://play.music.apple.com/WebObjects/MZPlay.woa/wa/webPlayback",
+        dev_token,
+        user_token,
+        &serde_json::json!({ "universalLibraryId": clean_id }),
+    )?;
+
+    match inspect_owned_web_playback_response(&clean_id, &json) {
+        OwnedWebPlaybackInspection::DirectClear {
+            flavor,
+            url,
+            size_hint,
+            mut observed_flavors,
+        } => match peek_url_magic(&url) {
+            Ok(head) => {
+                if let Some(container) = detect_audio_container_from_magic(&head) {
+                    Ok(classify_detected_container(
+                        &clean_id,
+                        container,
+                        &flavor,
+                        size_hint,
+                        &mut observed_flavors,
+                    ))
+                } else if is_m3u8_magic_header(&head) {
+                    Ok(verify_clear_hls_probe_result(
+                        &clean_id,
+                        flavor,
+                        &url,
+                        observed_flavors,
+                    ))
+                } else {
+                    let hex_preview: String = head
+                        .iter()
+                        .take(12)
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    Ok(OwnedAssetProbeResult {
+                        library_song_id: clean_id,
+                        ownership_class: LiberationOwnershipClass::Error,
+                        asset_flavor: Some(flavor),
+                        asset_url_kind: None,
+                        all_observed_flavors: observed_flavors,
+                        content_length_bytes: None,
+                        reason: Some(format!(
+                            "Unrecognized binary header at direct audio URL (hex={hex_preview})"
+                        )),
+                    })
+                }
+            }
+            Err(err) => Ok(OwnedAssetProbeResult {
+                library_song_id: clean_id,
+                ownership_class: LiberationOwnershipClass::Error,
+                asset_flavor: Some(flavor),
+                asset_url_kind: None,
+                all_observed_flavors: observed_flavors,
+                content_length_bytes: None,
+                reason: Some(format!("Direct audio peek failed: {err}")),
+            }),
+        },
+        OwnedWebPlaybackInspection::ClearHlsCandidate {
+            flavor,
+            playlist_url,
+            mut observed_flavors,
+        } => {
+            if let Ok(head) = peek_url_magic(&playlist_url) {
+                if let Some(container) = detect_audio_container_from_magic(&head) {
+                    return Ok(classify_detected_container(
+                        &clean_id,
+                        container,
+                        &flavor,
+                        None,
+                        &mut observed_flavors,
+                    ));
+                }
+            }
+            Ok(verify_clear_hls_probe_result(
+                &clean_id,
+                flavor,
+                &playlist_url,
+                observed_flavors,
+            ))
+        }
+        OwnedWebPlaybackInspection::DrmExcluded {
+            flavor,
+            reason,
+            observed_flavors,
+        } => Ok(OwnedAssetProbeResult {
+            library_song_id: clean_id,
+            ownership_class: LiberationOwnershipClass::SubscriptionDrmExcluded,
+            asset_flavor: flavor,
+            asset_url_kind: Some("drm_hls".to_string()),
+            all_observed_flavors: observed_flavors,
+            content_length_bytes: None,
+            reason: Some(reason),
+        }),
+        OwnedWebPlaybackInspection::Unavailable {
+            reason,
+            observed_flavors,
+        } => Ok(OwnedAssetProbeResult {
+            library_song_id: clean_id,
+            ownership_class: LiberationOwnershipClass::Unavailable,
+            asset_flavor: None,
+            asset_url_kind: None,
+            all_observed_flavors: observed_flavors,
+            content_length_bytes: None,
+            reason: Some(reason),
+        }),
+    }
+}
+
+/// Strictly read-only Stage 1 Project LIBERATION probe resolving tokens from `settings`.
+pub fn probe_owned_library_asset(
+    settings: &SimpSettings,
+    library_song_id: &str,
+) -> Result<OwnedAssetProbeResult> {
+    let (dev_token, user_token) = resolve_tokens(settings)?;
+    probe_owned_library_asset_with_tokens(&dev_token, &user_token, library_song_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_web_playback_asset_prefers_item_download_over_ctrp256() {
+        let song_obj = serde_json::json!({
+            "songId": "i.sample001",
+            "hls-key-server-url": "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense",
+            "assets": [
+                {
+                    "flavor": "28:ctrp256",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/prog.m3u8"
+                },
+                {
+                    "flavor": "itemDownload",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/track.m4a"
+                }
+            ]
+        });
+
+        let selected = select_web_playback_asset(&song_obj, "i.sample001").unwrap();
+        assert_eq!(selected.flavor, "itemDownload");
+        assert_eq!(selected.encryption_kind, AppleAssetEncryptionKind::ClearDirectAudio);
+        assert!(selected.hls_playlist_url.ends_with(".m4a"));
+    }
+
+    #[test]
+    fn test_select_web_playback_asset_prefers_plus256_when_no_key_server() {
+        let song_obj = serde_json::json!({
+            "songId": "i.sample002",
+            "assets": [
+                {
+                    "flavor": "28:ctrp256",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/ctrp.m3u8"
+                },
+                {
+                    "flavor": "plus256",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/plus.m3u8"
+                }
+            ]
+        });
+
+        let selected = select_web_playback_asset(&song_obj, "i.sample002").unwrap();
+        assert_eq!(selected.flavor, "plus256");
+        assert_eq!(selected.encryption_kind, AppleAssetEncryptionKind::ClearHlsFmp4);
+    }
+
+    #[test]
+    fn test_select_web_playback_asset_marks_ctrp256_and_keyed_plus_as_widevine() {
+        let ctrp_song = serde_json::json!({
+            "songId": "100001",
+            "hls-key-server-url": "https://play.itunes.apple.com/license",
+            "assets": [
+                {
+                    "flavor": "28:ctrp256",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/ctrp.m3u8"
+                }
+            ]
+        });
+        let s1 = select_web_playback_asset(&ctrp_song, "100001").unwrap();
+        assert_eq!(s1.encryption_kind, AppleAssetEncryptionKind::WidevineCenc);
+
+        let keyed_plus_song = serde_json::json!({
+            "songId": "100002",
+            "hls-key-server-url": "https://play.itunes.apple.com/license",
+            "assets": [
+                {
+                    "flavor": "plus256",
+                    "URL": "https://aod-ssl.itunes.apple.com/sample/plus.m3u8"
+                }
+            ]
+        });
+        let s2 = select_web_playback_asset(&keyed_plus_song, "100002").unwrap();
+        assert_eq!(s2.encryption_kind, AppleAssetEncryptionKind::WidevineCenc);
+    }
+
+    #[test]
+    fn test_inspect_owned_web_playback_response_classifications() {
+        let direct_json = serde_json::json!({
+            "songList": [{
+                "assets": [
+                    { "flavor": "itemDownload", "URL": "https://example.com/track.m4a", "fileSize": 8123456 }
+                ]
+            }]
+        });
+        assert_eq!(
+            inspect_owned_web_playback_response("i.direct1", &direct_json),
+            OwnedWebPlaybackInspection::DirectClear {
+                flavor: "itemDownload".to_string(),
+                url: "https://example.com/track.m4a".to_string(),
+                size_hint: Some(8123456),
+                observed_flavors: vec!["itemDownload".to_string()],
+            }
+        );
+
+        let clear_hls_json = serde_json::json!({
+            "songList": [{
+                "assets": [
+                    { "flavor": "plus256", "URL": "https://example.com/prog.m3u8" },
+                    { "flavor": "28:ctrp256", "URL": "https://example.com/drm.m3u8" }
+                ]
+            }]
+        });
+        assert_eq!(
+            inspect_owned_web_playback_response("i.clearhls1", &clear_hls_json),
+            OwnedWebPlaybackInspection::ClearHlsCandidate {
+                flavor: "plus256".to_string(),
+                playlist_url: "https://example.com/prog.m3u8".to_string(),
+                observed_flavors: vec!["plus256".to_string(), "28:ctrp256".to_string()],
+            }
+        );
+
+        let drm_json = serde_json::json!({
+            "songList": [{
+                "hls-key-server-url": "https://play.itunes.apple.com/license",
+                "assets": [
+                    { "flavor": "28:ctrp256", "URL": "https://example.com/drm.m3u8" },
+                    { "flavor": "30:cbcp256", "URL": "https://example.com/cbcp.m3u8" }
+                ]
+            }]
+        });
+        assert!(matches!(
+            inspect_owned_web_playback_response("i.sub1", &drm_json),
+            OwnedWebPlaybackInspection::DrmExcluded { .. }
+        ));
+
+        let empty_json = serde_json::json!({ "songList": [], "failureType": "1004" });
+        assert!(matches!(
+            inspect_owned_web_playback_response("i.missing1", &empty_json),
+            OwnedWebPlaybackInspection::Unavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn test_detect_audio_container_from_magic() {
+        assert_eq!(
+            detect_audio_container_from_magic(b"\x00\x00\x00 ftypM4A \x00\x00\x00\x00"),
+            Some("m4a")
+        );
+        assert_eq!(
+            detect_audio_container_from_magic(b"\x00\x00\x00 ftypM4P \x00\x00\x00\x00"),
+            Some("drm_m4p")
+        );
+        assert_eq!(
+            detect_audio_container_from_magic(b"ID3\x04\x00\x00\x00\x00\x00\x00"),
+            Some("mp3")
+        );
+        assert_eq!(detect_audio_container_from_magic(b"fLaC\x00\x00\x00\""), Some("flac"));
+        assert_eq!(
+            detect_audio_container_from_magic(b"RIFF\x24\x00\x00\x00WAVEfmt "),
+            Some("wav")
+        );
+        assert_eq!(
+            detect_audio_container_from_magic(b"#EXTM3U\n#EXT-X-VERSION:7\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_is_direct_unencrypted_audio_asset_recognizes_s3_cloud_locker_audio_url() {
+        let s3_song = serde_json::json!({
+            "songList": [{
+                "assets": [
+                    {
+                        "URL": "https://example-bucket.s3.amazonaws.com/sample-uuid/audio?response-content-disposition=attachment%3B%20filename%3D%22track.m4a%22&X-Amz-Signature=deadbeef"
+                    }
+                ]
+            }]
+        });
+        assert!(is_direct_unencrypted_audio_asset(
+            &s3_song["songList"][0]["assets"][0]
+        ));
+        assert!(matches!(
+            inspect_owned_web_playback_response("i.uploaded1", &s3_song),
+            OwnedWebPlaybackInspection::DirectClear { .. }
+        ));
+    }
 }
 

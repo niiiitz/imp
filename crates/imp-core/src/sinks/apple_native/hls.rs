@@ -306,6 +306,86 @@ pub fn fetch_and_parse_apple_hls(playlist_url: &str) -> Result<AppleHlsMediaPlay
     }
 }
 
+/// Returns `true` if an HLS master or media playlist declares any active encryption key
+/// (`#EXT-X-KEY` or `#EXT-X-SESSION-KEY` where `METHOD` is not explicitly `NONE`, or where
+/// a `URI` / `KEYFORMAT` attribute is present).
+pub fn m3u8_has_active_encryption_key(m3u8_text: &str) -> bool {
+    for raw_line in m3u8_text.lines() {
+        let line = raw_line.trim();
+        let attr_str = if let Some(rest) = line.strip_prefix("#EXT-X-KEY:") {
+            Some(rest)
+        } else if let Some(rest) = line.strip_prefix("#EXT-X-SESSION-KEY:") {
+            Some(rest)
+        } else {
+            None
+        };
+        if let Some(attrs_raw) = attr_str {
+            let attrs = parse_hls_attributes(attrs_raw);
+            let mut method: Option<String> = None;
+            let mut has_uri_or_keyformat = false;
+            for (k, v) in attrs {
+                match k.as_str() {
+                    "METHOD" => method = Some(v.trim().to_ascii_uppercase()),
+                    "URI" | "KEYFORMAT" => {
+                        if !v.trim().is_empty() {
+                            has_uri_or_keyformat = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let is_explicit_none = method.as_deref() == Some("NONE") && !has_uri_or_keyformat;
+            if !is_explicit_none {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Downloads and parses an Apple HLS `.m3u8` URL, strictly confirming that neither the master
+/// playlist nor the resolved media playlist contains any DRM/encryption key directives or PSSH data.
+///
+/// - `Err(e)`: network/HTTP/parse failure
+/// - `Ok(Err(reason))`: stream carries active DRM/encryption tags (`EXT-X-KEY` / `EXT-X-SESSION-KEY` / PSSH)
+/// - `Ok(Ok(playlist))`: verified unencrypted clear HLS playlist
+pub fn fetch_and_verify_clear_apple_hls(
+    playlist_url: &str,
+) -> Result<std::result::Result<AppleHlsMediaPlaylist, String>> {
+    let raw_bytes = fetch_hls_bytes(playlist_url, None)?;
+    let text = String::from_utf8(raw_bytes).context("HLS playlist was not valid UTF-8")?;
+    if m3u8_has_active_encryption_key(&text) {
+        return Ok(Err(
+            "HLS playlist contains active EXT-X-KEY or EXT-X-SESSION-KEY".to_string(),
+        ));
+    }
+
+    let parsed = if let Some(variant_url) = extract_variant_from_master_m3u8(playlist_url, &text) {
+        let media_bytes = fetch_hls_bytes(&variant_url, None)?;
+        let media_text =
+            String::from_utf8(media_bytes).context("HLS variant playlist was not valid UTF-8")?;
+        if m3u8_has_active_encryption_key(&media_text) {
+            return Ok(Err(
+                "HLS variant playlist contains active EXT-X-KEY or EXT-X-SESSION-KEY".to_string(),
+            ));
+        }
+        parse_apple_media_m3u8(&variant_url, &media_text)?
+    } else {
+        parse_apple_media_m3u8(playlist_url, &text)?
+    };
+
+    if parsed.encryption_method.is_some()
+        || parsed.key_uri.is_some()
+        || !parsed.widevine_pssh_bytes.is_empty()
+    {
+        return Ok(Err(
+            "Parsed HLS playlist contains DRM encryption metadata".to_string(),
+        ));
+    }
+
+    Ok(Ok(parsed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +443,34 @@ aod_stream_256.mp4
                 length: 191120
             })
         );
+    }
+
+    #[test]
+    fn test_m3u8_active_encryption_key_rejects_fairplay_widevine_aes128_and_session_key() {
+        let widevine = "#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES-CTR,URI=\"data:text/plain;base64,AAA\",KEYFORMAT=\"urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed\"\n#EXTINF:6.0,\nseg0.mp4\n";
+        assert!(m3u8_has_active_encryption_key(widevine));
+
+        let fairplay = "#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://sample-key-id\",KEYFORMAT=\"com.apple.streamingkeydelivery\"\n#EXTINF:6.0,\nseg0.mp4\n";
+        assert!(m3u8_has_active_encryption_key(fairplay));
+
+        let aes128 = "#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"https://example.com/key.bin\"\n#EXTINF:6.0,\nseg0.ts\n";
+        assert!(m3u8_has_active_encryption_key(aes128));
+
+        let session_key = "#EXTM3U\n#EXT-X-SESSION-KEY:METHOD=SAMPLE-AES-CTR,URI=\"data:text/plain;base64,BBB\"\n#EXT-X-STREAM-INF:BANDWIDTH=256000\nprog.m3u8\n";
+        assert!(m3u8_has_active_encryption_key(session_key));
+    }
+
+    #[test]
+    fn test_m3u8_active_encryption_key_allows_clear_and_method_none() {
+        let clear = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-MAP:URI=\"stream.mp4\",BYTERANGE=\"942@0\"\n#EXTINF:6.0,\n#EXT-X-BYTERANGE:120000@942\nstream.mp4\n#EXT-X-ENDLIST\n";
+        assert!(!m3u8_has_active_encryption_key(clear));
+
+        let method_none = "#EXTM3U\n#EXT-X-KEY:METHOD=NONE\n#EXTINF:6.0,\nstream.mp4\n#EXT-X-ENDLIST\n";
+        assert!(!m3u8_has_active_encryption_key(method_none));
+
+        // Ensure METHOD=NONE combined with a stray URI is still treated cautiously as active
+        let sneaky_none_with_uri = "#EXTM3U\n#EXT-X-KEY:METHOD=NONE,URI=\"skd://unexpected\"\n";
+        assert!(m3u8_has_active_encryption_key(sneaky_none_with_uri));
     }
 }
 

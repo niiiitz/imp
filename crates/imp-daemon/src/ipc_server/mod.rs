@@ -1,10 +1,12 @@
 mod apple_routes;
+mod liberation_routes;
 mod library_routes;
 mod media_routes;
 mod soundcloud_routes;
 mod ws_routes;
 
 use apple_routes::*;
+use liberation_routes::*;
 use library_routes::*;
 use media_routes::*;
 use soundcloud_routes::*;
@@ -197,6 +199,12 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/apple/web-playback", get(apple_web_playback_handler))
         .route("/api/apple/native-probe", get(apple_native_probe_handler))
         .route("/api/apple/open", get(apple_open_handler))
+        .route("/api/liberation/census/start", post(liberation_census_start_handler))
+        .route("/api/liberation/census/pause", post(liberation_census_pause_handler))
+        .route("/api/liberation/census/reset", post(liberation_census_reset_handler))
+        .route("/api/liberation/census/status", get(liberation_census_status_handler))
+        .route("/api/liberation/tracks", get(liberation_tracks_handler))
+        .route("/api/liberation/diagnostics", get(liberation_diagnostics_handler))
         .route("/api/lyrics", get(lyrics_handler))
         .route("/api/lyrics/refetch", post(lyrics_refetch_handler))
         .route("/api/factoids", get(factoids_handler))

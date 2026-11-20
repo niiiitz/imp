@@ -1,7 +1,7 @@
 use crate::sinks::apple::AppleMusicSink;
 use crate::sinks::apple_api::{
-    fetch_web_playback_manifest, force_resolve_catalog_song_by_search, AppleAssetEncryptionKind,
-    AppleWebPlaybackAsset,
+    fetch_web_playback_manifest, force_resolve_catalog_song_by_search,
+    try_fetch_clear_library_playback_manifest, AppleAssetEncryptionKind, AppleWebPlaybackAsset,
 };
 use crate::sinks::apple_native::{
     cdm_host::{
@@ -254,7 +254,14 @@ impl DecryptedFmp4RodioSource {
     }
 
     pub fn from_fmp4_bytes(fmp4_bytes: Vec<u8>) -> Result<Self> {
-        let (samples, channels, sample_rate) = decode_fmp4_bytes_to_pcm(fmp4_bytes)?;
+        Self::from_audio_bytes_with_hint(fmp4_bytes, Some("m4a"))
+    }
+
+    pub fn from_audio_bytes_with_hint(
+        audio_bytes: Vec<u8>,
+        ext_hint: Option<&str>,
+    ) -> Result<Self> {
+        let (samples, channels, sample_rate) = decode_audio_bytes_with_hint(audio_bytes, ext_hint)?;
         let len = samples.len();
         Ok(Self {
             state: Arc::new(Mutex::new(StreamingPcmState {
@@ -311,9 +318,37 @@ pub fn decode_clear_init_and_segments_to_pcm(
 }
 
 pub fn decode_fmp4_bytes_to_pcm(fmp4_bytes: Vec<u8>) -> Result<(Vec<f32>, u16, u32)> {
-    let mss = MediaSourceStream::new(Box::new(Cursor::new(fmp4_bytes)), Default::default());
+    decode_audio_bytes_with_hint(fmp4_bytes, Some("m4a"))
+}
+
+fn url_audio_ext_hint(url: &str) -> Option<&'static str> {
+    let path = url.split('?').next().unwrap_or(url).to_ascii_lowercase();
+    if path.ends_with(".m4a") || path.ends_with(".mp4") {
+        Some("m4a")
+    } else if path.ends_with(".mp3") {
+        Some("mp3")
+    } else if path.ends_with(".flac") {
+        Some("flac")
+    } else if path.ends_with(".wav") {
+        Some("wav")
+    } else if path.ends_with(".aac") {
+        Some("aac")
+    } else if path.ends_with(".aiff") || path.ends_with(".aif") {
+        Some("aiff")
+    } else {
+        None
+    }
+}
+
+pub fn decode_audio_bytes_with_hint(
+    audio_bytes: Vec<u8>,
+    ext_hint: Option<&str>,
+) -> Result<(Vec<f32>, u16, u32)> {
+    let mss = MediaSourceStream::new(Box::new(Cursor::new(audio_bytes)), Default::default());
     let mut hint = Hint::new();
-    hint.with_extension("m4a");
+    if let Some(ext) = ext_hint.filter(|e| !e.trim().is_empty()) {
+        hint.with_extension(ext);
+    }
 
     let probed = get_probe()
         .format(
@@ -886,10 +921,10 @@ pub fn spawn_progressive_apple_music_rodio_source(
     tracker: Arc<Mutex<LocalTimeTracker>>,
     user_paused_flag: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<DecryptedFmp4RodioSource> {
-    let cdm_lib = discover_widevine_cdm_library().ok_or_else(|| {
-        anyhow!("No local libwidevinecdm.so found for zero-browser native playback")
-    })?;
-    prewarm_standby_cdm_session(&cdm_lib.library_path);
+    let cdm_lib = discover_widevine_cdm_library();
+    if let Some(ref c) = cdm_lib {
+        prewarm_standby_cdm_session(&c.library_path);
+    }
 
     let creds = AppleMusicSink::resolve_credentials(&settings);
     let dev_token = AppleMusicSink::get_or_sign_developer_token(&settings)?;
@@ -1028,9 +1063,11 @@ pub fn spawn_progressive_apple_music_rodio_source(
                                             "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense"
                                                 .to_string()
                                         });
-                                    if let Some(pssh_bytes) = pssh_opt {
+                                    if let (Some(pssh_bytes), Some(ref cdm)) =
+                                        (pssh_opt, cdm_lib.as_ref())
+                                    {
                                         if negotiate_apple_license_for_epoch(
-                                            &cdm_lib.library_path,
+                                            &cdm.library_path,
                                             epoch,
                                             &active_epoch,
                                             &lic_url,
@@ -1110,15 +1147,35 @@ pub fn spawn_progressive_apple_music_rodio_source(
                 return;
             }
 
-            let manifest = match fetch_web_playback_manifest(&settings, &song_uri).or_else(|_| {
-                std::thread::sleep(Duration::from_millis(120));
-                fetch_web_playback_manifest(&settings, &song_uri)
-            }) {
-                Ok(m) => m,
-                Err(e) => {
-                    tracing::warn!("Apple webPlayback manifest failed for {song_uri}: {e}");
-                    mark_aborted(&state);
-                    return;
+            let manifest = if cdm_lib.is_some() {
+                match fetch_web_playback_manifest(&settings, &song_uri).or_else(|_| {
+                    std::thread::sleep(Duration::from_millis(120));
+                    fetch_web_playback_manifest(&settings, &song_uri)
+                }) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        tracing::warn!("Apple webPlayback manifest failed for {song_uri}: {e}");
+                        mark_aborted(&state);
+                        return;
+                    }
+                }
+            } else {
+                match try_fetch_clear_library_playback_manifest(&settings, &song_uri) {
+                    Ok(Some(m)) if m.encryption_kind != AppleAssetEncryptionKind::WidevineCenc => {
+                        m
+                    }
+                    Ok(_) => {
+                        tracing::warn!(
+                            "No local CDM active and {song_uri} did not resolve to a clear DRM-free stream"
+                        );
+                        mark_aborted(&state);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Clear Apple Cloud Library probe failed for {song_uri}: {e}");
+                        mark_aborted(&state);
+                        return;
+                    }
                 }
             };
             if active_epoch.load(Ordering::SeqCst) != epoch {
@@ -1126,8 +1183,9 @@ pub fn spawn_progressive_apple_music_rodio_source(
                 return;
             }
             if manifest.encryption_kind == AppleAssetEncryptionKind::ClearDirectAudio {
+                let ext_hint = url_audio_ext_hint(&manifest.hls_playlist_url);
                 match fetch_hls_bytes(&manifest.hls_playlist_url, None)
-                    .and_then(decode_fmp4_bytes_to_pcm)
+                    .and_then(|bytes| decode_audio_bytes_with_hint(bytes, ext_hint))
                 {
                     Ok((pcm, _, _)) => {
                         if let Ok(mut g) = state.lock() {
@@ -1223,7 +1281,7 @@ fn stream_cold_or_partial_track(
     tracker: Arc<Mutex<LocalTimeTracker>>,
     user_paused_flag: Arc<std::sync::atomic::AtomicBool>,
     state: Arc<Mutex<StreamingPcmState>>,
-    cdm_lib: DiscoveredWidevineCdm,
+    cdm_lib: Option<DiscoveredWidevineCdm>,
     dev_token: String,
     user_token: String,
     manifest: AppleWebPlaybackAsset,
@@ -1283,27 +1341,31 @@ fn stream_cold_or_partial_track(
             });
 
         let lic_handle = if has_inline_pssh {
-            let lib_path = cdm_lib.library_path.clone();
-            let lic_url = license_url.clone();
-            let d_tok = dev_token.clone();
-            let u_tok = user_token.clone();
-            let s_id = active_song_id.clone();
-            let pl_clone = playlist.clone();
-            let pssh_clone = playlist.widevine_pssh_bytes.clone();
-            let ae_clone = active_epoch.clone();
-            Some(s.spawn(move || -> Result<()> {
-                negotiate_apple_license_for_epoch(
-                    &lib_path,
-                    epoch,
-                    &ae_clone,
-                    &lic_url,
-                    &d_tok,
-                    &u_tok,
-                    &s_id,
-                    &pl_clone,
-                    &pssh_clone,
-                )
-            }))
+            if let Some(ref cdm) = cdm_lib {
+                let lib_path = cdm.library_path.clone();
+                let lic_url = license_url.clone();
+                let d_tok = dev_token.clone();
+                let u_tok = user_token.clone();
+                let s_id = active_song_id.clone();
+                let pl_clone = playlist.clone();
+                let pssh_clone = playlist.widevine_pssh_bytes.clone();
+                let ae_clone = active_epoch.clone();
+                Some(s.spawn(move || -> Result<()> {
+                    negotiate_apple_license_for_epoch(
+                        &lib_path,
+                        epoch,
+                        &ae_clone,
+                        &lic_url,
+                        &d_tok,
+                        &u_tok,
+                        &s_id,
+                        &pl_clone,
+                        &pssh_clone,
+                    )
+                }))
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -1336,10 +1398,12 @@ fn stream_cold_or_partial_track(
         }
     };
 
-    let mut is_unencrypted_hls = manifest.encryption_kind == AppleAssetEncryptionKind::ClearHlsFmp4
-        || (playlist.encryption_method.is_none()
-            && playlist.widevine_pssh_bytes.is_empty()
-            && manifest.key_server_url.is_none());
+    let has_any_drm_signal = has_inline_pssh
+        || playlist.encryption_method.is_some()
+        || playlist.key_uri.is_some();
+    let mut is_unencrypted_hls = !has_any_drm_signal
+        && (manifest.encryption_kind == AppleAssetEncryptionKind::ClearHlsFmp4
+            || manifest.key_server_url.is_none());
     let mut license_ok = false;
     if let Some(lic_r) = lic_res {
         match lic_r {
@@ -1348,23 +1412,34 @@ fn stream_cold_or_partial_track(
                 tracing::warn!("Widevine license attempt #1 failed for {song_uri}: {e}");
             }
         }
+    } else if has_inline_pssh {
+        is_unencrypted_hls = false;
+        tracing::warn!(
+            "Apple HLS playlist contains Widevine PSSH for {song_uri}, but no local CDM is active"
+        );
     } else if let Some(pssh_bytes) = find_widevine_pssh_in_mp4(&init_and_tenc.0) {
         is_unencrypted_hls = false;
-        match negotiate_apple_license_for_epoch(
-            &cdm_lib.library_path,
-            epoch,
-            &active_epoch,
-            &license_url,
-            &dev_token,
-            &user_token,
-            &active_song_id,
-            playlist,
-            &pssh_bytes,
-        ) {
-            Ok(()) => license_ok = true,
-            Err(e) => {
-                tracing::warn!("Widevine license attempt #1 failed for {song_uri}: {e}");
+        if let Some(ref cdm) = cdm_lib {
+            match negotiate_apple_license_for_epoch(
+                &cdm.library_path,
+                epoch,
+                &active_epoch,
+                &license_url,
+                &dev_token,
+                &user_token,
+                &active_song_id,
+                playlist,
+                &pssh_bytes,
+            ) {
+                Ok(()) => license_ok = true,
+                Err(e) => {
+                    tracing::warn!("Widevine license attempt #1 failed for {song_uri}: {e}");
+                }
             }
+        } else {
+            tracing::warn!(
+                "Apple init segment contains Widevine PSSH for {song_uri}, but no local CDM is active"
+            );
         }
     } else if is_unencrypted_hls {
         // DRM-free Uploaded / iTunes Match Cloud Locker fMP4 HLS stream (no Widevine PSSH in `.m3u8` or `init_segment`)
@@ -1373,7 +1448,7 @@ fn stream_cold_or_partial_track(
 
     // Self-healing fallback: if a library song's linked catalog ID was delisted (`status: -1003`),
     // resolve the active storefront pressing by `title + artist` from `library.db` and retry!
-    if !license_ok && active_epoch.load(Ordering::SeqCst) == epoch {
+    if !license_ok && cdm_lib.is_some() && active_epoch.load(Ordering::SeqCst) == epoch {
         if let Ok(Some(replacement_id)) =
             force_resolve_catalog_song_by_search(&settings, &song_uri)
         {
@@ -1390,13 +1465,13 @@ fn stream_cold_or_partial_track(
                             } else {
                                 find_widevine_pssh_in_mp4(&it2.0)
                             };
-                            if let Some(pssh_bytes) = pssh2 {
+                            if let (Some(pssh_bytes), Some(ref cdm)) = (pssh2, cdm_lib.as_ref()) {
                                 let lic_url2 =
                                     m2.key_server_url.clone().unwrap_or_else(|| {
                                         license_url.clone()
                                     });
                                 if negotiate_apple_license_for_epoch(
-                                    &cdm_lib.library_path,
+                                    &cdm.library_path,
                                     epoch,
                                     &active_epoch,
                                     &lic_url2,
@@ -1580,10 +1655,6 @@ pub fn load_native_apple_music_rodio_source(
     song_uri: &str,
     max_segments: Option<usize>,
 ) -> Result<DecryptedFmp4RodioSource> {
-    let cdm_lib = discover_widevine_cdm_library().ok_or_else(|| {
-        anyhow!("No local libwidevinecdm.so found for zero-browser native playback")
-    })?;
-
     let creds = AppleMusicSink::resolve_credentials(settings);
     let dev_token = AppleMusicSink::get_or_sign_developer_token(settings)?;
     let user_token = creds
@@ -1592,6 +1663,12 @@ pub fn load_native_apple_music_rodio_source(
         .ok_or_else(|| anyhow!("Apple Music user token is not configured"))?;
 
     let manifest = fetch_web_playback_manifest(settings, song_uri)?;
+    if manifest.encryption_kind == AppleAssetEncryptionKind::ClearDirectAudio {
+        let ext_hint = url_audio_ext_hint(&manifest.hls_playlist_url);
+        let raw_bytes = fetch_hls_bytes(&manifest.hls_playlist_url, None)?;
+        return DecryptedFmp4RodioSource::from_audio_bytes_with_hint(raw_bytes, ext_hint);
+    }
+
     let license_url = manifest
         .key_server_url
         .clone()
@@ -1603,17 +1680,35 @@ pub fn load_native_apple_music_rodio_source(
     let playlist = fetch_and_parse_apple_hls(&manifest.hls_playlist_url)?;
     let (init_bytes, tenc) = fetch_hls_init_and_tenc(&playlist)?;
 
-    let pssh_bytes = if !playlist.widevine_pssh_bytes.is_empty() {
-        playlist.widevine_pssh_bytes.clone()
+    let pssh_opt = if !playlist.widevine_pssh_bytes.is_empty() {
+        Some(playlist.widevine_pssh_bytes.clone())
     } else {
         find_widevine_pssh_in_mp4(&init_bytes)
-            .ok_or_else(|| anyhow!("No Widevine PSSH box found in HLS playlist or init segment"))?
     };
 
     let limit = max_segments
         .unwrap_or(playlist.segments.len())
         .min(playlist.segments.len());
     let mut raw_segments = download_hls_segment_slice(&playlist.segments[..limit])?;
+
+    let is_unencrypted_hls = playlist.encryption_method.is_none()
+        && playlist.key_uri.is_none()
+        && pssh_opt.is_none()
+        && manifest.key_server_url.is_none();
+
+    let clear_init = rewrite_init_segment_enca_to_clear(&init_bytes);
+    if is_unencrypted_hls {
+        return DecryptedFmp4RodioSource::from_clear_init_and_decrypted_segments(
+            &clear_init,
+            &raw_segments,
+        );
+    }
+
+    let cdm_lib = discover_widevine_cdm_library().ok_or_else(|| {
+        anyhow!("No local libwidevinecdm.so found for zero-browser native playback")
+    })?;
+    let pssh_bytes = pssh_opt
+        .ok_or_else(|| anyhow!("No Widevine PSSH box found in HLS playlist or init segment"))?;
 
     let song_id = manifest.song_id.clone();
     let playlist_clone = playlist.clone();
@@ -1633,7 +1728,6 @@ pub fn load_native_apple_music_rodio_source(
         Ok(raw_segments)
     })?;
 
-    let clear_init = rewrite_init_segment_enca_to_clear(&init_bytes);
     DecryptedFmp4RodioSource::from_clear_init_and_decrypted_segments(
         &clear_init,
         &decrypted_segments,

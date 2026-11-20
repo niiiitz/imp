@@ -455,8 +455,12 @@ impl AppleMusicSink {
     }
 
     /// Returns a valid Apple Music Developer Token (`ES256` JWT), either from a pre-signed
-    /// override or by signing a fresh token with the `.p8` private key.
+    /// override or by signing (and caching for 12h) a fresh token with the `.p8` private key.
     pub fn get_or_sign_developer_token(settings: &SimpSettings) -> Result<String> {
+        static CACHED_SIGNED_DEV_JWT: std::sync::OnceLock<
+            std::sync::Mutex<Option<(String, String, String, std::time::Instant)>>,
+        > = std::sync::OnceLock::new();
+
         let creds = Self::resolve_credentials(settings);
         if let Some(token) = creds.pre_signed_dev_token {
             return Ok(token);
@@ -466,6 +470,19 @@ impl AppleMusicSink {
                 "Missing APPLE_TEAM_ID or APPLE_KEY_ID in settings or .env"
             ));
         }
+
+        let cache = CACHED_SIGNED_DEV_JWT.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if let Some((ref c_team, ref c_key, ref c_jwt, signed_at)) = *guard {
+                if c_team == &creds.team_id
+                    && c_key == &creds.key_id
+                    && signed_at.elapsed() < std::time::Duration::from_secs(12 * 3600)
+                {
+                    return Ok(c_jwt.clone());
+                }
+            }
+        }
+
         let pem = creds.private_key_pem.ok_or_else(|| {
             anyhow!(
                 "Apple Music .p8 private key not found at '{}' (set APPLE_PRIVATE_KEY_PATH)",
@@ -473,7 +490,16 @@ impl AppleMusicSink {
             )
         })?;
 
-        sign_es256_developer_jwt(&creds.team_id, &creds.key_id, &pem, 86400 * 90)
+        let jwt = sign_es256_developer_jwt(&creds.team_id, &creds.key_id, &pem, 86400 * 90)?;
+        if let Ok(mut guard) = cache.lock() {
+            *guard = Some((
+                creds.team_id,
+                creds.key_id,
+                jwt.clone(),
+                std::time::Instant::now(),
+            ));
+        }
+        Ok(jwt)
     }
 }
 
@@ -498,59 +524,105 @@ impl crate::sinks::AudioSink for AppleMusicSink {
         self.restored_position_ms = start_pos_ms;
         self.worker_playing_ack = false;
 
-        if !uri.starts_with("applemusic:station:") && is_native_apple_cdm_preferred() {
-            if let Some(cdm_info) =
-                crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library()
-            {
-                tracing::info!(
-                    "AppleMusicSink: starting Native Rust Widevine CDM + PipeWire playback for {} (cdm={} [{}])",
-                    uri,
-                    cdm_info.library_path.display(),
-                    cdm_info.source_label
-                );
-                if let Ok(mut guard) = self.native_engine.lock() {
-                    let eng = guard.get_or_insert_with(LocalAudioEngine::new);
-                    eng.set_volume(self.volume);
-                    match eng.load_and_play(uri, start_pos_ms, epoch, internal_event_tx.clone()) {
-                        Ok(()) => {
-                            self.using_native_engine = true;
-                            self.worker_has_active_track = false;
-                            Self::kill_headless_widevine_worker();
-                            return Ok(());
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Native Widevine CDM playback failed ({e}); falling back to browser worker"
-                            );
-                            eng.release_pipewire_stream();
-                            self.using_native_engine = false;
-                        }
-                    }
-                }
-            } else {
+        let cdm_info_opt = if !uri.starts_with("applemusic:station:") && is_native_apple_cdm_preferred()
+        {
+            let info = crate::sinks::apple_native::cdm_host::discover_widevine_cdm_library();
+            if info.is_none() {
                 static LOGGED_NO_NATIVE_CDM: std::sync::atomic::AtomicBool =
                     std::sync::atomic::AtomicBool::new(false);
                 if !LOGGED_NO_NATIVE_CDM.swap(true, std::sync::atomic::Ordering::SeqCst) {
                     tracing::warn!(
-                        "AppleMusicSink: no compatible native Widevine CDM library found for arch={}; falling back to browser MusicKit worker",
+                        "AppleMusicSink: no compatible native Widevine CDM library found for arch={}; checking DRM-free native path or falling back to browser MusicKit worker",
                         std::env::consts::ARCH
                     );
                 }
-                if let Ok(mut guard) = self.native_engine.lock() {
-                    if let Some(ref mut eng) = *guard {
+            }
+            info
+        } else {
+            None
+        };
+
+        if let Some(cdm_info) = cdm_info_opt {
+            tracing::info!(
+                "AppleMusicSink: starting Native Rust Widevine CDM + PipeWire playback for {} (cdm={} [{}])",
+                uri,
+                cdm_info.library_path.display(),
+                cdm_info.source_label
+            );
+            if let Ok(mut guard) = self.native_engine.lock() {
+                let eng = guard.get_or_insert_with(LocalAudioEngine::new);
+                eng.set_volume(self.volume);
+                match eng.load_and_play(uri, start_pos_ms, epoch, internal_event_tx.clone()) {
+                    Ok(()) => {
+                        self.using_native_engine = true;
+                        self.worker_has_active_track = false;
+                        Self::kill_headless_widevine_worker();
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Native Widevine CDM playback failed ({e}); falling back to browser worker"
+                        );
                         eng.release_pipewire_stream();
+                        self.using_native_engine = false;
                     }
                 }
-                self.using_native_engine = false;
             }
-        } else {
-            if let Ok(mut guard) = self.native_engine.lock() {
-                if let Some(ref mut eng) = *guard {
-                    eng.release_pipewire_stream();
+        } else if !uri.starts_with("applemusic:station:") {
+            let clean_id = crate::sinks::apple_api::extract_clean_apple_song_id(uri);
+            if clean_id.starts_with("i.") {
+                let settings = crate::library::vdf::load_or_create_settings();
+                match crate::sinks::apple_api::try_fetch_clear_library_playback_manifest(
+                    &settings, uri,
+                ) {
+                    Ok(Some(clear_asset)) => {
+                        tracing::info!(
+                            "AppleMusicSink: starting zero-browser DRM-free native playback for {} (flavor={}, kind={:?})",
+                            uri,
+                            clear_asset.flavor,
+                            clear_asset.encryption_kind
+                        );
+                        if let Ok(mut guard) = self.native_engine.lock() {
+                            let eng = guard.get_or_insert_with(LocalAudioEngine::new);
+                            eng.set_volume(self.volume);
+                            match eng.load_and_play(
+                                uri,
+                                start_pos_ms,
+                                epoch,
+                                internal_event_tx.clone(),
+                            ) {
+                                Ok(()) => {
+                                    self.using_native_engine = true;
+                                    self.worker_has_active_track = false;
+                                    Self::kill_headless_widevine_worker();
+                                    return Ok(());
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Zero-browser DRM-free native playback failed ({e}); falling back to browser worker"
+                                    );
+                                    eng.release_pipewire_stream();
+                                    self.using_native_engine = false;
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::debug!(
+                            "Clear Cloud Library manifest probe skipped for {uri}: {e}"
+                        );
+                    }
                 }
             }
-            self.using_native_engine = false;
         }
+
+        if let Ok(mut guard) = self.native_engine.lock() {
+            if let Some(ref mut eng) = *guard {
+                eng.release_pipewire_stream();
+            }
+        }
+        self.using_native_engine = false;
 
         self.worker_has_active_track = true;
         self.emit_load_and_play(broadcast_tx, uri, start_pos_ms);
@@ -690,11 +762,14 @@ pub fn sign_es256_developer_jwt(
     let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload_json)?);
     let signing_input = format!("{header_b64}.{payload_b64}");
 
-    // Write key to a secure temporary file in /tmp with 0600 permissions for openssl signing
+    // Write key to a secure unique temporary file in /tmp with 0600 permissions for openssl signing
+    static TMP_KEY_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = TMP_KEY_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp_key_path = std::env::temp_dir().join(format!(
-        ".simp_apple_key_{}_{}.p8",
+        ".simp_apple_key_{}_{}_{}.p8",
         std::process::id(),
-        now
+        now,
+        seq
     ));
     {
         let mut f = std::fs::File::create(&tmp_key_path)

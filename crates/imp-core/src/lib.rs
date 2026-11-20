@@ -4,6 +4,7 @@ pub mod dsp;
 pub mod factoids;
 pub mod gamepad;
 pub mod http_pool;
+pub mod liberation;
 pub mod library;
 pub mod lyrics;
 pub mod mpris;

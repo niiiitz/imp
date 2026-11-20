@@ -994,17 +994,8 @@ impl Source for SymphoniaFileSource {
     }
 }
 
-fn load_local_settings_vdf() -> imp_protocol::SimpSettings {
-    let path = dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("simp")
-        .join("settings.vdf");
-    if let Ok(text) = std::fs::read_to_string(&path) {
-        if let Ok(parsed) = keyvalues_serde::from_str::<imp_protocol::SimpSettings>(&text) {
-            return parsed;
-        }
-    }
-    imp_protocol::SimpSettings::default()
+pub(crate) fn load_local_settings_vdf() -> imp_protocol::SimpSettings {
+    crate::library::vdf::load_or_create_settings()
 }
 
 

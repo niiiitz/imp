@@ -21,6 +21,7 @@ import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { BrowserTarget } from './PlayerView';
 import { ImpIcon } from '../components/icons/ImpIcon';
 import { FolderChooserModal } from '../components/FolderChooserModal';
+import { LiberationModal } from '../components/LiberationModal';
 
 interface DaemonPerfSnapshot {
   cpu_percent: number;
@@ -150,6 +151,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [scAuthOpen, setScAuthOpen] = useState(false);
   const [addPathOpen, setAddPathOpen] = useState(false);
   const [folderChooserOpen, setFolderChooserOpen] = useState(false);
+  const [liberationModalOpen, setLiberationModalOpen] = useState(false);
   const [confirmPurgeSource, setConfirmPurgeSource] = useState<string | null>(null);
 
   const handlePurgeSource = async (source: 'local' | 'apple' | 'soundcloud' | 'ia', label: string) => {
@@ -340,6 +342,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Determine if a sub-level inside Folders & Accounts or Brightness scrub is open so `B` / `ESC` walks back cleanly
   const hasNestedChildOpen =
+    liberationModalOpen ||
     brightnessScrubActive ||
     confirmHardReset ||
     addPathOpen ||
@@ -348,7 +351,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     scAuthOpen;
 
   const handleWalkBackNested = () => {
-    if (brightnessScrubActive) {
+    if (liberationModalOpen) {
+      setLiberationModalOpen(false);
+    } else if (brightnessScrubActive) {
       setBrightnessScrubActive(false);
     } else if (confirmHardReset) {
       setConfirmHardReset(false);
@@ -622,20 +627,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {appleBusy ? 'Working...' : 'Authorize Apple ID'}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await disconnectAppleMusicCleanSlate(showToast);
-                          const updated = await defaultSimpClient
-                            .getAppleMusicAuthConfig()
-                            .catch(() => null);
-                          if (updated) setAppleAuthCfg(updated);
-                        }}
-                        style={compactDangerBtnStyle}
-                      >
-                        <ImpIcon name="sign-out" size={11} style={{ marginRight: 4 }} />
-                        Sign Out (Keep DB)
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setLiberationModalOpen(true)}
+                          style={{
+                            ...compactPrimaryBtnStyle,
+                            minHeight: 28,
+                            padding: '0 9px',
+                            background: 'rgba(16, 185, 129, 0.14)',
+                            borderColor: 'rgba(52, 211, 153, 0.5)',
+                            color: '#6ee7b7',
+                          }}
+                        >
+                          Project Liberation Census
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await disconnectAppleMusicCleanSlate(showToast);
+                            const updated = await defaultSimpClient
+                              .getAppleMusicAuthConfig()
+                              .catch(() => null);
+                            if (updated) setAppleAuthCfg(updated);
+                          }}
+                          style={compactDangerBtnStyle}
+                        >
+                          <ImpIcon name="sign-out" size={11} style={{ marginRight: 4 }} />
+                          Sign Out (Keep DB)
+                        </button>
+                      </>
                     )}
                     <button
                       type="button"
@@ -1576,6 +1597,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
           }, 30);
         }}
+      />
+
+      <LiberationModal
+        open={liberationModalOpen}
+        onClose={() => setLiberationModalOpen(false)}
+        showToast={showToast}
       />
     </div>
   );
