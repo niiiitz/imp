@@ -325,8 +325,8 @@ fn register_delegate_class() -> &'static Class {
     static DELEGATE_CLASS: OnceLock<&'static Class> = OnceLock::new();
     DELEGATE_CLASS.get_or_init(|| unsafe {
         let superclass = class!(NSObject);
-        let mut decl = ClassDecl::new("SimpMacAppDelegate", superclass)
-            .expect("Failed to declare SimpMacAppDelegate");
+        let mut decl = ClassDecl::new("ImpMacAppDelegate", superclass)
+            .expect("Failed to declare ImpMacAppDelegate");
 
         decl.add_method(
             sel!(applicationShouldHandleReopen:hasVisibleWindows:),
@@ -512,7 +512,7 @@ pub fn ensure_inprocess_or_existing_daemon() {
     }
 
     let _ = std::thread::Builder::new()
-        .name("simp-macos-daemon".to_string())
+        .name("imp-macos-daemon".to_string())
         .spawn(|| {
             imp_core::prefer_efficiency_core_for_current_thread();
             let rt = tokio::runtime::Builder::new_multi_thread()

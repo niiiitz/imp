@@ -4,6 +4,11 @@ import {
   AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,
 } from '../drivers/AppleMusicDriver';
+import {
+  isAppFullscreenActive,
+  setAppFullscreen,
+  toggleAppFullscreen,
+} from '../api/servicesCacheApi';
 
 export type OskTargetKind = 'search' | 'folder' | 'playlist' | null;
 
@@ -1360,8 +1365,8 @@ export function useGamepadNavigation({
               videoEnterTheatre.click();
               break;
             }
-            if (document.fullscreenElement) {
-              document.exitFullscreen().catch(() => {});
+            if (isAppFullscreenActive()) {
+              setAppFullscreen(false);
               break;
             }
             if (window.parent && window.parent !== window) {
@@ -1674,10 +1679,8 @@ export function useGamepadNavigation({
         e.stopPropagation();
         if (view === 'lock') {
           window.dispatchEvent(new CustomEvent('simp-player-fullscreen-toggle'));
-        } else if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
         } else {
-          document.documentElement.requestFullscreen?.().catch(() => {});
+          toggleAppFullscreen();
         }
       } else if (e.key === 'n' || e.key === 'N' || e.key === '>') {
         e.preventDefault();

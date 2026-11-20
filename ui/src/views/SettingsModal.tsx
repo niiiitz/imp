@@ -22,6 +22,7 @@ import { BrowserTarget } from './PlayerView';
 import { ImpIcon } from '../components/icons/ImpIcon';
 import { FolderChooserModal } from '../components/FolderChooserModal';
 import { LiberationModal } from '../components/LiberationModal';
+import { resolveDaemonUrl } from '../api/servicesCacheApi';
 
 interface DaemonPerfSnapshot {
   cpu_percent: number;
@@ -1266,6 +1267,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 if (e.shiftKey) {
                   defaultSimpClient.pause();
                   defaultSimpClient.restartDaemon();
+                  fetch(resolveDaemonUrl('/api/v1/transport'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'restart_daemon' }),
+                    keepalive: true,
+                  }).catch(() => {});
                   showToast('Restarting IMP background service...');
                   closeSettingsDrawer();
                   if (window.parent && window.parent !== window) {
@@ -1276,8 +1283,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   return;
                 }
                 defaultSimpClient.shutdownDaemon();
+                fetch(resolveDaemonUrl('/api/v1/transport'), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ command: 'shutdown_daemon' }),
+                  keepalive: true,
+                }).catch(() => {});
                 closeSettingsDrawer();
-                window.setTimeout(() => dismissConsole(), 250);
+                window.setTimeout(() => dismissConsole(), 180);
               }}
               style={{
                 minHeight: 46,

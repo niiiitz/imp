@@ -21,7 +21,9 @@ pub fn run_windows_apple_worker() {
     }
 }
 
-fn query_running_daemon_health(addr: &SocketAddr) -> Option<(String, Option<u32>)> {
+fn query_running_daemon_health(
+    addr: &SocketAddr,
+) -> Option<(String, Option<u32>, Option<String>)> {
     let mut stream = TcpStream::connect_timeout(addr, Duration::from_millis(150)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
@@ -34,7 +36,11 @@ fn query_running_daemon_health(addr: &SocketAddr) -> Option<(String, Option<u32>
     let val: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
     let ver = val.get("version")?.as_str()?.to_string();
     let pid = val.get("pid").and_then(|v| v.as_u64()).map(|n| n as u32);
-    Some((ver, pid))
+    let platform = val
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Some((ver, pid, platform))
 }
 
 /// Ensures `simp --daemon` is listening on `127.0.0.1:18888`.
@@ -64,13 +70,26 @@ pub fn ensure_daemon_running() {
         }
     }
     let addr = SocketAddr::from(([127, 0, 0, 1], 18888));
-    if let Some((running_ver, running_pid)) = query_running_daemon_health(&addr) {
-        if running_ver == env!("CARGO_PKG_VERSION") {
+    if let Some((running_ver, running_pid, _running_platform)) = query_running_daemon_health(&addr)
+    {
+        let same_version = running_ver == env!("CARGO_PKG_VERSION");
+        #[cfg(target_os = "windows")]
+        let platform_ok = _running_platform.as_deref().unwrap_or("windows") == "windows";
+        #[cfg(not(target_os = "windows"))]
+        let platform_ok = true;
+
+        if same_version && platform_ok {
             return;
         }
-        // A stale daemon from a previous version is listening on :18888 — replace it cleanly
         #[cfg(target_os = "windows")]
         {
+            if _running_platform.as_deref() == Some("linux") {
+                eprintln!(
+                    "⚠️  Port 18888 is occupied by a Linux/WSL daemon (pid={running_pid:?}, version={running_ver}). \
+                     Stop it in WSL (`systemctl --user disable --now simp.service imp.service`) so native Windows IMP daemon & system tray can bind :18888."
+                );
+                return;
+            }
             imp_core::close_windows_headless_worker_windows();
             if let Some(pid) = running_pid {
                 let mut tk = Command::new("taskkill");

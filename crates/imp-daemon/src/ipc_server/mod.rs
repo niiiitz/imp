@@ -230,6 +230,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
             get(library_lyrics_status_handler),
         )
         .route("/api/dsp", get(dsp_get_handler).post(dsp_post_handler))
+        .route("/api/dsp/worker-status", post(dsp_worker_status_handler))
         .route(
             "/api/library/playlists/convert-to-hybrid",
             post(convert_playlist_to_hybrid_handler),
@@ -312,10 +313,10 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
     let lan_ips = detect_lan_ips();
     if let Some(primary_ip) = lan_ips.first() {
         tracing::info!(
-            "SIMP Daemon listening on http://127.0.0.1:18888 and LAN Companion http://{primary_ip}:18888/pair"
+            "IMP Daemon listening on http://127.0.0.1:18888 and LAN Companion http://{primary_ip}:18888/pair"
         );
     } else {
-        tracing::info!("SIMP Daemon IPC, Art & UI Server listening on http://{addr}");
+        tracing::info!("IMP Daemon IPC, Art & UI Server listening on http://{addr}");
     }
     let mut bind_err = None;
     let mut listener_opt = None;
@@ -472,6 +473,8 @@ async fn transport_handler(
         "pause" => Some(AudioCommand::Pause),
         "next" => Some(AudioCommand::Next),
         "previous" => Some(AudioCommand::Previous),
+        "shutdown_daemon" => Some(AudioCommand::ShutdownDaemon),
+        "restart_daemon" => Some(AudioCommand::RestartDaemon),
         _ => None,
     };
     if let Some(c) = cmd {

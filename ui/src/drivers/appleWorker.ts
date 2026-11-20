@@ -1,11 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { defaultSimpClient } from '@simp/client';
+import { defaultSimpClient, type DspConfigEventPayload } from '@simp/client';
 import {
   checkWidevineDrm,
   ensureMusicKitConfigured,
   mapAppleItemToTrack,
   resolveReplacementCatalogSongId,
 } from './appleApi';
+import { AppleWorkerWebAudioDsp } from './appleWorkerDsp';
 
 /**
  * React hook that binds the MusicKit JS v3 EME playback worker to `simp --daemon` (`AudioOrchestrator`).
@@ -23,6 +24,27 @@ export function useAppleMusicWorker(): void {
 
   useEffect(() => {
     let cancelled = false;
+    const isDedicatedWorker =
+      typeof window !== 'undefined' &&
+      (new URLSearchParams(window.location.search).get('worker') === 'apple' ||
+        window.location.pathname.startsWith('/apple-worker'));
+
+    const workerDsp = new AppleWorkerWebAudioDsp(isDedicatedWorker);
+    let latestDspConfig: DspConfigEventPayload = {
+      eq_enabled: false,
+      eq_preset: 'flat',
+      preamp_db: 0,
+      bands_db: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      vocal_mode: 'off',
+      vocal_strength: 0.9,
+    };
+    const syncDspNow = () => {
+      const audioEl =
+        typeof document !== 'undefined'
+          ? (document.getElementById('apple-music-player') as HTMLAudioElement | null)
+          : null;
+      workerDsp.sync(audioEl, latestDspConfig);
+    };
 
     const bindMusicKitEvents = (mk: any) => {
       if (listenersBoundRef.current || !window.MusicKit) return;
@@ -67,6 +89,7 @@ export function useAppleMusicWorker(): void {
 
         if (st === States.playing) {
           isLoadingRef.current = false;
+          syncDspNow();
           reportCurrentItemIfAny('playing');
           return;
         }
@@ -77,8 +100,10 @@ export function useAppleMusicWorker(): void {
         }
 
         if (st === States.paused) {
+          workerDsp.reportPausedOrInactive();
           defaultSimpClient.reportAppleWorkerEvent('paused', posMs, null, durMs);
         } else if (st === States.completed || st === States.ended) {
+          workerDsp.reportPausedOrInactive();
           // Deduplicate `completed` (10) followed by `ended` (6) for the same track load
           if (lastEndedSeqRef.current !== loadSeqRef.current) {
             lastEndedSeqRef.current = loadSeqRef.current;
@@ -101,18 +126,21 @@ export function useAppleMusicWorker(): void {
       });
     };
 
-    const isDedicatedWorker =
-      typeof window !== 'undefined' &&
-      (new URLSearchParams(window.location.search).get('worker') === 'apple' ||
-        window.location.pathname.startsWith('/apple-worker'));
-
     let lastAppliedSinkLabel = '';
+    let deviceLabelsUnlocked = false;
     const syncWorkerAudioSink = async () => {
       if (!isDedicatedWorker || typeof window === 'undefined') return;
       const audioEl = document.getElementById('apple-music-player') as
         | (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> })
         | null;
       if (!audioEl || typeof audioEl.setSinkId !== 'function') return;
+      if (workerDsp.isActive()) {
+        if (lastAppliedSinkLabel) {
+          lastAppliedSinkLabel = '';
+          await audioEl.setSinkId('').catch(() => {});
+        }
+        return;
+      }
       try {
         const res = await fetch('/api/dsp');
         const json = await res.json().catch(() => null);
@@ -123,8 +151,21 @@ export function useAppleMusicWorker(): void {
           await audioEl.setSinkId('').catch(() => {});
           return;
         }
-        const devices = await navigator.mediaDevices?.enumerateDevices?.();
+        let devices = await navigator.mediaDevices?.enumerateDevices?.();
         if (!Array.isArray(devices)) return;
+        const hasOutputLabels = devices.some(
+          (d) => d.kind === 'audiooutput' && d.label.trim().length > 0
+        );
+        if (!hasOutputLabels && !deviceLabelsUnlocked && navigator.mediaDevices?.getUserMedia) {
+          deviceLabelsUnlocked = true;
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((t) => t.stop());
+            devices = (await navigator.mediaDevices.enumerateDevices?.()) ?? devices;
+          } catch {
+            // Continue with whatever labels WebView2 exposed
+          }
+        }
         const needle = desiredLabel.toLowerCase();
         const target = devices.find(
           (d) =>
@@ -143,8 +184,31 @@ export function useAppleMusicWorker(): void {
     const sinkPollTimer = isDedicatedWorker
       ? window.setInterval(() => {
           void syncWorkerAudioSink();
-        }, 3000)
+        }, 1500)
       : null;
+
+    fetch('/health')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled) return;
+        workerDsp.setEnabledForPlatform(j?.platform === 'windows');
+        syncDspNow();
+      })
+      .catch(() => {});
+
+    fetch('/api/dsp')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j?.data) return;
+        latestDspConfig = j.data as DspConfigEventPayload;
+        syncDspNow();
+      })
+      .catch(() => {});
+
+    const unsubDsp = defaultSimpClient.subscribeDsp((cfg) => {
+      latestDspConfig = cfg;
+      syncDspNow();
+    });
 
     const ensureInstance = async (): Promise<any | null> => {
       if (mkRef.current) return mkRef.current;
@@ -382,6 +446,7 @@ export function useAppleMusicWorker(): void {
               if (audioEl.paused && mk.playbackState !== States?.loading && mk.playbackState !== States?.waiting) {
                 await audioEl.play().catch(() => {});
               }
+              syncDspNow();
               void syncWorkerAudioSink();
             }
 
@@ -433,9 +498,11 @@ export function useAppleMusicWorker(): void {
             if (audioEl && audioEl.paused) {
               await audioEl.play().catch(() => {});
             }
+            syncDspNow();
             break;
           }
           case 'pause':
+            workerDsp.reportPausedOrInactive();
             await mk.pause();
             break;
           case 'seek':
@@ -464,8 +531,10 @@ export function useAppleMusicWorker(): void {
       if (sinkPollTimer !== null) {
         window.clearInterval(sinkPollTimer);
       }
+      unsubDsp();
       unsubState();
       unsubSink();
+      workerDsp.dispose();
     };
   }, []);
 }

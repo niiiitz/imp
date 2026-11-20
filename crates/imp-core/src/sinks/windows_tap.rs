@@ -86,11 +86,18 @@ pub(crate) fn select_windows_virtual_loopback_sink(
     const VIRTUAL_KEYWORDS: &[&str] = &[
         "vb-audio",
         "cable input",
+        "cable-a",
+        "cable-b",
+        "hi-fi cable",
         "voicemeeter",
         "virtual cable",
         "virtual audio",
+        "steam streaming",
         "steelseries sonar",
         "virtual desktop audio",
+        "oculus virtual",
+        "wave link",
+        "line 1 (virtual",
     ];
 
     endpoints
@@ -196,6 +203,10 @@ pub(crate) fn push_wasapi_pcm_packet(
     max_peak
 }
 
+#[cfg(target_os = "windows")]
+const AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM_RAW: u32 = 0x8000_0000;
+#[cfg(target_os = "windows")]
+const AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY_RAW: u32 = 0x0800_0000;
 #[cfg(target_os = "windows")]
 const WAVE_FORMAT_PCM_TAG: u16 = 1;
 #[cfg(target_os = "windows")]
@@ -372,7 +383,7 @@ impl WasapiCaptureHandle {
                     is_silent,
                     &scratch_ring,
                     tap_buffer,
-                    true,
+                    dsp_active,
                 )
             };
             peak_seen = Some(peak_seen.unwrap_or(0.0).max(peak));
@@ -384,12 +395,9 @@ impl WasapiCaptureHandle {
 }
 
 #[cfg(target_os = "windows")]
-unsafe fn open_process_loopback_capture(target_pid: u32) -> Option<WasapiCaptureHandle> {
-    if target_pid == 0 {
-        return None;
-    }
-
-    let activate_event = CreateEventW(None, TRUE, FALSE, PCWSTR::null()).ok()?;
+unsafe fn activate_process_loopback_client(target_pid: u32) -> Result<IAudioClient, String> {
+    let activate_event = CreateEventW(None, TRUE, FALSE, PCWSTR::null())
+        .map_err(|e| format!("CreateEventW failed: {e}"))?;
     let handler_raw = Box::into_raw(Box::new(ProcessLoopbackCompletion {
         vtable: &COMPLETION_HANDLER_VTBL,
         ref_count: AtomicU32::new(1),
@@ -424,75 +432,134 @@ unsafe fn open_process_loopback_capture(target_pid: u32) -> Option<WasapiCapture
         &handler,
     ) {
         Ok(o) => o,
-        Err(_) => {
+        Err(e) => {
             let _ = CloseHandle(activate_event);
-            return None;
+            return Err(format!("ActivateAudioInterfaceAsync failed: {e}"));
         }
     };
 
     let wait_res = WaitForSingleObject(activate_event, 4_000);
     let _ = CloseHandle(activate_event);
     if wait_res != WAIT_OBJECT_0 {
-        return None;
+        return Err(format!(
+            "Process loopback activation timed out (wait={:?})",
+            wait_res.0
+        ));
     }
 
     let mut hr = S_OK;
     let mut activated: Option<IUnknown> = None;
-    if op.GetActivateResult(&mut hr, &mut activated).is_err() || hr.is_err() {
-        return None;
+    if let Err(e) = op.GetActivateResult(&mut hr, &mut activated) {
+        return Err(format!("GetActivateResult failed: {e}"));
     }
-    let audio_client: IAudioClient = activated?.cast().ok()?;
+    if hr.is_err() {
+        return Err(format!(
+            "Process loopback activation returned HRESULT 0x{:08X}",
+            hr.0 as u32
+        ));
+    }
+    activated
+        .ok_or_else(|| "Activated process loopback interface was null".to_string())?
+        .cast::<IAudioClient>()
+        .map_err(|e| format!("Cast to IAudioClient failed: {e}"))
+}
 
-    let wfx = WAVEFORMATEX {
-        wFormatTag: WAVE_FORMAT_IEEE_FLOAT_TAG,
-        nChannels: 2,
-        nSamplesPerSec: 48_000,
-        nAvgBytesPerSec: 48_000 * 2 * 4,
-        nBlockAlign: 8,
-        wBitsPerSample: 32,
-        cbSize: 0,
-    };
+#[cfg(target_os = "windows")]
+unsafe fn open_process_loopback_capture(target_pid: u32) -> Result<WasapiCaptureHandle, String> {
+    if target_pid == 0 {
+        return Err("Target worker PID is 0".to_string());
+    }
 
-    if audio_client
-        .Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+    let base_flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+    let autoconvert_flags =
+        base_flags | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM_RAW | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY_RAW;
+    let candidates: [(u16, u32, u16, bool, u32, i64, &str); 5] = [
+        (WAVE_FORMAT_IEEE_FLOAT_TAG, 48_000, 32, true, base_flags, 0, "f32/48k/event"),
+        (
+            WAVE_FORMAT_IEEE_FLOAT_TAG,
+            48_000,
+            32,
+            true,
+            autoconvert_flags,
+            0,
+            "f32/48k/autoconvert",
+        ),
+        (WAVE_FORMAT_PCM_TAG, 48_000, 16, false, base_flags, 0, "i16/48k/event"),
+        (WAVE_FORMAT_PCM_TAG, 44_100, 16, false, base_flags, 0, "i16/44.1k/event"),
+        (
+            WAVE_FORMAT_IEEE_FLOAT_TAG,
+            48_000,
+            32,
+            true,
+            base_flags,
             200_000,
+            "f32/48k/20ms",
+        ),
+    ];
+
+    let mut last_err = String::from("No process loopback format succeeded");
+    for (tag, sample_rate, bits_per_sample, is_float, flags, buf_hns, label) in candidates {
+        let audio_client = activate_process_loopback_client(target_pid)?;
+        let channels = 2u16;
+        let block_align = channels * (bits_per_sample / 8);
+        let wfx = WAVEFORMATEX {
+            wFormatTag: tag,
+            nChannels: channels,
+            nSamplesPerSec: sample_rate,
+            nAvgBytesPerSec: sample_rate * (block_align as u32),
+            nBlockAlign: block_align,
+            wBitsPerSample: bits_per_sample,
+            cbSize: 0,
+        };
+
+        if let Err(e) = audio_client.Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            flags,
+            buf_hns,
             0,
             &wfx as *const WAVEFORMATEX,
             None,
-        )
-        .is_err()
-    {
-        return None;
-    }
-
-    let packet_event = CreateEventW(None, FALSE, FALSE, PCWSTR::null()).ok()?;
-    if audio_client.SetEventHandle(packet_event).is_err() {
-        let _ = CloseHandle(packet_event);
-        return None;
-    }
-    let capture_client: IAudioCaptureClient = match audio_client.GetService() {
-        Ok(c) => c,
-        Err(_) => {
-            let _ = CloseHandle(packet_event);
-            return None;
+        ) {
+            last_err = format!("IAudioClient::Initialize({label}) failed: {e}");
+            continue;
         }
-    };
-    if audio_client.Start().is_err() {
-        let _ = CloseHandle(packet_event);
-        return None;
+
+        let packet_event = match CreateEventW(None, FALSE, FALSE, PCWSTR::null()) {
+            Ok(ev) => ev,
+            Err(e) => {
+                return Err(format!("CreateEventW(packet) failed: {e}"));
+            }
+        };
+        if let Err(e) = audio_client.SetEventHandle(packet_event) {
+            let _ = CloseHandle(packet_event);
+            last_err = format!("SetEventHandle({label}) failed: {e}");
+            continue;
+        }
+        let capture_client: IAudioCaptureClient = match audio_client.GetService() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = CloseHandle(packet_event);
+                return Err(format!("GetService(IAudioCaptureClient) failed: {e}"));
+            }
+        };
+        if let Err(e) = audio_client.Start() {
+            let _ = CloseHandle(packet_event);
+            last_err = format!("IAudioClient::Start({label}) failed: {e}");
+            continue;
+        }
+
+        return Ok(WasapiCaptureHandle {
+            _audio_client: audio_client,
+            capture_client,
+            event: packet_event,
+            sample_rate,
+            channels: channels as usize,
+            bits_per_sample,
+            is_float,
+        });
     }
 
-    Some(WasapiCaptureHandle {
-        _audio_client: audio_client,
-        capture_client,
-        event: packet_event,
-        sample_rate: 48_000,
-        channels: 2,
-        bits_per_sample: 32,
-        is_float: true,
-    })
+    Err(last_err)
 }
 
 #[cfg(target_os = "windows")]
@@ -766,7 +833,7 @@ impl WindowsAudioTap {
         }
 
         let _ = std::thread::Builder::new()
-            .name("simp-windows-tap".to_string())
+            .name("imp-windows-tap".to_string())
             .spawn(move || {
                 crate::prefer_efficiency_core_for_current_thread();
 
@@ -790,6 +857,8 @@ impl WindowsAudioTap {
                 let mut last_tick_emit_at = Instant::now();
                 let mut recent_peak = 0.0f32;
                 let mut last_nonzero_at = Instant::now() - Duration::from_secs(30);
+                let mut device_nonzero_at: Option<Instant> = None;
+                let mut last_proc_error: Option<String> = None;
 
                 while !stop_flag.load(Ordering::Acquire) {
                     let now = Instant::now();
@@ -801,25 +870,67 @@ impl WindowsAudioTap {
                             active_tree_pids = unsafe { collect_process_tree_pids(&roots) };
                             let candidate_pid = roots[0];
                             if proc_capture.is_none() || candidate_pid != active_root_pid {
-                                proc_capture = unsafe { open_process_loopback_capture(candidate_pid) };
-                                if proc_capture.is_some() {
-                                    active_root_pid = candidate_pid;
+                                let mut opened_cap: Option<(u32, WasapiCaptureHandle)> = None;
+                                let mut latest_err: Option<String> = None;
+                                for &pid in &roots {
+                                    match unsafe { open_process_loopback_capture(pid) } {
+                                        Ok(cap) => {
+                                            opened_cap = Some((pid, cap));
+                                            break;
+                                        }
+                                        Err(err) => {
+                                            latest_err = Some(err);
+                                        }
+                                    }
+                                }
+                                if let Some((pid, cap)) = opened_cap {
+                                    tap_buffer.set_sample_rate(cap.sample_rate);
+                                    proc_capture = Some(cap);
+                                    active_root_pid = pid;
                                     pre_mute_supported = None;
+                                    last_proc_error = None;
+                                } else if let Some(err) = latest_err {
+                                    if last_proc_error.as_deref() != Some(&err) {
+                                        tracing::warn!(
+                                            "WindowsAudioTap: process loopback open failed for pid(s) {:?}: {}",
+                                            roots,
+                                            err
+                                        );
+                                        last_proc_error = Some(err);
+                                    }
                                 }
                             }
                         }
                     }
 
-                    let use_device_loopback = device_capture.is_some();
-                    if let Some(ref cap) = device_capture {
-                        let _ = unsafe { WaitForSingleObject(cap.event, 45) };
-                        let dsp_on = active_dsp_out.is_some();
-                        if let Some(peak) =
-                            unsafe { cap.drain_packets(&ring, &tap_buffer, dsp_on, true) }
-                        {
-                            recent_peak = recent_peak.max(peak);
-                            if peak > 1e-5 {
-                                last_nonzero_at = now;
+                    let worker_dsp_active = crate::sinks::tap_dsp::is_worker_native_dsp_active();
+                    if worker_dsp_active {
+                        if let Some(out) = active_dsp_out.take() {
+                            out.stop();
+                        }
+                        if device_capture.is_some() {
+                            device_capture = None;
+                            device_nonzero_at = None;
+                        }
+                        if sessions_muted {
+                            unsafe { set_worker_sessions_muted(&active_tree_pids, false) };
+                            sessions_muted = false;
+                        }
+                    }
+
+                    let use_device_loopback = !worker_dsp_active && device_capture.is_some();
+                    if use_device_loopback {
+                        if let Some(ref cap) = device_capture {
+                            let _ = unsafe { WaitForSingleObject(cap.event, 45) };
+                            let dsp_on = active_dsp_out.is_some();
+                            if let Some(peak) =
+                                unsafe { cap.drain_packets(&ring, &tap_buffer, dsp_on, true) }
+                            {
+                                recent_peak = recent_peak.max(peak);
+                                if peak > 1e-5 {
+                                    last_nonzero_at = now;
+                                    device_nonzero_at = Some(now);
+                                }
                             }
                         }
                     }
@@ -839,14 +950,14 @@ impl WindowsAudioTap {
                                 }
                             }
                         }
-                    } else {
+                    } else if !use_device_loopback {
                         std::thread::sleep(Duration::from_millis(80));
                     }
 
                     let want_dsp = !global_dsp_state().is_bypassed();
                     let audio_live = now.duration_since(last_nonzero_at) < Duration::from_secs(10);
 
-                    if want_dsp && audio_live {
+                    if !worker_dsp_active && want_dsp && audio_live {
                         // Step 2a: Empirical Windows 11 pre-mute loopback spike
                         if pre_mute_supported.is_none()
                             && proc_capture.is_some()
@@ -947,8 +1058,24 @@ impl WindowsAudioTap {
                             if let Some(ref ep) = selected_virtual_sink {
                                 if device_capture.is_none() {
                                     device_capture = unsafe { open_device_loopback_capture(&ep.id) };
+                                    device_nonzero_at = None;
                                 }
-                                if let Some(ref cap) = device_capture {
+                                let device_live = device_nonzero_at
+                                    .map(|t| now.duration_since(t) < Duration::from_secs(6))
+                                    .unwrap_or(false);
+                                if !device_live {
+                                    set_global_tap_status(AudioTapStatusSnapshot {
+                                        platform: "windows".to_string(),
+                                        mode: "windows_virtual_sink_pending".to_string(),
+                                        dsp_active: false,
+                                        spectrum_active: proc_capture.is_some(),
+                                        worker_sink_label: Some(ep.friendly_name.clone()),
+                                        detail: format!(
+                                            "Routing Apple Music worker to {} for EQ...",
+                                            ep.friendly_name
+                                        ),
+                                    });
+                                } else if let Some(ref cap) = device_capture {
                                     if let Some(out) = TapDspOutput::open(
                                         ring.clone(),
                                         tap_buffer.clone(),
@@ -976,17 +1103,32 @@ impl WindowsAudioTap {
                                     dsp_active: false,
                                     spectrum_active: true,
                                     worker_sink_label: None,
-                                    detail: "Windows muted DRM sessions before Process Loopback. Spectrum works live; for EQ on Apple DRM streams install VB-Audio Virtual Cable (or set IMP_WINDOWS_TAP_SINK), or play Uploaded/Matched DRM-free tracks via native Rust audio."
+                                    detail: "Windows muted DRM sessions before Process Loopback. Spectrum works live; install VB-Audio Virtual Cable / Steam Streaming Speakers (or set IMP_WINDOWS_TAP_SINK), or play DRM-free tracks via native Rust audio."
                                         .to_string(),
                                 });
                             }
                         }
-                    } else if !want_dsp {
+                    } else if !worker_dsp_active && want_dsp && proc_capture.is_none() {
+                        if let Some(ref err) = last_proc_error {
+                            set_global_tap_status(AudioTapStatusSnapshot {
+                                platform: "windows".to_string(),
+                                mode: "windows_tap_unavailable".to_string(),
+                                dsp_active: false,
+                                spectrum_active: false,
+                                worker_sink_label: None,
+                                detail: format!(
+                                    "Windows Process Loopback unavailable ({}). Spectrum/WASAPI EQ waiting for active worker.",
+                                    err
+                                ),
+                            });
+                        }
+                    } else if !worker_dsp_active && !want_dsp {
                         if let Some(out) = active_dsp_out.take() {
                             out.stop();
                         }
                         if device_capture.is_some() {
                             device_capture = None;
+                            device_nonzero_at = None;
                         }
                         if sessions_muted {
                             unsafe { set_worker_sessions_muted(&active_tree_pids, false) };
@@ -1079,6 +1221,22 @@ mod tests {
 
         // Never pick the default endpoint even if named in override
         assert!(select_windows_virtual_loopback_sink(&endpoints, Some("Realtek")).is_none());
+
+        let steam_endpoints = vec![
+            WindowsRenderEndpointInfo {
+                id: "dev-speakers".to_string(),
+                friendly_name: "Realtek(R) Speakers".to_string(),
+                is_default: true,
+            },
+            WindowsRenderEndpointInfo {
+                id: "dev-steam".to_string(),
+                friendly_name: "Steam Streaming Speakers".to_string(),
+                is_default: false,
+            },
+        ];
+        let steam_picked = select_windows_virtual_loopback_sink(&steam_endpoints, None)
+            .expect("should select Steam Streaming Speakers");
+        assert_eq!(steam_picked.id, "dev-steam");
     }
 
     #[test]

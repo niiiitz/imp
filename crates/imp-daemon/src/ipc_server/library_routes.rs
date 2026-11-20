@@ -428,7 +428,14 @@ fn schedule_debounced_settings_save(cfg: imp_protocol::SimpSettings) {
 
 pub(super) async fn dsp_get_handler() -> impl IntoResponse {
     let snap = imp_core::dsp::global_dsp_state().snapshot();
-    let tap_status = imp_core::sinks::tap_dsp::global_tap_status();
+    let os_tap_status = imp_core::sinks::tap_dsp::global_tap_status();
+    let tap_status = match imp_core::sinks::tap_dsp::worker_native_dsp_status() {
+        Some(mut ws) if ws.dsp_active => {
+            ws.spectrum_active = ws.spectrum_active || os_tap_status.spectrum_active;
+            ws
+        }
+        _ => os_tap_status,
+    };
     Json(serde_json::json!({
         "ok": true,
         "data": snap,
@@ -437,6 +444,42 @@ pub(super) async fn dsp_get_handler() -> impl IntoResponse {
         "band_freqs_hz": imp_core::dsp::EQ_BAND_FREQS_HZ,
         "band_labels": imp_core::dsp::EQ_BAND_LABELS,
     }))
+}
+
+#[derive(serde::Deserialize, Default)]
+pub(super) struct DspWorkerStatusBody {
+    active: bool,
+    mode: Option<String>,
+    detail: Option<String>,
+    spectrum_active: Option<bool>,
+}
+
+pub(super) async fn dsp_worker_status_handler(
+    Json(body): Json<DspWorkerStatusBody>,
+) -> impl IntoResponse {
+    if body.active {
+        imp_core::sinks::tap_dsp::set_worker_native_dsp_status(Some(
+            imp_core::sinks::tap_dsp::AudioTapStatusSnapshot {
+                platform: "windows".to_string(),
+                mode: body
+                    .mode
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "windows_webaudio_dsp".to_string()),
+                dsp_active: true,
+                spectrum_active: body.spectrum_active.unwrap_or(true),
+                worker_sink_label: None,
+                detail: body
+                    .detail
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        "Windows Web Audio 10-Band EQ + Vocal Stage active.".to_string()
+                    }),
+            },
+        ));
+    } else {
+        imp_core::sinks::tap_dsp::set_worker_native_dsp_status(None);
+    }
+    Json(serde_json::json!({ "ok": true }))
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -496,6 +539,14 @@ pub(super) async fn dsp_post_handler(
     }
 
     dsp_state.apply_snapshot(&next);
+    let _ = state.broadcast_tx.send(imp_protocol::PlaybackEvent::DspConfigUpdated {
+        eq_enabled: next.eq_enabled,
+        eq_preset: next.eq_preset.clone(),
+        preamp_db: next.preamp_db,
+        bands_db: next.bands_db,
+        vocal_mode: next.vocal_mode.clone(),
+        vocal_strength: next.vocal_strength,
+    });
 
     // Persist DSP state to `~/.config/simp/settings.vdf` asynchronously (coalesced/debounced)
     // so rapid EQ slider adjustments never block Tokio HTTP handlers on disk I/O.

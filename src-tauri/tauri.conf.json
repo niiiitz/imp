@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "IMP",
-  "version": "0.9.0-alpha.1",
-  "identifier": "org.simp.player",
+  "version": "0.9.0-alpha.2",
+  "identifier": "org.imp.player",
   "build": {
     "beforeDevCommand": "npm --prefix ui run dev",
     "beforeBuildCommand": "npm --prefix ui run build",

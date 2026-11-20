@@ -1220,6 +1220,7 @@ impl AudioOrchestrator {
             }
             AudioCommand::RestartDaemon => {
                 tracing::info!("Restarting IMP daemon & shutting down all audio sinks...");
+                crate::tray::remove_windows_tray_icon();
                 self.pause_active_engine();
                 self.shutdown_all_sinks();
                 if let Ok(exe) = std::env::current_exe() {
@@ -1340,8 +1341,12 @@ impl AudioOrchestrator {
             }
             AudioCommand::ShutdownDaemon => {
                 crate::close_windows_ui_windows();
+                crate::close_windows_headless_worker_windows();
+                crate::tray::remove_windows_tray_icon();
                 self.pause_active_engine();
                 self.shutdown_all_sinks();
+                #[cfg(target_os = "windows")]
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 // Also stop the systemd user service if running under systemd so `Restart=always` doesn't respawn
                 #[cfg(not(target_os = "windows"))]
                 for unit in ["imp.service", "simp.service"] {

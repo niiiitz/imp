@@ -189,6 +189,15 @@ export interface AppleSinkCommandPayload {
   volume?: number | null;
 }
 
+export interface DspConfigEventPayload {
+  eq_enabled: boolean;
+  eq_preset: string;
+  preamp_db: number;
+  bands_db: number[];
+  vocal_mode: 'off' | 'vocal_remover' | 'vocal_isolate';
+  vocal_strength: number;
+}
+
 export interface DvdAudioTrack {
   stream_index: number;
   lang_code: string;

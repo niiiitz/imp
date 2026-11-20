@@ -20,9 +20,15 @@ pub struct AudioTapStatusSnapshot {
 }
 
 static GLOBAL_TAP_STATUS: OnceLock<Mutex<AudioTapStatusSnapshot>> = OnceLock::new();
+static WORKER_NATIVE_DSP_ACTIVE: AtomicBool = AtomicBool::new(false);
+static WORKER_NATIVE_DSP_STATUS: OnceLock<Mutex<Option<AudioTapStatusSnapshot>>> = OnceLock::new();
 
 fn global_tap_status_slot() -> &'static Mutex<AudioTapStatusSnapshot> {
     GLOBAL_TAP_STATUS.get_or_init(|| Mutex::new(AudioTapStatusSnapshot::default()))
+}
+
+fn worker_native_dsp_status_slot() -> &'static Mutex<Option<AudioTapStatusSnapshot>> {
+    WORKER_NATIVE_DSP_STATUS.get_or_init(|| Mutex::new(None))
 }
 
 pub fn global_tap_status() -> AudioTapStatusSnapshot {
@@ -38,7 +44,28 @@ pub fn set_global_tap_status(snapshot: AudioTapStatusSnapshot) {
     }
 }
 
+pub fn set_worker_native_dsp_status(status: Option<AudioTapStatusSnapshot>) {
+    let active = status.as_ref().map(|s| s.dsp_active).unwrap_or(false);
+    WORKER_NATIVE_DSP_ACTIVE.store(active, Ordering::Release);
+    if let Ok(mut g) = worker_native_dsp_status_slot().lock() {
+        *g = status;
+    }
+}
+
+pub fn is_worker_native_dsp_active() -> bool {
+    WORKER_NATIVE_DSP_ACTIVE.load(Ordering::Acquire)
+}
+
+pub fn worker_native_dsp_status() -> Option<AudioTapStatusSnapshot> {
+    worker_native_dsp_status_slot()
+        .lock()
+        .map(|g| g.clone())
+        .ok()
+        .flatten()
+}
+
 pub fn reset_global_tap_status() {
+    set_worker_native_dsp_status(None);
     set_global_tap_status(AudioTapStatusSnapshot::default());
 }
 
@@ -251,5 +278,23 @@ mod tests {
         assert_eq!(ring.pop_frame(), None);
 
         reset_global_tap_status();
+        assert!(!is_worker_native_dsp_active());
+        assert_eq!(worker_native_dsp_status(), None);
+
+        let worker_snap = AudioTapStatusSnapshot {
+            platform: "windows".to_string(),
+            mode: "windows_webaudio_dsp".to_string(),
+            dsp_active: true,
+            spectrum_active: true,
+            worker_sink_label: None,
+            detail: "Web Audio active".to_string(),
+        };
+        set_worker_native_dsp_status(Some(worker_snap.clone()));
+        assert!(is_worker_native_dsp_active());
+        assert_eq!(worker_native_dsp_status(), Some(worker_snap));
+
+        reset_global_tap_status();
+        assert!(!is_worker_native_dsp_active());
+        assert_eq!(worker_native_dsp_status(), None);
     }
 }

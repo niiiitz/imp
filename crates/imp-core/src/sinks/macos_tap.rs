@@ -717,7 +717,7 @@ unsafe fn create_webkit_process_tap(
         ),
     ]);
     let tap_list = CFArray::from_CFTypes(&[sub_tap.as_CFType()]);
-    let agg_uid = format!("org.simp.player.webkittap.{}.{}", libc::getpid(), tap_id);
+    let agg_uid = format!("org.imp.player.webkittap.{}.{}", libc::getpid(), tap_id);
     let mut agg_pairs = vec![
         (
             CFString::from_static_string("uid"),
@@ -725,7 +725,7 @@ unsafe fn create_webkit_process_tap(
         ),
         (
             CFString::from_static_string("name"),
-            CFString::from_static_string("SIMP WebKit Audio Tap").as_CFType(),
+            CFString::from_static_string("IMP WebKit Audio Tap").as_CFType(),
         ),
         (
             CFString::from_static_string("private"),

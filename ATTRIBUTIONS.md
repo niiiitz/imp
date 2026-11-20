@@ -68,6 +68,8 @@ SIMP's native Rust Internet Archive client (`crates/simp-core/src/sinks/internet
   * Reference for SIMP's perceptual cubic volume taper ($v^3$, corresponding to $-60 \log_{10}(v)\text{ dB}$) and zero-CPU idle stream suspension on Steam Deck.
 * **Robert Bristow-Johnson — *Cookbook Formulae for Audio Equalizer Biquad Filter Coefficients* (`Audio-EQ-Cookbook`)**:
   * Reference for SIMP's lock-free 10-band stereo biquad cascade (`32 Hz` low-shelf, `64 Hz–8 kHz` peaking EQ, `16 kHz` high-shelf) and `130 Hz–4.5 kHz` band-limited Mid/Side Butterworth vocal isolation/removal filters in `crates/simp-core/src/dsp.rs`.
+* **[`Cider` (`ciderapp/Cider`)](https://github.com/ciderapp/Cider) & [`CurvioEQ` (`hussainhumam/CurvioEQ`)](https://github.com/hussainhumam/CurvioEQ)**:
+  * Thank you to the Cider and CurvioEQ contributors for inspiring IMP's Windows Apple Music DSP architecture — combining Web Audio API (`AudioContext` + 10-band `BiquadFilterNode` + Mid/Side vocal stage) directly on the MusicKit audio element (`ui/src/drivers/appleWorkerDsp.ts`) with virtual-sink WASAPI loopback discovery (`Steam Streaming Speakers`, VB-Audio Virtual Cable, VoiceMeeter) in `crates/imp-core/src/sinks/windows_tap.rs`.
 
 ---
 

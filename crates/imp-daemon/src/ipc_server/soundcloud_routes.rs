@@ -39,7 +39,7 @@ pub(super) async fn soundcloud_auth_start_handler(
                 .into_response()
             } else {
                 let html = format!(
-                    "<!doctype html><html><head><meta charset='utf-8'><title>SIMP SoundCloud Auth Error</title></head>\
+                    "<!doctype html><html><head><meta charset='utf-8'><title>IMP SoundCloud Auth Error</title></head>\
                      <body style='background:#050507;color:#fca5a5;font-family:system-ui,sans-serif;padding:40px;text-align:center'>\
                      <h2>☁️ SoundCloud Configuration Needed</h2><p>{}</p></body></html>",
                     e
@@ -73,7 +73,7 @@ pub(super) async fn soundcloud_callback_handler(
             "<!doctype html><html><head><meta charset='utf-8'><title>SoundCloud Sign-In Failed</title></head>\
              <body style='background:#050507;color:#fca5a5;font-family:system-ui,sans-serif;padding:40px;text-align:center'>\
              <h2>☁️ SoundCloud Sign-In Cancelled or Failed</h2><p>{err_desc}</p>\
-             <p><a href='/' style='color:#ff5500'>Return to SIMP</a></p></body></html>"
+             <p><a href='/' style='color:#ff5500'>Return to IMP</a></p></body></html>"
         );
         return axum::response::Html(html).into_response();
     }
@@ -119,15 +119,15 @@ pub(super) async fn soundcloud_callback_handler(
                 format!("@{}", bundle.username)
             };
             let html = format!(
-                "<!doctype html><html><head><meta charset='utf-8'><title>SIMP SoundCloud Connected</title></head>\
+                "<!doctype html><html><head><meta charset='utf-8'><title>IMP SoundCloud Connected</title></head>\
                  <body style='background:#050507;color:#f4f4f6;font-family:system-ui,sans-serif;padding:48px 24px;text-align:center'>\
                  <div style='max-width:440px;margin:0 auto;padding:28px;border-radius:18px;background:#0d0d14;border:1px solid #ff5500'>\
                  <div style='font-size:42px;margin-bottom:12px'>☁️</div>\
                  <h2 style='margin:0 0 8px;color:#ff7733'>SoundCloud Connected!</h2>\
-                 <p style='color:#a1a1aa;font-size:14px;margin:0 0 20px'>Signed in as <strong style='color:#f4f4f6'>{uname_label}</strong>. Your Likes, Sets, Stream &amp; Native 160kbps AAC playback are now active in SIMP.</p>\
+                 <p style='color:#a1a1aa;font-size:14px;margin:0 0 20px'>Signed in as <strong style='color:#f4f4f6'>{uname_label}</strong>. Your Likes, Sets, Stream &amp; Native 160kbps AAC playback are now active in IMP.</p>\
                  <button onclick=\"if(window.opener){{window.close();}}else{{window.location.href='/';}}\" \
                    style='padding:12px 24px;border-radius:10px;background:#ff5500;color:#fff;border:none;font-weight:800;cursor:pointer;font-size:14px'>\
-                   Return to SIMP Console\
+                   Return to IMP Console\
                  </button>\
                  </div>\
                  <script>setTimeout(()=>{{if(window.opener){{window.close();}}else{{window.location.href='/';}}}}, 1800);</script>\
@@ -144,7 +144,7 @@ pub(super) async fn soundcloud_callback_handler(
                 "<!doctype html><html><head><meta charset='utf-8'><title>SoundCloud OAuth Error</title></head>\
                  <body style='background:#050507;color:#fca5a5;font-family:system-ui,sans-serif;padding:40px;text-align:center'>\
                  <h2>☁️ SoundCloud Token Exchange Failed</h2><p>{e}</p>\
-                 <p><a href='/' style='color:#ff5500'>Return to SIMP</a></p></body></html>"
+                 <p><a href='/' style='color:#ff5500'>Return to IMP</a></p></body></html>"
             );
             axum::response::Html(html).into_response()
         }

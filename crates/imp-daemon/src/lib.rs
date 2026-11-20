@@ -20,7 +20,7 @@ pub async fn run_daemon() -> anyhow::Result<()> {
         .try_init();
 
     tracing::info!(
-        "Starting SIMP v{} (Simple Integrated Media Player) headless daemon...",
+        "Starting IMP v{} (Integrated Media Player) headless daemon...",
         env!("CARGO_PKG_VERSION")
     );
 
@@ -45,7 +45,7 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     // 1. Spawn the dedicated Audio Orchestrator & MPRIS2 thread
     // (`rodio::OutputStream` and `souvlaki::MediaControls` own native OS handles and live on this thread)
     std::thread::Builder::new()
-        .name("simp-audio-orchestrator".to_string())
+        .name("imp-audio-orchestrator".to_string())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

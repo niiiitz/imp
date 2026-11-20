@@ -49,6 +49,15 @@ pub enum PlaybackEvent {
     GamepadInput {
         action: String,
     },
+    /// Emitted when DSP / 10-band EQ / Vocal Isolation parameters change via `POST /api/dsp`.
+    DspConfigUpdated {
+        eq_enabled: bool,
+        eq_preset: String,
+        preamp_db: f32,
+        bands_db: [f32; 10],
+        vocal_mode: String,
+        vocal_strength: f32,
+    },
 
     // High-Frequency Event (500ms tick — suppressed when 0 WebSocket clients connected)
     ProgressTick {

@@ -35,6 +35,11 @@ import {
   SoundCloudMixChapter,
 } from '../drivers/SoundCloudDriver';
 import { fetchTrackLyrics, type TrackLyricsResponse } from '../drivers/appleApi';
+import {
+  isAppFullscreenActive,
+  setAppFullscreen,
+  toggleAppFullscreen,
+} from '../api/servicesCacheApi';
 import { getSourceThemeForTrack, getSourceThemeCssVars } from '../theme/sourceTheme';
 import { PlayerUpNextStrip } from './player/PlayerUpNextStrip';
 import { PlayerSelectModal } from './player/PlayerSelectModal';
@@ -398,21 +403,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     if (isVideoTrack) {
       setVideoTheatreExpanded((prev) => {
         const next = !prev;
-        if (next) {
-          if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen?.().catch(() => {});
-          }
-        } else if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        }
+        setAppFullscreen(next);
         return next;
       });
     } else {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      } else {
-        document.documentElement.requestFullscreen?.().catch(() => {});
-      }
+      toggleAppFullscreen();
     }
   }, [isVideoTrack]);
 
@@ -428,7 +423,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       togglePlayerFullscreen();
     };
     const onFullscreenChange = () => {
-      if (!document.fullscreenElement) {
+      if (!isAppFullscreenActive()) {
         setVideoTheatreExpanded(false);
       }
     };
@@ -442,12 +437,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     window.addEventListener('simp-equalizer-toggle', onToggleEqualizer);
     window.addEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
     window.addEventListener('simp-select-category-focus', onSelectCategoryFocus);
+    window.addEventListener('simp-fullscreen-change', onFullscreenChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       window.removeEventListener('simp-player-actions-toggle', onToggleActions);
       window.removeEventListener('simp-equalizer-toggle', onToggleEqualizer);
       window.removeEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
       window.removeEventListener('simp-select-category-focus', onSelectCategoryFocus);
+      window.removeEventListener('simp-fullscreen-change', onFullscreenChange);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
     };
   }, [togglePlayerFullscreen]);
@@ -514,8 +511,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setVideoTheatreExpanded(false);
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
+        if (isAppFullscreenActive()) {
+          setAppFullscreen(false);
         }
       }
     };
@@ -755,8 +752,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const toggleTheatreFullscreen = useCallback(() => {
     setVideoTheatreExpanded((prev) => {
       const next = !prev;
-      if (!next && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      if (!next && isAppFullscreenActive()) {
+        setAppFullscreen(false);
       }
       return next;
     });

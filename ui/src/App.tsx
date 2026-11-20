@@ -10,6 +10,7 @@ import {
   TrackMetadata,
 } from '@simp/client';
 import { CompanionPairView } from './components/CompanionPairView';
+import { quitNativeAppWindow, toggleAppFullscreen } from './api/servicesCacheApi';
 import type { BrowseHubTarget } from './views/library/libraryHelpers';
 import { computeRelativeSubpath } from './views/library/localFolderTree';
 import {
@@ -813,7 +814,7 @@ const ConsoleMainApp: React.FC = () => {
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: 'SIMP_EXIT_CONSOLE' }, '*');
     } else {
-      window.close();
+      quitNativeAppWindow();
     }
   }, []);
 
@@ -2715,10 +2716,8 @@ const ConsoleMainApp: React.FC = () => {
         }
         if (view === 'lock') {
           window.dispatchEvent(new CustomEvent('simp-player-fullscreen-toggle'));
-        } else if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
         } else {
-          document.documentElement.requestFullscreen?.().catch(() => {});
+          toggleAppFullscreen();
         }
       }}
       style={{

@@ -8,14 +8,17 @@ use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::{mpsc, OnceLock};
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Environment,
-    ICoreWebView2EnvironmentOptions, COREWEBVIEW2_COLOR, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
+    ICoreWebView2, ICoreWebView2Controller, ICoreWebView2Controller2, ICoreWebView2Environment,
+    ICoreWebView2EnvironmentOptions, COREWEBVIEW2_COLOR, COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN,
+    COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN, COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
     COREWEBVIEW2_PERMISSION_STATE_ALLOW,
 };
 use webview2_com::{
-    take_pwstr, ContainsFullScreenElementChangedEventHandler, CoreWebView2EnvironmentOptions,
-    CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    NewWindowRequestedEventHandler, PermissionRequestedEventHandler,
+    take_pwstr, AcceleratorKeyPressedEventHandler, ContainsFullScreenElementChangedEventHandler,
+    CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, NewWindowRequestedEventHandler,
+    PermissionRequestedEventHandler, WebMessageReceivedEventHandler,
+    WindowCloseRequestedEventHandler,
 };
 use windows::core::{s, w, Interface, HRESULT, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{
@@ -35,15 +38,15 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
     GetClientRect, GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowLongW,
-    GetWindowPlacement, IsIconic, LoadCursorW, LoadImageW, PostMessageW, PostQuitMessage,
+    GetWindowPlacement, IsIconic, IsZoomed, LoadCursorW, LoadImageW, PostMessageW, PostQuitMessage,
     RegisterClassExW, SetForegroundWindow, SetWindowLongPtrW, SetWindowLongW, SetWindowPlacement,
     SetWindowPos, ShowWindow, TranslateMessage, CW_USEDEFAULT, GWLP_USERDATA, GWL_EXSTYLE,
     GWL_STYLE, HICON, HWND_TOP, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, MSG,
     SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
-    SWP_NOZORDER, SW_HIDE, SW_RESTORE, SW_SHOW, WINDOWPLACEMENT, WM_APP, WM_CLOSE, WM_DESTROY,
-    WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW, WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME,
-    WS_EX_NOACTIVATE, WS_EX_STATICEDGE, WS_EX_TOOLWINDOW, WS_EX_WINDOWEDGE, WS_OVERLAPPEDWINDOW,
-    WS_POPUP,
+    SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WINDOWPLACEMENT,
+    WM_APP, WM_CLOSE, WM_DESTROY, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_STATICEDGE, WS_EX_TOOLWINDOW,
+    WS_EX_WINDOWEDGE, WS_MAXIMIZE, WS_MINIMIZE, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
 
 pub const IMP_NATIVE_UI_CLASS: &str = "ImpWin32WebViewWindowClass";
@@ -51,6 +54,7 @@ pub const IMP_NATIVE_WORKER_CLASS: &str = "ImpWin32AppleWorkerClass";
 pub const WM_IMP_SHOW_WINDOW: u32 = WM_APP + 41;
 pub const WM_IMP_QUIT_APP: u32 = WM_APP + 42;
 pub const WM_IMP_SET_FULLSCREEN: u32 = WM_APP + 43;
+pub const WM_IMP_TOGGLE_FULLSCREEN: u32 = WM_APP + 44;
 
 #[cfg(has_embedded_webview2_loader)]
 const EMBEDDED_WEBVIEW2_LOADER_DLL: &[u8] =
@@ -80,6 +84,7 @@ impl Drop for ComApartmentGuard {
 
 struct WindowState {
     controller: ICoreWebView2Controller,
+    webview: ICoreWebView2,
     is_worker: bool,
     is_fullscreen: bool,
     saved_style: i32,
@@ -89,6 +94,9 @@ struct WindowState {
     _perm_token: EventRegistrationToken,
     _new_win_token: Option<EventRegistrationToken>,
     _fullscreen_token: Option<EventRegistrationToken>,
+    _web_msg_token: Option<EventRegistrationToken>,
+    _accel_token: Option<EventRegistrationToken>,
+    _close_req_token: Option<EventRegistrationToken>,
 }
 
 fn to_wide<S: AsRef<OsStr>>(s: S) -> Vec<u16> {
@@ -219,11 +227,25 @@ unsafe fn apply_window_fullscreen(hwnd: HWND, state: &mut WindowState, enter: bo
         };
         let _ = GetWindowPlacement(hwnd, &mut state.saved_placement);
 
-        let next_style = (state.saved_style & !(WS_OVERLAPPEDWINDOW.0 as i32)) | (WS_POPUP.0 as i32);
+        if IsZoomed(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+        }
+
+        let style_strip = (WS_OVERLAPPEDWINDOW | WS_MAXIMIZE | WS_MINIMIZE).0 as i32;
+        let next_style = (state.saved_style & !style_strip) | (WS_POPUP.0 as i32);
         let ex_strip =
             (WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE).0
                 as i32;
         let next_ex_style = state.saved_ex_style & !ex_strip;
+
+        // Disable Windows 11 rounded corners in borderless fullscreen (`DWMWA_WINDOW_CORNER_PREFERENCE = 33`, `DWMWCP_DONOTROUND = 1`).
+        let corner_none: i32 = 1;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(33),
+            (&corner_none as *const i32) as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
 
         SetWindowLongW(hwnd, GWL_STYLE, next_style);
         SetWindowLongW(hwnd, GWL_EXSTYLE, next_ex_style);
@@ -242,7 +264,7 @@ unsafe fn apply_window_fullscreen(hwnd: HWND, state: &mut WindowState, enter: bo
                 rc.top,
                 rc.right - rc.left,
                 rc.bottom - rc.top,
-                SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+                SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
             );
         } else {
             let _ = SetWindowPos(
@@ -252,12 +274,22 @@ unsafe fn apply_window_fullscreen(hwnd: HWND, state: &mut WindowState, enter: bo
                 0,
                 0,
                 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW,
             );
         }
         state.is_fullscreen = true;
         sync_controller_bounds(hwnd, &state.controller);
+        let _ = state
+            .webview
+            .PostWebMessageAsJson(w!(r#"{"type":"imp_fullscreen_state","fullscreen":true}"#));
     } else {
+        let corner_default: i32 = 0;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(33),
+            (&corner_default as *const i32) as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
         SetWindowLongW(hwnd, GWL_STYLE, state.saved_style);
         SetWindowLongW(hwnd, GWL_EXSTYLE, state.saved_ex_style);
         let _ = SetWindowPlacement(hwnd, &state.saved_placement);
@@ -272,6 +304,9 @@ unsafe fn apply_window_fullscreen(hwnd: HWND, state: &mut WindowState, enter: bo
         );
         state.is_fullscreen = false;
         sync_controller_bounds(hwnd, &state.controller);
+        let _ = state
+            .webview
+            .PostWebMessageAsJson(w!(r#"{"type":"imp_fullscreen_state","fullscreen":false}"#));
     }
 }
 
@@ -325,6 +360,14 @@ unsafe extern "system" fn wnd_proc(
             }
             LRESULT(0)
         }
+        WM_IMP_TOGGLE_FULLSCREEN => {
+            if ptr != 0 {
+                let state = &mut *(ptr as *mut WindowState);
+                let target = !state.is_fullscreen;
+                apply_window_fullscreen(hwnd, state, target);
+            }
+            LRESULT(0)
+        }
         WM_IMP_SHOW_WINDOW => {
             if ptr != 0 {
                 let state = &*(ptr as *const WindowState);
@@ -348,7 +391,10 @@ unsafe extern "system" fn wnd_proc(
         }
         WM_IMP_QUIT_APP => {
             if ptr != 0 {
-                let state = &*(ptr as *const WindowState);
+                let state = &mut *(ptr as *mut WindowState);
+                if state.is_fullscreen {
+                    apply_window_fullscreen(hwnd, state, false);
+                }
                 let _ = state.controller.Close();
             }
             let _ = DestroyWindow(hwnd);
@@ -655,6 +701,7 @@ fn run_webview2_window(url: &str, is_worker: bool) -> Result<(), String> {
             let _ = settings.SetIsStatusBarEnabled(false);
             let _ = settings.SetIsZoomControlEnabled(false);
             let _ = settings.SetAreDefaultScriptDialogsEnabled(true);
+            let _ = settings.SetIsWebMessageEnabled(true);
             let devtools = cfg!(debug_assertions)
                 || std::env::var("IMP_WEBVIEW_DEVTOOLS").ok().as_deref() == Some("1");
             let _ = settings.SetAreDevToolsEnabled(devtools);
@@ -742,7 +789,117 @@ fn run_webview2_window(url: &str, is_worker: bool) -> Result<(), String> {
         None
     };
 
+    let (web_msg_token, accel_token, close_req_token) = if !is_worker {
+        let mut msg_token = EventRegistrationToken::default();
+        let msg_hwnd_raw = hwnd.0;
+        let msg_handler = WebMessageReceivedEventHandler::create(Box::new(move |_sender, args| {
+            if let Some(args) = args {
+                let mut pw = PWSTR::null();
+                if unsafe { args.WebMessageAsJson(&mut pw) }.is_ok() {
+                    let raw = take_pwstr(pw);
+                    let cmd = raw.trim().trim_matches('"');
+                    unsafe {
+                        match cmd {
+                            "imp:toggle_fullscreen" => {
+                                let _ = PostMessageW(
+                                    HWND(msg_hwnd_raw),
+                                    WM_IMP_TOGGLE_FULLSCREEN,
+                                    WPARAM(0),
+                                    LPARAM(0),
+                                );
+                            }
+                            "imp:enter_fullscreen" => {
+                                let _ = PostMessageW(
+                                    HWND(msg_hwnd_raw),
+                                    WM_IMP_SET_FULLSCREEN,
+                                    WPARAM(1),
+                                    LPARAM(0),
+                                );
+                            }
+                            "imp:exit_fullscreen" => {
+                                let _ = PostMessageW(
+                                    HWND(msg_hwnd_raw),
+                                    WM_IMP_SET_FULLSCREEN,
+                                    WPARAM(0),
+                                    LPARAM(0),
+                                );
+                            }
+                            "imp:quit_app" => {
+                                let _ = PostMessageW(
+                                    HWND(msg_hwnd_raw),
+                                    WM_IMP_QUIT_APP,
+                                    WPARAM(0),
+                                    LPARAM(0),
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            let _ = webview.add_WebMessageReceived(&msg_handler, &mut msg_token);
+        }
+
+        let mut acc_token = EventRegistrationToken::default();
+        let acc_hwnd_raw = hwnd.0;
+        let acc_handler =
+            AcceleratorKeyPressedEventHandler::create(Box::new(move |_sender, args| {
+                if let Some(args) = args {
+                    let mut kind = COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN;
+                    let mut vk = 0u32;
+                    if unsafe { args.KeyEventKind(&mut kind) }.is_ok()
+                        && unsafe { args.VirtualKey(&mut vk) }.is_ok()
+                    {
+                        let is_f11 = kind == COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN && vk == 0x7A;
+                        let is_alt_enter =
+                            kind == COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN && vk == 0x0D;
+                        if is_f11 || is_alt_enter {
+                            let _ = unsafe { args.SetHandled(true) };
+                            unsafe {
+                                let _ = PostMessageW(
+                                    HWND(acc_hwnd_raw),
+                                    WM_IMP_TOGGLE_FULLSCREEN,
+                                    WPARAM(0),
+                                    LPARAM(0),
+                                );
+                            }
+                        }
+                    }
+                }
+                Ok(())
+            }));
+        unsafe {
+            let _ = controller.add_AcceleratorKeyPressed(&acc_handler, &mut acc_token);
+        }
+
+        let mut close_token = EventRegistrationToken::default();
+        let close_hwnd_raw = hwnd.0;
+        let close_handler =
+            WindowCloseRequestedEventHandler::create(Box::new(move |_sender, _args| {
+                unsafe {
+                    let _ = PostMessageW(
+                        HWND(close_hwnd_raw),
+                        WM_IMP_QUIT_APP,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+                Ok(())
+            }));
+        unsafe {
+            let _ = webview.add_WindowCloseRequested(&close_handler, &mut close_token);
+        }
+
+        (Some(msg_token), Some(acc_token), Some(close_token))
+    } else {
+        (None, None, None)
+    };
+
     let url_w = to_wide(url);
+    let webview_for_state = webview.clone();
     if let Err(e) = unsafe { webview.Navigate(PCWSTR(url_w.as_ptr())) } {
         unsafe {
             let _ = controller.Close();
@@ -753,6 +910,7 @@ fn run_webview2_window(url: &str, is_worker: bool) -> Result<(), String> {
 
     let state_ptr = Box::into_raw(Box::new(WindowState {
         controller,
+        webview: webview_for_state,
         is_worker,
         is_fullscreen: false,
         saved_style: 0,
@@ -761,6 +919,9 @@ fn run_webview2_window(url: &str, is_worker: bool) -> Result<(), String> {
         _perm_token: perm_token,
         _new_win_token: new_win_token,
         _fullscreen_token: fullscreen_token,
+        _web_msg_token: web_msg_token,
+        _accel_token: accel_token,
+        _close_req_token: close_req_token,
     }));
     unsafe {
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);

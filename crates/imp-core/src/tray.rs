@@ -23,7 +23,7 @@ pub fn spawn_system_tray(
     #[cfg(target_os = "windows")]
     {
         let _ = std::thread::Builder::new()
-            .name("simp-win32-tray".to_string())
+            .name("imp-win32-tray".to_string())
             .spawn(move || {
                 crate::prefer_efficiency_core_for_current_thread();
                 win32_tray::run_win32_tray_and_smtc_loop(state, cmd_tx);
@@ -44,7 +44,7 @@ pub fn spawn_system_tray(
             return;
         }
         let _ = std::thread::Builder::new()
-            .name("simp-kde-tray".to_string())
+            .name("imp-kde-tray".to_string())
             .spawn(move || {
                 crate::prefer_efficiency_core_for_current_thread();
                 linux_sni::run_sni_tray_loop(state, cmd_tx);
@@ -55,6 +55,13 @@ pub fn spawn_system_tray(
     {
         let _ = (state, cmd_tx);
     }
+}
+
+/// Removes the Windows notification-area tray icon cleanly before daemon shutdown/restart
+/// so Explorer does not leave a stale ghost icon in the taskbar.
+pub fn remove_windows_tray_icon() {
+    #[cfg(target_os = "windows")]
+    win32_tray::remove_tray_icon();
 }
 
 #[cfg(target_os = "linux")]
@@ -1016,6 +1023,17 @@ mod win32_tray {
         }
     }
 
+    pub fn remove_tray_icon() {
+        unsafe {
+            if let Some(g) = TRAY_GLOBAL.get() {
+                if let Ok(nid) = g.nid.lock() {
+                    Shell_NotifyIconW(NIM_DELETE, &*nid);
+                }
+            }
+            TRAY_ADDED.store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     pub fn run_win32_tray_and_smtc_loop(
         state: Arc<Mutex<OrchestratorSnapshot>>,
         cmd_tx: mpsc::UnboundedSender<AudioCommand>,
@@ -1039,7 +1057,7 @@ mod win32_tray {
             } else {
                 create_simp_portal_hicon()
             };
-            let class_name = to_wide("SimpWin32TrayWindowClass");
+            let class_name = to_wide("ImpWin32TrayWindowClass");
             let wnd_class = WndClassExW {
                 cb_size: std::mem::size_of::<WndClassExW>() as u32,
                 style: 0,
