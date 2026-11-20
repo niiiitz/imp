@@ -2713,7 +2713,13 @@ const ConsoleMainApp: React.FC = () => {
         ) {
           return;
         }
-        window.dispatchEvent(new CustomEvent('simp-player-fullscreen-toggle'));
+        if (view === 'lock') {
+          window.dispatchEvent(new CustomEvent('simp-player-fullscreen-toggle'));
+        } else if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        } else {
+          document.documentElement.requestFullscreen?.().catch(() => {});
+        }
       }}
       style={{
         width: '100%',

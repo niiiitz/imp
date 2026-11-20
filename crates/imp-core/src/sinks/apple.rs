@@ -1168,6 +1168,26 @@ fn spawn_windows_headless_widevine_browser() -> Option<Child> {
         return None;
     }
 
+    // Prefer IMP's own embedded Edge WebView2 worker (`imp.exe --apple-worker`) so zero
+    // external browser process is needed for Widevine/PlayReady DRM playback.
+    if std::env::var("IMP_USE_EXTERNAL_BROWSER").ok().as_deref() != Some("1") {
+        if let Ok(exe) = std::env::current_exe() {
+            let mut cmd = Command::new(exe);
+            crate::configure_background_command(&mut cmd);
+            cmd.arg("--apple-worker")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            if let Ok(mut child) = cmd.spawn() {
+                crate::apply_windows_efficiency_mode_to_child(&child);
+                std::thread::sleep(std::time::Duration::from_millis(350));
+                if let Ok(None) = child.try_wait() {
+                    return Some(child);
+                }
+            }
+        }
+    }
+
     let worker_url = "http://127.0.0.1:18888/apple-worker?worker=apple";
     let worker_profile = crate::simp_data_dir().join("simp-widevine-worker");
     let _ = std::fs::create_dir_all(&worker_profile);

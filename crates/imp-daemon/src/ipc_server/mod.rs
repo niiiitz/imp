@@ -356,6 +356,7 @@ async fn health_handler() -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
         "service": "imp-daemon",
+        "platform": std::env::consts::OS,
         "version": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
         "ui_served": ui_dir.is_some(),

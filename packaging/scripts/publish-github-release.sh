@@ -39,6 +39,37 @@ if [[ "${SKIP_BUILD_FLAG}" != "1" ]]; then
   fi
 fi
 
+# Generate legacy `simp-*` transition bridge archives so v0.8.x installs on the alpha
+# channel can self-update cleanly to v0.9.0-alpha.1+ (`simp.exe` / `bin/simp`).
+if [[ -d "dist/imp-windows-portable" && -f "dist/imp-windows-portable/imp.exe" ]]; then
+  rm -rf "dist/simp-windows-portable" "dist/simp-windows-portable-x86_64.zip"
+  cp -a "dist/imp-windows-portable" "dist/simp-windows-portable"
+  cp -f "dist/imp-windows-portable/imp.exe" "dist/simp-windows-portable/simp.exe"
+  (cd "dist" && python3 -m zipfile -c "${REPO_ROOT}/dist/simp-windows-portable-x86_64.zip" simp-windows-portable)
+  rm -rf "dist/simp-windows-portable"
+fi
+
+for ARCH_BRIDGE in x86_64 aarch64; do
+  IMP_TAR="dist/imp-steamos-userland-${ARCH_BRIDGE}.tar.gz"
+  SIMP_TAR="dist/simp-steamos-userland-${ARCH_BRIDGE}.tar.gz"
+  if [[ -f "${IMP_TAR}" ]]; then
+    BRIDGE_TMP="$(mktemp -d)"
+    tar -xzf "${IMP_TAR}" -C "${BRIDGE_TMP}"
+    if [[ -d "${BRIDGE_TMP}/imp-steamos-userland" ]]; then
+      mv "${BRIDGE_TMP}/imp-steamos-userland" "${BRIDGE_TMP}/simp-steamos-userland"
+      if [[ -f "${BRIDGE_TMP}/simp-steamos-userland/bin/imp" ]]; then
+        cp -f "${BRIDGE_TMP}/simp-steamos-userland/bin/imp" "${BRIDGE_TMP}/simp-steamos-userland/bin/simp"
+        chmod +x "${BRIDGE_TMP}/simp-steamos-userland/bin/simp"
+      fi
+      if [[ -d "${BRIDGE_TMP}/simp-steamos-userland/imp-decky" ]]; then
+        mv "${BRIDGE_TMP}/simp-steamos-userland/imp-decky" "${BRIDGE_TMP}/simp-steamos-userland/simp-decky"
+      fi
+      tar --no-xattrs -C "${BRIDGE_TMP}" -czf "${SIMP_TAR}" "simp-steamos-userland"
+    fi
+    rm -rf "${BRIDGE_TMP}"
+  fi
+done
+
 python3 - "${TAG}" "${NOTES_FILE}" <<'PY'
 import json
 import os
@@ -159,6 +190,9 @@ assets = [
     ("dist/imp-steamos-userland.tar.gz", "application/gzip"),
     ("dist/imp-decky.zip", "application/zip"),
     ("dist/imp-windows-portable-x86_64.zip", "application/zip"),
+    ("dist/simp-steamos-userland-aarch64.tar.gz", "application/gzip"),
+    ("dist/simp-steamos-userland-x86_64.tar.gz", "application/gzip"),
+    ("dist/simp-windows-portable-x86_64.zip", "application/zip"),
     ("dist/IMP-macos-arm64.zip", "application/zip"),
     ("dist/IMP-macos-x86_64.zip", "application/zip"),
 ]

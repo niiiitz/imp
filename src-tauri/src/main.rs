@@ -126,7 +126,21 @@ fn main() {
         return;
     }
 
-    // Mode 1: Headless systemd Daemon (`simp --daemon`)
+    // Mode 1: Headless Apple Music WebView2 DRM Audio Worker on Windows (`imp --apple-worker`)
+    if args.iter().any(|arg| arg == "--apple-worker") {
+        #[cfg(target_os = "windows")]
+        {
+            imp_ui_lib::run_windows_apple_worker();
+            return;
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            eprintln!("--apple-worker is only used on Windows");
+            std::process::exit(1);
+        }
+    }
+
+    // Mode 2: Headless systemd Daemon (`simp --daemon`)
     // Runs on a tight 2-thread Tokio runtime without initializing GTK or WebKitGTK.
     // Worker threads opt into Efficiency Cores (Windows EcoQoS / Apple Silicon Utility QoS / Linux EAS nice +5)
     // while the dedicated AudioOrchestrator / Rodio thread remains at full unthrottled priority.

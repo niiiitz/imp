@@ -7,6 +7,19 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 pub mod macos_app;
+#[cfg(target_os = "windows")]
+pub mod windows_app;
+
+/// Runs the hidden embedded Edge WebView2 Apple Music audio worker (`imp.exe --apple-worker`).
+#[cfg(target_os = "windows")]
+pub fn run_windows_apple_worker() {
+    if let Err(err) =
+        windows_app::run_windows_apple_worker("http://127.0.0.1:18888/apple-worker?worker=apple")
+    {
+        eprintln!("IMP WebView2 Apple worker failed: {err}");
+        std::process::exit(2);
+    }
+}
 
 fn query_running_daemon_health(addr: &SocketAddr) -> Option<(String, Option<u32>)> {
     let mut stream = TcpStream::connect_timeout(addr, Duration::from_millis(150)).ok()?;
@@ -170,7 +183,21 @@ pub fn run_ui() {
 
         #[cfg(target_os = "windows")]
         {
-            run_windows_ui(ui_url, &profile_dir_path, &user_data_arg);
+            let use_external_browser = std::env::var("IMP_USE_EXTERNAL_BROWSER")
+                .ok()
+                .as_deref()
+                == Some("1");
+            if !use_external_browser {
+                match windows_app::run_windows_native_app(ui_url) {
+                    Ok(()) => return,
+                    Err(err) => {
+                        eprintln!(
+                            "Embedded Edge WebView2 unavailable ({err}); falling back to external browser app mode."
+                        );
+                    }
+                }
+            }
+            run_windows_external_browser_ui(ui_url, &profile_dir_path, &user_data_arg);
             return;
         }
 
@@ -274,7 +301,11 @@ pub fn run_ui() {
 }
 
 #[cfg(target_os = "windows")]
-fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &str) {
+fn run_windows_external_browser_ui(
+    ui_url: &str,
+    profile_dir: &std::path::Path,
+    user_data_arg: &str,
+) {
     if imp_core::focus_existing_windows_ui_window() {
         return;
     }

@@ -361,6 +361,11 @@ mod win32_window_mgr {
     const WS_EX_TOOLWINDOW: isize = 0x00000080;
     const WS_EX_APPWINDOW: isize = 0x00040000;
     const WM_CLOSE: u32 = 0x0010;
+    const WM_APP: u32 = 0x8000;
+    const WM_IMP_SHOW_WINDOW: u32 = WM_APP + 41;
+    const WM_IMP_QUIT_APP: u32 = WM_APP + 42;
+    const IMP_NATIVE_UI_CLASS: &str = "ImpWin32WebViewWindowClass";
+    const IMP_NATIVE_WORKER_CLASS: &str = "ImpWin32AppleWorkerClass";
 
     #[link(name = "user32")]
     extern "system" {
@@ -369,6 +374,7 @@ mod win32_window_mgr {
             l_param: Lparam,
         ) -> i32;
         fn GetWindowTextW(h_wnd: Hwnd, lp_string: *mut u16, n_max_count: i32) -> i32;
+        fn GetClassNameW(h_wnd: Hwnd, lp_class_name: *mut u16, n_max_count: i32) -> i32;
         fn GetWindowRect(h_wnd: Hwnd, lp_rect: *mut Rect) -> i32;
         fn IsWindowVisible(h_wnd: Hwnd) -> i32;
         fn IsIconic(h_wnd: Hwnd) -> i32;
@@ -391,6 +397,15 @@ mod win32_window_mgr {
         String::from_utf16_lossy(&buf[..len as usize])
     }
 
+    unsafe fn read_window_class(hwnd: Hwnd) -> String {
+        let mut buf = [0u16; 128];
+        let len = GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if len <= 0 {
+            return String::new();
+        }
+        String::from_utf16_lossy(&buf[..len as usize])
+    }
+
     unsafe fn is_ui_window_title(title: &str) -> bool {
         title.starts_with("IMP — Interactive Media Player")
             || title.starts_with("IMP - Interactive Media Player")
@@ -399,6 +414,9 @@ mod win32_window_mgr {
     }
 
     unsafe fn is_worker_hwnd(hwnd: Hwnd, title: &str) -> bool {
+        if read_window_class(hwnd) == IMP_NATIVE_WORKER_CLASS {
+            return true;
+        }
         if title.starts_with("IMP Headless Audio Worker")
             || title.starts_with("SIMP Headless Audio Worker")
             || title.contains("apple-worker")
@@ -421,6 +439,10 @@ mod win32_window_mgr {
     }
 
     unsafe fn is_main_ui_hwnd(hwnd: Hwnd, title: &str) -> bool {
+        // Check native WebView2 window class before IsWindowVisible so tray-hidden windows can restore.
+        if read_window_class(hwnd) == IMP_NATIVE_UI_CLASS {
+            return true;
+        }
         if IsWindowVisible(hwnd) == 0 {
             return false;
         }
@@ -453,7 +475,9 @@ mod win32_window_mgr {
             if !found_ptr.is_null() {
                 *found_ptr = true;
             }
-            if IsIconic(hwnd) != 0 {
+            if read_window_class(hwnd) == IMP_NATIVE_UI_CLASS {
+                PostMessageW(hwnd, WM_IMP_SHOW_WINDOW, 0, 0);
+            } else if IsIconic(hwnd) != 0 {
                 ShowWindow(hwnd, SW_RESTORE);
             } else {
                 ShowWindow(hwnd, SW_SHOW);
@@ -540,7 +564,9 @@ mod win32_window_mgr {
 
     unsafe extern "system" fn enum_close_ui_cb(hwnd: Hwnd, _l_param: Lparam) -> i32 {
         let title = read_window_title(hwnd);
-        if is_ui_window_title(&title) && !is_worker_hwnd(hwnd, &title) {
+        if read_window_class(hwnd) == IMP_NATIVE_UI_CLASS {
+            PostMessageW(hwnd, WM_IMP_QUIT_APP, 0, 0);
+        } else if is_ui_window_title(&title) && !is_worker_hwnd(hwnd, &title) {
             PostMessageW(hwnd, WM_CLOSE, 0, 0);
         }
         1

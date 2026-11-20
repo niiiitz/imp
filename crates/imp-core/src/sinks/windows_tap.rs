@@ -665,6 +665,8 @@ unsafe fn collect_process_tree_pids(root_pids: &[u32]) -> HashSet<u32> {
         }
     }
 
+    // Never include the daemon's own PID so we never mute TapDspOutput's Rodio playback session.
+    tree.remove(&self_pid);
     tree
 }
 
@@ -713,9 +715,13 @@ unsafe fn set_worker_sessions_muted(target_pids: &HashSet<u32>, muted: bool) -> 
 
 #[cfg(target_os = "windows")]
 fn discover_worker_root_pids() -> Vec<u32> {
-    let mut roots = crate::find_windows_headless_worker_pids();
+    let self_pid = std::process::id();
+    let mut roots: Vec<u32> = crate::find_windows_headless_worker_pids()
+        .into_iter()
+        .filter(|&pid| pid != 0 && pid != self_pid)
+        .collect();
     if let Some(child_pid) = crate::sinks::apple::current_worker_child_pid() {
-        if child_pid != 0 && !roots.contains(&child_pid) {
+        if child_pid != 0 && child_pid != self_pid && !roots.contains(&child_pid) {
             roots.push(child_pid);
         }
     }

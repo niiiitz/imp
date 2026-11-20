@@ -127,6 +127,12 @@ rm -rf "${OUT_DIR}" "${ZIP_ARCHIVE}"
 mkdir -p "${OUT_DIR}/ui" "${OUT_DIR}/data/lib" "${OUT_DIR}/data/bin"
 
 cp "${BUILT_EXE}" "${OUT_DIR}/imp.exe"
+# Also stage WebView2Loader.dll in data\lib\ (fallback copy is embedded inside imp.exe, keeping root clean).
+WEBVIEW2_DLL_PATH="$(find "${REPO_ROOT}/target/${RUST_TARGET}/release/build" -path "*/webview2-com-sys-*/out/x64/WebView2Loader.dll" 2>/dev/null | head -n 1 || true)"
+if [[ -n "${WEBVIEW2_DLL_PATH}" && -f "${WEBVIEW2_DLL_PATH}" ]]; then
+  cp "${WEBVIEW2_DLL_PATH}" "${OUT_DIR}/data/lib/WebView2Loader.dll"
+  echo "   • Staged data/lib/WebView2Loader.dll for Embedded Edge WebView2"
+fi
 # Note: multi-resolution icon is already compiled into `imp.exe` PE resources via `build.rs`.
 # Do not copy a loose `.ico` next to `imp.exe` in the root portable folder so users never
 # confuse the icon file with the `imp.exe` application launcher when file extensions are hidden.
@@ -191,7 +197,9 @@ cat > "${OUT_DIR}/README-WINDOWS.txt" <<'EOF'
    - Starts the ultra-lightweight headless Rust audio daemon (`imp.exe --daemon`)
      in the background (~0.1% CPU, native Windows WASAPI audio).
    - Places the IMP Portal Icon in the Windows System Tray (Notification Area).
-   - Opens the chromeless IMP Console window (via Edge / Brave / Chrome `--app`).
+   - Opens the chromeless IMP Console window via built-in Embedded Edge WebView2
+     (with automatic fallback to Microsoft Edge / Brave / Chrome `--app` if
+     WebView2 Runtime is unavailable or `IMP_USE_EXTERNAL_BROWSER=1` is set).
 
 2. HEADLESS BACKGROUND PLAYBACK & SYSTEM TRAY
    - Closing the IMP window keeps your music playing in the background with

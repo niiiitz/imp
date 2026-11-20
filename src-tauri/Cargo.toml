@@ -31,4 +31,18 @@ core-graphics.workspace = true
 block.workspace = true
 dispatch.workspace = true
 
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.29.0"
+windows = { version = "0.54.0", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 

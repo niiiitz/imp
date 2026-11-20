@@ -619,6 +619,10 @@ mod win32_tray {
     const ID_TRAY_PREV: usize = 1003;
     const ID_TRAY_OPEN_UI: usize = 1004;
     const ID_TRAY_QUIT: usize = 1005;
+    const IMAGE_ICON: u32 = 1;
+    const LR_SHARED: u32 = 0x00008000;
+    const SM_CXSMICON: i32 = 49;
+    const SM_CYSMICON: i32 = 50;
 
     #[repr(C)]
     struct WndClassExW {
@@ -731,6 +735,16 @@ mod win32_tray {
         fn PostQuitMessage(n_exit_code: i32);
         fn CreateIconIndirect(piconinfo: *const IconInfo) -> Hicon;
         fn LoadIconW(h_instance: Hinstance, lp_icon_name: *const u16) -> Hicon;
+        fn LoadImageW(
+            h_inst: Hinstance,
+            name: *const u16,
+            r#type: u32,
+            cx: i32,
+            cy: i32,
+            fu_load: u32,
+        ) -> Hicon;
+        fn GetSystemMetrics(n_index: i32) -> i32;
+        fn RegisterWindowMessageW(lp_string: *const u16) -> u32;
     }
 
     #[link(name = "gdi32")]
@@ -765,6 +779,10 @@ mod win32_tray {
     unsafe impl Sync for Win32TrayGlobal {}
 
     static TRAY_GLOBAL: OnceLock<Win32TrayGlobal> = OnceLock::new();
+    static TASKBAR_CREATED_MSG: std::sync::atomic::AtomicU32 =
+        std::sync::atomic::AtomicU32::new(0);
+    static TRAY_ADDED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
 
     fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
@@ -928,6 +946,16 @@ mod win32_tray {
         w_param: Wparam,
         l_param: Lparam,
     ) -> Lresult {
+        let taskbar_msg = TASKBAR_CREATED_MSG.load(std::sync::atomic::Ordering::Relaxed);
+        if taskbar_msg != 0 && msg == taskbar_msg {
+            if let Some(g) = TRAY_GLOBAL.get() {
+                if let Ok(nid_guard) = g.nid.lock() {
+                    let added = Shell_NotifyIconW(NIM_ADD, &*nid_guard) != 0;
+                    TRAY_ADDED.store(added, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+            return 0;
+        }
         match msg {
             WM_TRAYICON => {
                 let mouse_msg = (l_param as u32) & 0xFFFF;
@@ -993,8 +1021,19 @@ mod win32_tray {
         cmd_tx: mpsc::UnboundedSender<AudioCommand>,
     ) {
         unsafe {
+            TASKBAR_CREATED_MSG.store(
+                RegisterWindowMessageW(to_wide("TaskbarCreated").as_ptr()),
+                std::sync::atomic::Ordering::Relaxed,
+            );
             let h_instance = GetModuleHandleW(null());
-            let embedded_hicon = LoadIconW(h_instance, 1 as *const u16);
+            let sm_w = GetSystemMetrics(SM_CXSMICON).max(16);
+            let sm_h = GetSystemMetrics(SM_CYSMICON).max(16);
+            let small_hicon = LoadImageW(h_instance, 1 as *const u16, IMAGE_ICON, sm_w, sm_h, LR_SHARED);
+            let embedded_hicon = if !small_hicon.is_null() {
+                small_hicon
+            } else {
+                LoadIconW(h_instance, 1 as *const u16)
+            };
             let hicon = if !embedded_hicon.is_null() {
                 embedded_hicon
             } else {
@@ -1053,7 +1092,8 @@ mod win32_tray {
                 nid: Mutex::new(nid),
             });
 
-            Shell_NotifyIconW(NIM_ADD, &nid);
+            let added = Shell_NotifyIconW(NIM_ADD, &nid) != 0;
+            TRAY_ADDED.store(added, std::sync::atomic::Ordering::Relaxed);
 
             // Attach Windows 10/11 System Media Transport Controls (SMTC) via `souvlaki` using our hidden `hwnd`
             let mut smtc_controls = MediaControls::new(PlatformConfig {
@@ -1110,12 +1150,25 @@ mod win32_tray {
                 if msg.message == WM_TIMER {
                     let _ = crate::hide_windows_headless_worker_windows();
                     let next_tip = format_tray_tooltip(&state);
-                    if next_tip != last_tip {
+                    if !TRAY_ADDED.load(std::sync::atomic::Ordering::Relaxed) {
+                        if let Some(g) = TRAY_GLOBAL.get() {
+                            if let Ok(mut nid_guard) = g.nid.lock() {
+                                copy_wide_fixed(&mut nid_guard.sz_tip, &next_tip);
+                                if Shell_NotifyIconW(NIM_ADD, &*nid_guard) != 0 {
+                                    TRAY_ADDED.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    last_tip = next_tip;
+                                }
+                            }
+                        }
+                    } else if next_tip != last_tip {
                         last_tip = next_tip.clone();
                         if let Some(g) = TRAY_GLOBAL.get() {
                             if let Ok(mut nid_guard) = g.nid.lock() {
                                 copy_wide_fixed(&mut nid_guard.sz_tip, &next_tip);
-                                Shell_NotifyIconW(NIM_MODIFY, &*nid_guard);
+                                if Shell_NotifyIconW(NIM_MODIFY, &*nid_guard) == 0 {
+                                    let added = Shell_NotifyIconW(NIM_ADD, &*nid_guard) != 0;
+                                    TRAY_ADDED.store(added, std::sync::atomic::Ordering::Relaxed);
+                                }
                             }
                         }
                     }
