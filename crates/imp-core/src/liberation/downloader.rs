@@ -150,7 +150,36 @@ pub fn sanitize_path_component(raw: &str) -> String {
     let truncated: String = trimmed.chars().take(110).collect();
     let final_trim = truncated.trim().trim_matches('.').trim();
     if final_trim.is_empty() {
-        "Unknown".to_string()
+        return "Unknown".to_string();
+    }
+    let upper = final_trim.to_ascii_uppercase();
+    let is_win_reserved = matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if is_win_reserved {
+        format!("_{final_trim}")
     } else {
         final_trim.to_string()
     }
@@ -411,6 +440,7 @@ impl LiberationDownloadController {
         dest_dir: PathBuf,
         scope: String,
         allow_partial_space: bool,
+        retry_failed: bool,
         max_tracks: Option<usize>,
     ) -> Result<LiberationDownloadStatusResponse> {
         if self.runtime.lock().unwrap().running {
@@ -419,6 +449,10 @@ impl LiberationDownloadController {
         if dest_dir.as_os_str().is_empty() {
             return Err(anyhow!("Destination folder is required"));
         }
+        if retry_failed {
+            let _ = cache.reset_failed_liberation_downloads();
+        }
+        let _ = cache.reset_interrupted_liberation_downloads();
         let preflight = preflight_download(&cache, &dest_dir, &scope)?;
         if preflight.critical_low_space {
             return Err(anyhow!(
@@ -439,7 +473,6 @@ impl LiberationDownloadController {
         let (dev_token, user_token) = resolve_tokens(&settings)?;
         std::fs::create_dir_all(&dest_dir)
             .with_context(|| format!("Failed to create destination folder {}", dest_dir.display()))?;
-        let _ = cache.reset_failed_liberation_downloads();
 
         self.pause_flag.store(false, Ordering::SeqCst);
         let now = current_unix_sec();
@@ -569,9 +602,21 @@ impl LiberationDownloadController {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(part_path, &bytes)?;
+        let raw_ver = verify_audio_file(part_path, Some(track.duration_ms));
+        if raw_ver.status != "verified_ok" {
+            return Ok(raw_ver);
+        }
+
         let art = Self::fetch_artwork_cached(art_cache, track.artwork_url.as_deref());
-        let _ = embed_liberation_metadata_tags(part_path, track, art.as_deref());
-        Ok(verify_audio_file(part_path, Some(track.duration_ms)))
+        if embed_liberation_metadata_tags(part_path, track, art.as_deref()).is_ok() {
+            let post_ver = verify_audio_file(part_path, Some(track.duration_ms));
+            if post_ver.status == "verified_ok" {
+                return Ok(post_ver);
+            }
+            // Roll back clean untagged audio bytes if lofty tag save corrupted container framing
+            std::fs::write(part_path, &bytes)?;
+        }
+        Ok(raw_ver)
     }
 
     fn run_worker(
@@ -972,6 +1017,9 @@ mod tests {
     #[test]
     fn test_sanitize_and_build_reclaimed_track_path() {
         assert_eq!(sanitize_path_component("A/B:C*D?"), "A_B_C_D_");
+        assert_eq!(sanitize_path_component("CON"), "_CON");
+        assert_eq!(sanitize_path_component("nul"), "_nul");
+        assert_eq!(sanitize_path_component("Com1"), "_Com1");
         let dest = Path::new("/tmp/reclaimed");
         let rec = sample_record();
         let built = build_reclaimed_track_path(dest, &rec, "mp3");

@@ -9,7 +9,7 @@ use lofty::tag::Accessor;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::{Cursor, ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -88,6 +88,270 @@ fn compute_blake3_hex(path: &Path) -> Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn parse_leading_id3v2_skip_offset(buf: &[u8]) -> usize {
+    let mut off = 0usize;
+    while buf.len().saturating_sub(off) >= 10 && &buf[off..off + 3] == b"ID3" {
+        let size = (((buf[off + 6] & 0x7f) as usize) << 21)
+            | (((buf[off + 7] & 0x7f) as usize) << 14)
+            | (((buf[off + 8] & 0x7f) as usize) << 7)
+            | ((buf[off + 9] & 0x7f) as usize);
+        let footer = if (buf[off + 5] & 0x10) != 0 { 10 } else { 0 };
+        let total = 10usize.saturating_add(size).saturating_add(footer);
+        if total == 0 || off.saturating_add(total) > buf.len() {
+            break;
+        }
+        off += total;
+    }
+    off
+}
+
+fn plausible_mp3_frame_len(buf: &[u8], pos: usize) -> Option<usize> {
+    if pos + 4 > buf.len() {
+        return None;
+    }
+    let b0 = buf[pos];
+    let b1 = buf[pos + 1];
+    let b2 = buf[pos + 2];
+    if b0 != 0xFF || (b1 & 0xE0) != 0xE0 {
+        return None;
+    }
+    let ver = (b1 >> 3) & 0x03;
+    let layer = (b1 >> 1) & 0x03;
+    let br_idx = (b2 >> 4) & 0x0F;
+    let sr_idx = (b2 >> 2) & 0x03;
+    if ver == 0x01 || layer != 0x01 || br_idx == 0 || br_idx == 0x0F || sr_idx >= 0x03 {
+        return None;
+    }
+    let bitrate_kbps: usize = match ver {
+        0x03 => [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0][br_idx as usize],
+        _ => [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0][br_idx as usize],
+    };
+    let sample_rate: usize = match ver {
+        0x03 => [44_100, 48_000, 32_000][sr_idx as usize],
+        0x02 => [22_050, 24_000, 16_000][sr_idx as usize],
+        _ => [11_025, 12_000, 8_000][sr_idx as usize],
+    };
+    let padding = ((b2 >> 1) & 0x01) as usize;
+    let coeff = if ver == 0x03 { 144 } else { 72 };
+    let frame_len = (coeff * bitrate_kbps * 1000) / sample_rate + padding;
+    if frame_len < 24 {
+        return None;
+    }
+    Some(frame_len)
+}
+
+fn find_fallback_payload_offset(file_path: &Path) -> Option<(u64, Option<&'static str>)> {
+    let mut f = File::open(file_path).ok()?;
+    let mut buf = vec![0u8; 512 * 1024];
+    let n = f.read(&mut buf).ok()?;
+    buf.truncate(n);
+    if buf.len() < 16 {
+        return None;
+    }
+
+    let id3_skip = parse_leading_id3v2_skip_offset(&buf);
+    let scan_end = buf.len().min(id3_skip.saturating_add(256 * 1024));
+    for i in id3_skip..scan_end {
+        let rem = &buf[i..];
+        let container = if rem.starts_with(b"fLaC") {
+            Some("flac")
+        } else if rem.len() >= 12 && &rem[4..8] == b"ftyp" {
+            Some("m4a")
+        } else if rem.starts_with(b"OggS") {
+            Some("ogg")
+        } else if rem.len() >= 12 && rem.starts_with(b"RIFF") && &rem[8..12] == b"WAVE" {
+            Some("wav")
+        } else if rem.len() >= 12
+            && rem.starts_with(b"FORM")
+            && (&rem[8..12] == b"AIFF" || &rem[8..12] == b"AIFC")
+        {
+            Some("aiff")
+        } else {
+            None
+        };
+        if container.is_some() {
+            return Some((i as u64, container));
+        }
+        if let Some(frame_len) = plausible_mp3_frame_len(&buf, i) {
+            let next_pos = i + frame_len;
+            if next_pos + 2 < buf.len()
+                && buf[next_pos] == 0xFF
+                && (buf[next_pos + 1] & 0xE0) == 0xE0
+            {
+                return Some((i as u64, Some("mp3")));
+            }
+        }
+    }
+
+    if id3_skip > 0 && id3_skip < buf.len() {
+        return Some((id3_skip as u64, None));
+    }
+    None
+}
+
+struct DecodedAudioStats {
+    sample_rate: u32,
+    channels: u16,
+    decoded_frames: u64,
+    decode_errors: u64,
+    total_packets: u64,
+    peak_abs: f32,
+    fatal_error: Option<String>,
+}
+
+fn decode_audio_mss(mss: MediaSourceStream, hint_ext: Option<&str>) -> DecodedAudioStats {
+    let mut hint = Hint::new();
+    if let Some(ext) = hint_ext.map(str::trim).filter(|s| !s.is_empty()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = match get_probe().format(
+        &hint,
+        mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return DecodedAudioStats {
+                sample_rate: 0,
+                channels: 0,
+                decoded_frames: 0,
+                decode_errors: 1,
+                total_packets: 0,
+                peak_abs: 0.0,
+                fatal_error: Some(format!("Container probe failed: {e}")),
+            };
+        }
+    };
+
+    let mut format = probed.format;
+    let Some(track) = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+    else {
+        return DecodedAudioStats {
+            sample_rate: 0,
+            channels: 0,
+            decoded_frames: 0,
+            decode_errors: 1,
+            total_packets: 0,
+            peak_abs: 0.0,
+            fatal_error: Some("No decodable audio track found in container".to_string()),
+        };
+    };
+
+    let track_id = track.id;
+    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(0);
+    let mut channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count() as u16)
+        .unwrap_or(0);
+
+    let mut decoder = match get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
+        Ok(d) => d,
+        Err(e) => {
+            return DecodedAudioStats {
+                sample_rate,
+                channels,
+                decoded_frames: 0,
+                decode_errors: 1,
+                total_packets: 0,
+                peak_abs: 0.0,
+                fatal_error: Some(format!("Audio decoder initialization failed: {e}")),
+            };
+        }
+    };
+
+    let mut decoded_frames: u64 = 0;
+    let mut decode_errors: u64 = 0;
+    let mut total_packets: u64 = 0;
+    let mut peak_abs: f32 = 0.0;
+    let mut fatal_error: Option<String> = None;
+    let mut sample_buf: Option<SampleBuffer<f32>> = None;
+    let mut last_spec = None;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(SymphError::IoError(ref err)) if err.kind() == ErrorKind::UnexpectedEof => {
+                break;
+            }
+            Err(SymphError::ResetRequired) => {
+                decoder.reset();
+                continue;
+            }
+            Err(SymphError::IoError(err)) => {
+                fatal_error = Some(format!("I/O error during stream read: {err}"));
+                break;
+            }
+            Err(err) => {
+                fatal_error = Some(format!("Demux error mid-stream: {err}"));
+                break;
+            }
+        };
+
+        if packet.track_id() != track_id {
+            continue;
+        }
+        total_packets += 1;
+
+        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                let spec = *decoded.spec();
+                if spec.rate > 0 {
+                    sample_rate = spec.rate;
+                }
+                channels = spec.channels.count().max(1) as u16;
+                decoded_frames += decoded.frames() as u64;
+
+                let needs_realloc = sample_buf
+                    .as_ref()
+                    .map(|b| b.capacity() < decoded.capacity() || last_spec != Some(spec))
+                    .unwrap_or(true);
+                if needs_realloc {
+                    sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
+                    last_spec = Some(spec);
+                }
+                if let Some(ref mut sb) = sample_buf {
+                    sb.copy_interleaved_ref(decoded);
+                    for &s in sb.samples() {
+                        let a = s.abs();
+                        if a > peak_abs {
+                            peak_abs = a;
+                        }
+                    }
+                }
+            }
+            Err(SymphError::DecodeError(_)) => {
+                decode_errors += 1;
+                if decode_errors > 64 && decode_errors.saturating_mul(10) > total_packets.max(1) {
+                    break;
+                }
+            }
+            Err(SymphError::ResetRequired) => {
+                decoder.reset();
+            }
+            Err(err) => {
+                fatal_error = Some(format!("Fatal decode failure: {err}"));
+                break;
+            }
+        }
+    }
+
+    DecodedAudioStats {
+        sample_rate,
+        channels,
+        decoded_frames,
+        decode_errors,
+        total_packets,
+        peak_abs,
+        fatal_error,
+    }
 }
 
 /// 4-Stage Audio Integrity Verifier:
@@ -194,14 +458,14 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
         };
     }
 
-    // Stage 2: Symphonia full-stream decode
+    // Stage 2: Symphonia full-stream decode (with unhinted & ID3v2/payload-offset fallback)
     let file_for_decode = match File::open(path) {
         Ok(f) => f,
         Err(e) => {
             return FileVerificationResult {
                 status: "unreadable".to_string(),
                 file_size_bytes,
-                container_format,
+                container_format: ext_lower,
                 decoded_duration_ms: 0,
                 sample_rate: 0,
                 channels: 0,
@@ -219,173 +483,55 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
     };
 
     let (tag_artist, tag_album, tag_title, tag_track_number, has_artwork) = read_tag_summary(path);
-
-    let mss = MediaSourceStream::new(Box::new(file_for_decode), Default::default());
-    let mut hint = Hint::new();
-    if !ext_lower.is_empty() && ext_lower != "part" {
-        hint.with_extension(&ext_lower);
+    let primary_hint = if !ext_lower.is_empty() && ext_lower != "part" {
+        Some(ext_lower.as_str())
     } else if !container_format.is_empty() {
-        hint.with_extension(&container_format);
+        Some(container_format.as_str())
+    } else {
+        None
+    };
+
+    let mut stats = decode_audio_mss(
+        MediaSourceStream::new(Box::new(file_for_decode), Default::default()),
+        primary_hint,
+    );
+
+    if (stats.fatal_error.is_some() || stats.decoded_frames == 0) && primary_hint.is_some() {
+        if let Ok(unhinted_file) = File::open(path) {
+            let alt = decode_audio_mss(
+                MediaSourceStream::new(Box::new(unhinted_file), Default::default()),
+                None,
+            );
+            if alt.fatal_error.is_none() && alt.decoded_frames > stats.decoded_frames {
+                stats = alt;
+            }
+        }
     }
 
-    let probed = match get_probe().format(
-        &hint,
-        mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
-    ) {
-        Ok(p) => p,
-        Err(e) => {
-            return FileVerificationResult {
-                status: "corrupt_decode".to_string(),
-                file_size_bytes,
-                container_format,
-                decoded_duration_ms: 0,
-                sample_rate: 0,
-                channels: 0,
-                peak_db: None,
-                decode_errors: 1,
-                blake3_hash: None,
-                tag_artist,
-                tag_album,
-                tag_title,
-                tag_track_number,
-                has_artwork,
-                reason: Some(format!("Container probe failed: {e}")),
-            };
-        }
-    };
-
-    let mut format = probed.format;
-    let Some(track) = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-    else {
-        return FileVerificationResult {
-            status: "corrupt_decode".to_string(),
-            file_size_bytes,
-            container_format,
-            decoded_duration_ms: 0,
-            sample_rate: 0,
-            channels: 0,
-            peak_db: None,
-            decode_errors: 1,
-            blake3_hash: None,
-            tag_artist,
-            tag_album,
-            tag_title,
-            tag_track_number,
-            has_artwork,
-            reason: Some("No decodable audio track found in container".to_string()),
-        };
-    };
-
-    let track_id = track.id;
-    let mut sample_rate = track.codec_params.sample_rate.unwrap_or(0);
-    let mut channels = track
-        .codec_params
-        .channels
-        .map(|c| c.count() as u16)
-        .unwrap_or(0);
-
-    let mut decoder = match get_codecs().make(&track.codec_params, &DecoderOptions::default()) {
-        Ok(d) => d,
-        Err(e) => {
-            return FileVerificationResult {
-                status: "corrupt_decode".to_string(),
-                file_size_bytes,
-                container_format,
-                decoded_duration_ms: 0,
-                sample_rate,
-                channels,
-                peak_db: None,
-                decode_errors: 1,
-                blake3_hash: None,
-                tag_artist,
-                tag_album,
-                tag_title,
-                tag_track_number,
-                has_artwork,
-                reason: Some(format!("Audio decoder initialization failed: {e}")),
-            };
-        }
-    };
-
-    let mut decoded_frames: u64 = 0;
-    let mut decode_errors: u64 = 0;
-    let mut peak_abs: f32 = 0.0;
-    let mut fatal_io_error: Option<String> = None;
-    let mut sample_buf: Option<SampleBuffer<f32>> = None;
-    let mut last_spec = None;
-
-    loop {
-        let packet = match format.next_packet() {
-            Ok(p) => p,
-            Err(SymphError::IoError(ref err)) if err.kind() == ErrorKind::UnexpectedEof => {
-                break;
-            }
-            Err(SymphError::ResetRequired) => {
-                decoder.reset();
-                continue;
-            }
-            Err(SymphError::IoError(err)) => {
-                fatal_io_error = Some(format!("I/O error during stream read: {err}"));
-                break;
-            }
-            Err(err) => {
-                fatal_io_error = Some(format!("Demux error mid-stream: {err}"));
-                break;
-            }
-        };
-
-        if packet.track_id() != track_id {
-            continue;
-        }
-
-        match decoder.decode(&packet) {
-            Ok(decoded) => {
-                let spec = *decoded.spec();
-                if spec.rate > 0 {
-                    sample_rate = spec.rate;
-                }
-                channels = spec.channels.count().max(1) as u16;
-                decoded_frames += decoded.frames() as u64;
-
-                let needs_realloc = sample_buf
-                    .as_ref()
-                    .map(|b| b.capacity() < decoded.capacity() || last_spec != Some(spec))
-                    .unwrap_or(true);
-                if needs_realloc {
-                    sample_buf = Some(SampleBuffer::<f32>::new(decoded.capacity() as u64, spec));
-                    last_spec = Some(spec);
-                }
-                if let Some(ref mut sb) = sample_buf {
-                    sb.copy_interleaved_ref(decoded);
-                    for &s in sb.samples() {
-                        let a = s.abs();
-                        if a > peak_abs {
-                            peak_abs = a;
-                        }
+    if stats.fatal_error.is_some() || stats.decoded_frames == 0 {
+        if let Some((offset, fallback_ext)) = find_fallback_payload_offset(path) {
+            if let Ok(all_bytes) = std::fs::read(path) {
+                let slice_start = offset as usize;
+                if slice_start < all_bytes.len() {
+                    let payload = all_bytes[slice_start..].to_vec();
+                    let alt = decode_audio_mss(
+                        MediaSourceStream::new(Box::new(Cursor::new(payload)), Default::default()),
+                        fallback_ext,
+                    );
+                    if alt.fatal_error.is_none() && alt.decoded_frames > stats.decoded_frames {
+                        stats = alt;
                     }
                 }
             }
-            Err(SymphError::DecodeError(_)) => {
-                decode_errors += 1;
-                if decode_errors > 3 {
-                    break;
-                }
-            }
-            Err(SymphError::ResetRequired) => {
-                decoder.reset();
-            }
-            Err(err) => {
-                fatal_io_error = Some(format!("Fatal decode failure: {err}"));
-                break;
-            }
         }
     }
 
+    let sample_rate = stats.sample_rate;
+    let channels = stats.channels;
+    let decoded_frames = stats.decoded_frames;
+    let decode_errors = stats.decode_errors;
+    let total_packets = stats.total_packets;
+    let peak_abs = stats.peak_abs;
     let decoded_duration_ms = if sample_rate > 0 {
         (decoded_frames.saturating_mul(1000)) / (sample_rate as u64)
     } else {
@@ -397,7 +543,7 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
         None
     };
 
-    if let Some(err_msg) = fatal_io_error {
+    if let Some(err_msg) = stats.fatal_error {
         return FileVerificationResult {
             status: "corrupt_decode".to_string(),
             file_size_bytes,
@@ -417,7 +563,9 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
         };
     }
 
-    if decoded_frames == 0 || decode_errors > 3 {
+    if decoded_frames == 0
+        || (decode_errors > 25 && decode_errors.saturating_mul(20) > total_packets.max(1))
+    {
         return FileVerificationResult {
             status: "corrupt_decode".to_string(),
             file_size_bytes,
@@ -465,11 +613,11 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
     if let Some(exp_ms) = expected_duration_ms {
         if exp_ms >= 15_000 {
             let diff = decoded_duration_ms.abs_diff(exp_ms);
-            let too_short =
-                diff > 5_000 && (decoded_duration_ms as f64) < (exp_ms as f64 * 0.90);
-            let too_long =
-                diff > 10_000 && (decoded_duration_ms as f64) > (exp_ms as f64 * 1.15);
-            if too_short || too_long {
+            let severely_truncated = decoded_duration_ms < exp_ms
+                && diff > 5_000
+                && (decoded_duration_ms < 10_000
+                    || (decoded_duration_ms as f64) < (exp_ms as f64 * 0.55));
+            if severely_truncated {
                 return FileVerificationResult {
                     status: "truncated_duration".to_string(),
                     file_size_bytes,
@@ -863,6 +1011,21 @@ mod tests {
         std::fs::write(&m4p, &m4p_bytes).unwrap();
         let m4p_res = verify_audio_file(&m4p, None);
         assert_eq!(m4p_res.status, "drm_protected_m4p");
+
+        // Audio longer than stale cloud metadata OR ~80% duration MUST pass verified_ok
+        let full_wav = dir.join("valid_full.wav");
+        write_test_wav(&full_wav, 440.0, 0.5, 20_000);
+        assert_eq!(verify_audio_file(&full_wav, Some(15_000)).status, "verified_ok");
+        assert_eq!(verify_audio_file(&full_wav, Some(25_000)).status, "verified_ok");
+
+        // Stacked ID3v2 header in front of a valid WAV payload should decode via fallback offset
+        let stacked_path = dir.join("stacked_id3.mp3");
+        let wav_bytes = std::fs::read(&full_wav).unwrap();
+        let mut stacked = b"ID3\x04\x00\x00\x00\x00\x00\x04ABCD".to_vec();
+        stacked.extend_from_slice(&wav_bytes);
+        std::fs::write(&stacked_path, &stacked).unwrap();
+        let stacked_res = verify_audio_file(&stacked_path, Some(20_000));
+        assert_eq!(stacked_res.status, "verified_ok", "reason={:?}", stacked_res.reason);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

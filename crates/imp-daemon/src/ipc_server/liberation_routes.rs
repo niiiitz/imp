@@ -111,6 +111,8 @@ pub(super) struct LiberationTracksQuery {
     #[serde(default)]
     origin: Option<String>,
     #[serde(default)]
+    verification: Option<String>,
+    #[serde(default)]
     q: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
@@ -127,12 +129,14 @@ pub(super) async fn liberation_tracks_handler(
     let offset = params.offset.unwrap_or(0);
     let ownership = params.ownership;
     let origin = params.origin;
+    let verification = params.verification;
     let q = params.q;
 
     let res = tokio::task::spawn_blocking(move || {
         cache.query_liberation_tracks(
             ownership.as_deref(),
             origin.as_deref(),
+            verification.as_deref(),
             q.as_deref(),
             limit,
             offset,
@@ -207,6 +211,8 @@ pub(super) struct DownloadStartBody {
     #[serde(default)]
     allow_partial_space: bool,
     #[serde(default)]
+    retry_failed: bool,
+    #[serde(default)]
     max_tracks: Option<usize>,
 }
 
@@ -219,6 +225,7 @@ pub(super) async fn liberation_download_start_handler(
     let dest_dir = PathBuf::from(body.dest_dir.trim());
     let scope = body.scope;
     let allow_partial_space = body.allow_partial_space;
+    let retry_failed = body.retry_failed;
     let max_tracks = body.max_tracks;
     let res = tokio::task::spawn_blocking(move || {
         global_liberation_downloader().start(
@@ -227,6 +234,7 @@ pub(super) async fn liberation_download_start_handler(
             dest_dir,
             scope,
             allow_partial_space,
+            retry_failed,
             max_tracks,
         )
     })

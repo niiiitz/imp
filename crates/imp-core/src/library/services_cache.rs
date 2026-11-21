@@ -770,6 +770,7 @@ impl ServicesCacheDatabase {
         &self,
         ownership_filter: Option<&str>,
         origin_filter: Option<&str>,
+        verification_filter: Option<&str>,
         search: Option<&str>,
         limit: usize,
         offset: usize,
@@ -780,6 +781,10 @@ impl ServicesCacheDatabase {
             .filter(|s| !s.is_empty() && *s != "all")
             .map(str::to_ascii_lowercase);
         let origin_opt = origin_filter
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && *s != "all")
+            .map(str::to_ascii_lowercase);
+        let verification_opt = verification_filter
             .map(str::trim)
             .filter(|s| !s.is_empty() && *s != "all")
             .map(str::to_ascii_lowercase);
@@ -797,8 +802,9 @@ impl ServicesCacheDatabase {
                         ELSE cloud_origin_hint = ?2
                    END
                ))
-               AND (?3 IS NULL OR lower(title) LIKE ?3 OR lower(artist) LIKE ?3 OR lower(album) LIKE ?3 OR lower(library_song_id) LIKE ?3)",
-            params![ownership_opt, origin_opt, search_like],
+               AND (?3 IS NULL OR lower(title) LIKE ?3 OR lower(artist) LIKE ?3 OR lower(album) LIKE ?3 OR lower(library_song_id) LIKE ?3)
+               AND (?4 IS NULL OR verification_status = ?4)",
+            params![ownership_opt, origin_opt, search_like, verification_opt],
             |r| r.get(0),
         )?;
 
@@ -817,8 +823,9 @@ impl ServicesCacheDatabase {
                    END
                ))
                AND (?3 IS NULL OR lower(title) LIKE ?3 OR lower(artist) LIKE ?3 OR lower(album) LIKE ?3 OR lower(library_song_id) LIKE ?3)
+               AND (?4 IS NULL OR verification_status = ?4)
              ORDER BY artist ASC, album ASC, COALESCE(disc_number, 1) ASC, COALESCE(track_number, 0) ASC, title ASC
-             LIMIT ?4 OFFSET ?5",
+             LIMIT ?5 OFFSET ?6",
         )?;
 
         let rows = stmt.query_map(
@@ -826,6 +833,7 @@ impl ServicesCacheDatabase {
                 ownership_opt,
                 origin_opt,
                 search_like,
+                verification_opt,
                 limit.clamp(1, 500) as i64,
                 offset as i64
             ],
@@ -858,11 +866,11 @@ impl ServicesCacheDatabase {
     fn download_scope_where(scope: &str) -> &'static str {
         if scope.trim() == "reclaimable_only" {
             "ownership_class IN ('reclaimable_direct', 'reclaimable_clear_hls')
-             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable')"
+             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable', 'corrupt_failed')"
         } else {
             "(cloud_origin_hint = 'uploaded' OR ownership_class IN ('reclaimable_direct', 'reclaimable_clear_hls'))
              AND ownership_class NOT IN ('subscription_drm_excluded', 'unavailable')
-             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable')"
+             AND verification_status NOT IN ('verified_ok', 'skipped_drm', 'unavailable', 'corrupt_failed')"
         }
     }
 
@@ -944,6 +952,17 @@ impl ServicesCacheDatabase {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn reset_interrupted_liberation_downloads(&self) -> Result<usize> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE liberation_tracks
+             SET verification_status = 'not_downloaded'
+             WHERE verification_status = 'downloading'",
+            [],
+        )?;
+        Ok(updated)
     }
 
     pub fn reset_failed_liberation_downloads(&self) -> Result<usize> {
@@ -1431,7 +1450,14 @@ mod tests {
         db.upsert_liberation_tracks_batch(&[t1_reingest]).unwrap();
 
         let (rows, total) = db
-            .query_liberation_tracks(Some("reclaimable_direct"), Some("purchased"), Some("remastered"), 50, 0)
+            .query_liberation_tracks(
+                Some("reclaimable_direct"),
+                Some("purchased"),
+                None,
+                Some("remastered"),
+                50,
+                0,
+            )
             .unwrap();
         assert_eq!(total, 1);
         assert_eq!(rows[0].title, "Track 01 (Remastered)");
@@ -1474,6 +1500,65 @@ mod tests {
         let deleted = db.clear_liberation_tracks().unwrap();
         assert_eq!(deleted, 5);
         assert_eq!(db.get_liberation_census_summary().unwrap().total_tracks, 0);
+
+        let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+    }
+
+    #[test]
+    fn test_liberation_download_skips_corrupt_failed_and_filters_verification() {
+        let db_path = temp_cache_db_path("liberation_corrupt_skip");
+        let db = ServicesCacheDatabase::open(&db_path).unwrap();
+
+        let mut tracks = Vec::new();
+        for idx in 1..=37u32 {
+            let mut rec = sample_liberation_track(
+                &format!("i.batch{idx:02}"),
+                &format!("Track {idx:02}"),
+            );
+            rec.cloud_origin_hint = "uploaded".to_string();
+            rec.ownership_class = "reclaimable_direct".to_string();
+            rec.track_number = Some(idx);
+            tracks.push(rec);
+        }
+        assert_eq!(db.upsert_liberation_tracks_batch(&tracks).unwrap(), 37);
+
+        for idx in 1..=35u32 {
+            db.update_liberation_download_result(
+                &format!("i.batch{idx:02}"),
+                "corrupt_failed",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("Simulated decode failure"),
+            )
+            .unwrap();
+        }
+
+        // Batch limit 30 MUST skip all 35 `corrupt_failed` rows and return only the 2 `not_downloaded` rows.
+        let candidates = db
+            .list_download_candidates("uploaded_and_reclaimable", 30)
+            .unwrap();
+        let candidate_ids: Vec<String> = candidates
+            .into_iter()
+            .map(|r| r.library_song_id)
+            .collect();
+        assert_eq!(candidate_ids, vec!["i.batch36", "i.batch37"]);
+
+        let (failed_rows, failed_total) = db
+            .query_liberation_tracks(None, None, Some("corrupt_failed"), None, 50, 0)
+            .unwrap();
+        assert_eq!(failed_total, 35);
+        assert_eq!(failed_rows.len(), 35);
+
+        let reset_count = db.reset_failed_liberation_downloads().unwrap();
+        assert_eq!(reset_count, 35);
+        let (_, failed_after) = db
+            .query_liberation_tracks(None, None, Some("corrupt_failed"), None, 50, 0)
+            .unwrap();
+        assert_eq!(failed_after, 0);
 
         let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
     }

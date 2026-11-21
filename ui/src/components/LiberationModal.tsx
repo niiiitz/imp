@@ -133,6 +133,7 @@ type OwnershipFilter =
   | 'error';
 
 type OriginFilter = 'all' | 'purchased' | 'matched' | 'uploaded' | 'subscription';
+type VerificationFilter = 'all' | 'corrupt_failed' | 'verified_ok';
 
 const PAGE_LIMIT = 50;
 
@@ -224,6 +225,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
   }, []);
   const [ownershipFilter, setOwnershipFilter] = useState<OwnershipFilter>('all');
   const [originFilter, setOriginFilter] = useState<OriginFilter>('all');
+  const [verificationFilter, setVerificationFilter] = useState<VerificationFilter>('all');
   const [searchInput, setSearchInput] = useState<string>('');
   const [appliedSearch, setAppliedSearch] = useState<string>('');
   const [pageOffset, setPageOffset] = useState<number>(0);
@@ -260,6 +262,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
       const params = new URLSearchParams();
       if (ownershipFilter !== 'all') params.set('ownership', ownershipFilter);
       if (originFilter !== 'all') params.set('origin', originFilter);
+      if (verificationFilter !== 'all') params.set('verification', verificationFilter);
       if (appliedSearch.trim()) params.set('q', appliedSearch.trim());
       params.set('limit', String(PAGE_LIMIT));
       params.set('offset', String(pageOffset));
@@ -277,7 +280,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
     } finally {
       setTracksLoading(false);
     }
-  }, [ownershipFilter, originFilter, appliedSearch, pageOffset]);
+  }, [ownershipFilter, originFilter, verificationFilter, appliedSearch, pageOffset]);
 
   const fetchDiagnostics = useCallback(async () => {
     setDiagLoading(true);
@@ -953,6 +956,31 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
                 ))}
               </div>
 
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {(
+                  [
+                    ['corrupt_failed', 'Failed / Corrupt'],
+                    ['verified_ok', 'Verified OK'],
+                  ] as [Exclude<VerificationFilter, 'all'>, string][]
+                ).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    data-focusable="true"
+                    onClick={() => {
+                      setVerificationFilter((cur) => (cur === val ? 'all' : val));
+                      setPageOffset(0);
+                    }}
+                    style={filterPillStyle(
+                      verificationFilter === val,
+                      val === 'corrupt_failed' ? '#f87171' : '#34d399'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -1227,6 +1255,13 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
             destDir={rescueFolder}
             setDestDir={updateRescueFolder}
             onBrowseDest={() => setChooserTarget('download')}
+            onInspectFailed={() => {
+              setOwnershipFilter('all');
+              setOriginFilter('all');
+              setVerificationFilter('corrupt_failed');
+              setPageOffset(0);
+              setActiveTab('tracks');
+            }}
             showToast={showToast}
           />
         ) : activeTab === 'audit' ? (

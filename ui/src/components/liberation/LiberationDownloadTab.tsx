@@ -53,6 +53,7 @@ interface LiberationDownloadTabProps {
   destDir: string;
   setDestDir: (path: string) => void;
   onBrowseDest: () => void;
+  onInspectFailed?: () => void;
   showToast?: (msg: string) => void;
 }
 
@@ -61,6 +62,7 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
   destDir,
   setDestDir,
   onBrowseDest,
+  onInspectFailed,
   showToast,
 }) => {
   const [scope, setScope] = useState<'uploaded_and_reclaimable' | 'reclaimable_only'>(
@@ -126,7 +128,7 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
     }
   };
 
-  const startDownload = async (maxTracks?: number) => {
+  const startDownload = async (maxTracks?: number, retryFailed = false) => {
     if (!destDir.trim()) {
       setErrorMsg('Choose or enter a destination folder first.');
       return;
@@ -141,6 +143,7 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
           dest_dir: destDir.trim(),
           scope,
           allow_partial_space: allowPartialSpace,
+          retry_failed: retryFailed,
           max_tracks: maxTracks ?? null,
         }),
       });
@@ -149,9 +152,11 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
         setStatusData(json.data as LiberationDownloadStatusResponse);
         if (showToast) {
           showToast(
-            maxTracks
-              ? `Started Project LIBERATION Test Batch (${maxTracks} tracks)`
-              : 'Started Project LIBERATION DRM-free download reclamation'
+            retryFailed
+              ? 'Retrying failed Project LIBERATION tracks...'
+              : maxTracks
+                ? `Started Project LIBERATION Test Batch (${maxTracks} tracks)`
+                : 'Started Project LIBERATION DRM-free download reclamation'
           );
         }
       } else {
@@ -370,6 +375,28 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
             <ImpIcon name="pause" size={12} style={{ marginRight: 5 }} />
             Pause
           </button>
+
+          {(db?.corrupt_failed ?? 0) > 0 && (
+            <button
+              type="button"
+              data-focusable="true"
+              disabled={!canStart}
+              onClick={() => startDownload(undefined, true)}
+              style={{
+                padding: '7px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(248, 113, 113, 0.48)',
+                background: canStart ? 'rgba(239, 68, 68, 0.16)' : 'rgba(255,255,255,0.04)',
+                color: canStart ? '#fecaca' : '#64748b',
+                fontSize: 11.5,
+                fontWeight: 800,
+                cursor: canStart ? 'pointer' : 'not-allowed',
+              }}
+            >
+              <ImpIcon name="refresh" size={12} style={{ marginRight: 5 }} />
+              Retry Failed ({(db?.corrupt_failed ?? 0).toLocaleString()})
+            </button>
+          )}
         </div>
 
         <span style={{ fontSize: 11, color: '#94a3b8' }}>
@@ -420,9 +447,25 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
         <span style={liberationChipStyle('#38bdf8')}>
           Remaining Queue: {(db?.remaining_uploaded ?? 0).toLocaleString()} (~{formatBytesHuman(db?.estimated_remaining_bytes ?? 0)})
         </span>
-        <span style={liberationChipStyle('#f87171')}>
-          Corrupt / Failed: {db?.corrupt_failed ?? 0}
-        </span>
+        {(db?.corrupt_failed ?? 0) > 0 && onInspectFailed ? (
+          <button
+            type="button"
+            data-focusable="true"
+            onClick={onInspectFailed}
+            title="Inspect failed/corrupt tracks and exact error reasons"
+            style={{
+              ...liberationChipStyle('#f87171'),
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+          >
+            Corrupt / Failed: {db?.corrupt_failed ?? 0} (Inspect)
+          </button>
+        ) : (
+          <span style={liberationChipStyle('#f87171')}>
+            Corrupt / Failed: {db?.corrupt_failed ?? 0}
+          </span>
+        )}
         <span style={liberationChipStyle('#fb923c')}>
           Skipped DRM: {db?.skipped_drm ?? 0}
         </span>
