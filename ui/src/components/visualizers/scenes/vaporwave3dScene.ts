@@ -128,6 +128,120 @@ function drawBottlenoseDolphin(
   ctx.restore();
 }
 
+interface HydraPopupWindow {
+  id: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title: string;
+  progOffset: number;
+  openProgress: number;
+  closingFlash: number;
+}
+
+interface CursorTrailSample {
+  x: number;
+  y: number;
+}
+
+const HYDRA_POPUP_TITLES = [
+  'FREE_RAM.EXE',
+  'CONGRATS!.EXE',
+  'WIN95_ALERT',
+  'IMP_VIRUS.BAT',
+  'CLICK_ME.HTA',
+  'FATAL_0E.DLL',
+  'HOT_TRACK.WAV',
+  'BONUS_MIDI.EXE',
+];
+
+const HYDRA_MAX_POPUPS = 8;
+
+const vaporHydraState = {
+  initialized: false,
+  lastTimeSec: -1,
+  lastTrackKey: '',
+  nextId: 1,
+  popups: [] as HydraPopupWindow[],
+  cursorX: 160,
+  cursorY: 240,
+  trail: [] as CursorTrailSample[],
+  trailSampleAccum: 0,
+  phase: 'cooldown' as 'seeking' | 'clicking' | 'cooldown' | 'purging',
+  phaseTimer: 1.4,
+  targetPopupId: -1,
+  clickRingT: 0,
+  clickRingX: 0,
+  clickRingY: 0,
+};
+
+function spawnHydraPopup(indexSeed: number, horizonY: number, cropBottomY: number): HydraPopupWindow {
+  const id = vaporHydraState.nextId++;
+  const w = 136;
+  const h = 54;
+  // Deterministic non-chaotic cascading positions across lower-left/mid-left desktop
+  const col = indexSeed % 4;
+  const row = Math.floor(indexSeed / 4) % 3;
+  const minY = horizonY + 14;
+  const maxY = Math.max(minY + 10, Math.min(CANVAS_H - h - 18, cropBottomY - h - 12));
+  const rawX = 28 + col * 36 + row * 22 + ((id * 17) % 18);
+  const rawY = minY + col * 14 + row * 18;
+  const x = snapPs1(Math.max(20, Math.min(248, rawX)), 1);
+  const y = snapPs1(Math.max(minY, Math.min(maxY, rawY)), 1);
+  return {
+    id,
+    x,
+    y,
+    w,
+    h,
+    title: HYDRA_POPUP_TITLES[(id - 1) % HYDRA_POPUP_TITLES.length],
+    progOffset: (id * 0.23) % 1,
+    openProgress: 0.01,
+    closingFlash: 0,
+  };
+}
+
+function resetVaporHydraState(horizonY: number, cropBottomY: number): void {
+  vaporHydraState.initialized = true;
+  vaporHydraState.popups = [spawnHydraPopup(0, horizonY, cropBottomY)];
+  vaporHydraState.cursorX = 260;
+  vaporHydraState.cursorY = horizonY + 95;
+  vaporHydraState.trail = [];
+  vaporHydraState.trailSampleAccum = 0;
+  vaporHydraState.phase = 'cooldown';
+  vaporHydraState.phaseTimer = 1.6;
+  vaporHydraState.targetPopupId = vaporHydraState.popups[0].id;
+  vaporHydraState.clickRingT = 0;
+}
+
+function drawWin95Cursor(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  fill: string,
+  stroke: string,
+  alpha: number,
+): void {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x, y + 14);
+  ctx.lineTo(x + 4, y + 10);
+  ctx.lineTo(x + 7, y + 16);
+  ctx.lineTo(x + 9.5, y + 14.5);
+  ctx.lineTo(x + 6.5, y + 8.5);
+  ctx.lineTo(x + 11, y + 8.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 /**
  * Mode 16: Vaporwave 3D [Unified Y2K / WannaCry / Algorave / Spinning CRT Odyssey]
  * Combines the strongest elements of V1 Vaporwave, WannaCry OS, Algorave Live-Coding, and V2 3D:
@@ -135,7 +249,7 @@ function drawBottlenoseDolphin(
  * - Speeding Tron Lightcycles, Leaping Bottlenose Dolphins, Hanging Tropical Vines & Fiji Bottle
  * - Low-Poly Poseidon Greek God Bust + 3-Pronged Trident (Left) & Spinning 3D Cubes
  * - 3D Spinning Vintage CRT Desktop Computer at Center Stage (with live album art on its rotating screen!)
- * - Cascading Tiling Y2K Dialog Windows + Swarm of Chaotic Mouse Cursors
+ * - Escalating Y2K Hydra Pop-Up Windows + Single Win95 Pointer-Trails Cursor frantically trying to close them
  * - Pop-In / Pop-Out Algorave Live-Coding Terminal (`STRUDEL_REPL.EXE`) that pops open, executes beat-synced
  *   code patterns, and closes!
  */
@@ -143,6 +257,7 @@ export function renderVaporwave3dScene(s: SceneRenderContext): void {
   const {
     ctx,
     timeSec,
+    dt,
     bpm,
     beat,
     subBass,
@@ -563,36 +678,198 @@ export function renderVaporwave3dScene(s: SceneRenderContext): void {
     ctx.restore();
   }
 
-  // 8. Cascading Tiling Y2K Warning / Progress Windows (from WannaCry!)
-  const cascadeCount = 5;
-  const activeStep = Math.floor(timeSec * (3.2 + drop * 5)) % cascadeCount;
-  for (let w = 0; w <= activeStep; w++) {
-    const wx = snapPs1(36 + w * 18 + Math.sin(timeSec * 1.8 + w) * 4, 1);
-    const wy = snapPs1(horizonY + 26 + w * 14, 1);
-    const ww = 136;
-    const wh = 54;
+  // 8. Escalating Y2K Hydra Malware Pop-Up Windows (Starts slow with 1 window; closing spawns 2 more!)
+  const safeDt = dt > 0 ? Math.min(0.06, dt) : 0;
+  if (
+    !vaporHydraState.initialized ||
+    trackTitle !== vaporHydraState.lastTrackKey ||
+    (vaporHydraState.lastTimeSec >= 0 && timeSec < vaporHydraState.lastTimeSec - 2.0)
+  ) {
+    vaporHydraState.lastTrackKey = trackTitle;
+    resetVaporHydraState(horizonY, cropBottomY);
+  }
+  vaporHydraState.lastTimeSec = timeSec;
 
-    ctx.fillStyle = rgbToCss(palette[1], 0.92);
-    ctx.fillRect(wx, wy, ww, wh);
-    ctx.strokeStyle = rgbToCss(palette[6], 0.94);
+  if (safeDt > 0) {
+    // Animate popup pop-in scales & click ring
+    for (const p of vaporHydraState.popups) {
+      if (p.openProgress < 1) {
+        p.openProgress = Math.min(1, p.openProgress + safeDt * 5.2);
+      }
+      if (p.closingFlash > 0) {
+        p.closingFlash = Math.max(0, p.closingFlash - safeDt * 4.0);
+      }
+    }
+    if (vaporHydraState.clickRingT > 0) {
+      vaporHydraState.clickRingT = Math.max(0, vaporHydraState.clickRingT - safeDt * 2.8);
+    }
+
+    const popupCount = vaporHydraState.popups.length;
+    // Escalate cursor urgency gradually: calm & deliberate at 1–2 windows, faster as hydra multiplies
+    const panicFactor = Math.min(1, Math.max(0, (popupCount - 1) / (HYDRA_MAX_POPUPS - 1)));
+
+    if (vaporHydraState.phase === 'purging') {
+      vaporHydraState.phaseTimer -= safeDt;
+      if (vaporHydraState.phaseTimer <= 0) {
+        vaporHydraState.popups = [spawnHydraPopup(0, horizonY, cropBottomY)];
+        vaporHydraState.targetPopupId = vaporHydraState.popups[0].id;
+        vaporHydraState.phase = 'cooldown';
+        vaporHydraState.phaseTimer = 1.8;
+      }
+    } else if (vaporHydraState.phase === 'cooldown') {
+      vaporHydraState.phaseTimer -= safeDt;
+      // Gentle idle hover drift while waiting
+      vaporHydraState.cursorX += Math.sin(timeSec * 1.4) * 14 * safeDt;
+      vaporHydraState.cursorY += Math.cos(timeSec * 1.1) * 9 * safeDt;
+      if (vaporHydraState.phaseTimer <= 0 && vaporHydraState.popups.length > 0) {
+        const topWin = vaporHydraState.popups[vaporHydraState.popups.length - 1];
+        vaporHydraState.targetPopupId = topWin.id;
+        vaporHydraState.phase = 'seeking';
+      }
+    } else if (vaporHydraState.phase === 'seeking') {
+      const targetWin =
+        vaporHydraState.popups.find((p) => p.id === vaporHydraState.targetPopupId) ||
+        vaporHydraState.popups[vaporHydraState.popups.length - 1];
+      if (!targetWin) {
+        vaporHydraState.phase = 'cooldown';
+        vaporHydraState.phaseTimer = 1.2;
+      } else {
+        const tx = targetWin.x + targetWin.w - 7.5;
+        const ty = targetWin.y + 6.5;
+        const dx = tx - vaporHydraState.cursorX;
+        const dy = ty - vaporHydraState.cursorY;
+        const dist = Math.hypot(dx, dy);
+        const speed = 115 + panicFactor * 165;
+        if (dist <= Math.max(4, speed * safeDt)) {
+          vaporHydraState.cursorX = tx;
+          vaporHydraState.cursorY = ty;
+          vaporHydraState.phase = 'clicking';
+          vaporHydraState.phaseTimer = 0.22 - panicFactor * 0.08;
+          targetWin.closingFlash = 1.0;
+          vaporHydraState.clickRingT = 1.0;
+          vaporHydraState.clickRingX = tx;
+          vaporHydraState.clickRingY = ty;
+        } else {
+          vaporHydraState.cursorX += (dx / dist) * speed * safeDt;
+          vaporHydraState.cursorY += (dy / dist) * speed * safeDt;
+        }
+      }
+    } else if (vaporHydraState.phase === 'clicking') {
+      vaporHydraState.phaseTimer -= safeDt;
+      if (vaporHydraState.phaseTimer <= 0) {
+        const idx = vaporHydraState.popups.findIndex((p) => p.id === vaporHydraState.targetPopupId);
+        if (idx >= 0) {
+          vaporHydraState.popups.splice(idx, 1);
+        }
+        if (vaporHydraState.popups.length + 1 >= HYDRA_MAX_POPUPS) {
+          // Overwhelmed by hydra pop-ups -> brief END TASK purge resets the comedic loop!
+          vaporHydraState.popups = [];
+          vaporHydraState.phase = 'purging';
+          vaporHydraState.phaseTimer = 1.45;
+        } else {
+          // Classic malware hydra: closing 1 pop-up spawns 2 more!
+          const toSpawn = Math.min(2, HYDRA_MAX_POPUPS - vaporHydraState.popups.length);
+          for (let k = 0; k < toSpawn; k++) {
+            vaporHydraState.popups.push(
+              spawnHydraPopup(vaporHydraState.popups.length + k, horizonY, cropBottomY),
+            );
+          }
+          vaporHydraState.phase = 'cooldown';
+          // Starts slow (~1.35s) and ramps to a brisk (~0.38s) cadence as windows stack up
+          vaporHydraState.phaseTimer = Math.max(0.36, 1.35 - panicFactor * 0.95);
+        }
+      }
+    }
+
+    // Record classic Win95 Mouse Trail ghosts at a steady ~32ms interval (looks crisp at both 30 & 60 FPS)
+    vaporHydraState.trailSampleAccum += safeDt;
+    if (vaporHydraState.trailSampleAccum >= 0.032) {
+      vaporHydraState.trailSampleAccum = 0;
+      vaporHydraState.trail.unshift({ x: vaporHydraState.cursorX, y: vaporHydraState.cursorY });
+      if (vaporHydraState.trail.length > 7) {
+        vaporHydraState.trail.length = 7;
+      }
+    }
+  }
+
+  // Render active Hydra Pop-Up Windows (or brief END TASK purge banner)
+  if (vaporHydraState.phase === 'purging') {
+    const px = 42;
+    const py = horizonY + 46;
+    const pw = 178;
+    const ph = 42;
+    ctx.save();
+    ctx.fillStyle = rgbToCss(palette[0], 0.92);
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = rgbToCss(palette[7], 0.95);
     ctx.lineWidth = 1.4;
-    ctx.strokeRect(wx, wy, ww, wh);
+    ctx.strokeRect(px, py, pw, ph);
+    ctx.fillStyle = rgbToCss(palette[5], 0.94);
+    ctx.fillRect(px + 2, py + 2, pw - 4, 11);
+    ctx.font = 'bold 7.5px "JetBrains Mono", monospace';
+    ctx.fillStyle = rgbToCss(palette[0], 0.98);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('TASKMGR.EXE — END TASK', px + 6, py + 7.5);
+    ctx.fillStyle = rgbToCss(palette[7], 0.92);
+    ctx.font = 'bold 8.5px "JetBrains Mono", monospace';
+    ctx.fillText('PURGING POP-UPS...', px + 10, py + 28);
+    ctx.restore();
+  } else {
+    for (let w = 0; w < vaporHydraState.popups.length; w++) {
+      const pop = vaporHydraState.popups[w];
+      const scale = 0.55 + 0.45 * pop.openProgress;
+      const cxWin = pop.x + pop.w * 0.5;
+      const cyWin = pop.y + pop.h * 0.5;
 
-    // Title bar
-    ctx.fillStyle = rgbToCss(palette[4 + (w & 1)], 0.95);
-    ctx.fillRect(wx + 2, wy + 2, ww - 4, 10);
-    ctx.fillStyle = rgbToCss(palette[7], 0.98);
-    ctx.fillRect(wx + ww - 11, wy + 3, 7, 7);
+      ctx.save();
+      ctx.translate(cxWin, cyWin);
+      ctx.scale(scale, scale);
+      const wx = -pop.w * 0.5;
+      const wy = -pop.h * 0.5;
 
-    // Looping segmented progress bar inside each tiled window
-    const progW = ww - 18;
-    ctx.strokeStyle = rgbToCss(palette[5], 0.88);
-    ctx.strokeRect(wx + 9, wy + 30, progW, 10);
-    const fillRatio = ((timeSec * 0.95 + w * 0.21) % 1);
-    const blocks = Math.floor(fillRatio * 8);
-    ctx.fillStyle = rgbToCss(palette[6], 0.95);
-    for (let b = 0; b < blocks; b++) {
-      ctx.fillRect(wx + 11 + b * 14, wy + 32, 11, 6);
+      ctx.fillStyle = rgbToCss(palette[1], 0.93);
+      ctx.fillRect(wx, wy, pop.w, pop.h);
+      ctx.strokeStyle = rgbToCss(palette[6], 0.95);
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(wx, wy, pop.w, pop.h);
+
+      // Win95 Title Bar
+      ctx.fillStyle = rgbToCss(palette[4 + (pop.id & 1)], 0.96);
+      ctx.fillRect(wx + 2, wy + 2, pop.w - 4, 11);
+
+      ctx.font = 'bold 7px "JetBrains Mono", monospace';
+      ctx.fillStyle = rgbToCss(palette[0], 0.98);
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(pop.title, wx + 5, wy + 7.5);
+
+      // Clickable `[X]` close button (flashes inverted when cursor clicks it!)
+      const btnX = wx + pop.w - 12;
+      const btnY = wy + 3;
+      ctx.fillStyle = pop.closingFlash > 0.1 ? '#ef4444' : rgbToCss(palette[7], 0.98);
+      ctx.fillRect(btnX, btnY, 9, 9);
+      ctx.strokeStyle = rgbToCss(palette[0], 0.96);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(btnX + 2, btnY + 2);
+      ctx.lineTo(btnX + 7, btnY + 7);
+      ctx.moveTo(btnX + 7, btnY + 2);
+      ctx.lineTo(btnX + 2, btnY + 7);
+      ctx.stroke();
+
+      // Looping segmented Win95 progress bar inside each window
+      const progW = pop.w - 18;
+      ctx.strokeStyle = rgbToCss(palette[5], 0.88);
+      ctx.lineWidth = 1.1;
+      ctx.strokeRect(wx + 9, wy + 30, progW, 10);
+      const fillRatio = (timeSec * 0.55 + pop.progOffset) % 1;
+      const blocks = Math.floor(fillRatio * 8);
+      ctx.fillStyle = rgbToCss(palette[6], 0.95);
+      for (let b = 0; b < blocks; b++) {
+        ctx.fillRect(wx + 11 + b * 14, wy + 32, 11, 6);
+      }
+      ctx.restore();
     }
   }
 
@@ -727,25 +1004,37 @@ export function renderVaporwave3dScene(s: SceneRenderContext): void {
     ctx.stroke();
   }
 
-  // 12. Swarm of Chaotic Pixel Mouse Cursors Darting Across the Scene (from WannaCry!)
-  for (let c = 0; c < 5; c++) {
-    const curX = cx + Math.sin(timeSec * (2.1 + c * 0.35) + c * 1.7) * 220;
-    const curY = CANVAS_H * 0.5 + Math.cos(timeSec * (1.8 + c * 0.45) + c * 2.1) * 115;
-    ctx.fillStyle = rgbToCss(palette[7], 0.98);
-    ctx.strokeStyle = rgbToCss(palette[0], 0.98);
-    ctx.lineWidth = 1.2;
+  // 12. Single Smart Win95 Mouse Cursor with Classic Pointer Trails Chasing Pop-Up `[X]` Buttons!
+  if (vaporHydraState.clickRingT > 0.02) {
+    const r = (1 - vaporHydraState.clickRingT) * 16 + 3;
+    ctx.save();
+    ctx.strokeStyle = rgbToCss(palette[7], vaporHydraState.clickRingT * 0.85);
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.moveTo(curX, curY);
-    ctx.lineTo(curX, curY + 13);
-    ctx.lineTo(curX + 4, curY + 9);
-    ctx.lineTo(curX + 7, curY + 15);
-    ctx.lineTo(curX + 9, curY + 13);
-    ctx.lineTo(curX + 6, curY + 7);
-    ctx.lineTo(curX + 10, curY + 7);
-    ctx.closePath();
-    ctx.fill();
+    ctx.arc(vaporHydraState.clickRingX, vaporHydraState.clickRingY, r, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
   }
+  for (let t = vaporHydraState.trail.length - 1; t >= 0; t--) {
+    const sample = vaporHydraState.trail[t];
+    const ghostAlpha = (1 - (t + 1) / (vaporHydraState.trail.length + 1)) * 0.56;
+    drawWin95Cursor(
+      ctx,
+      sample.x,
+      sample.y,
+      rgbToCss(palette[6], 0.92),
+      rgbToCss(palette[0], 0.85),
+      ghostAlpha,
+    );
+  }
+  drawWin95Cursor(
+    ctx,
+    vaporHydraState.cursorX,
+    vaporHydraState.cursorY,
+    rgbToCss(palette[7], 0.99),
+    rgbToCss(palette[0], 0.99),
+    1.0,
+  );
 
   // 13A. Palette-Tinted Win95 `IMP_LYRICS.EXE` Dialog for `activeLyric` (Upper Center)
   const cleanLyric = (activeLyric || '').trim();

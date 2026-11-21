@@ -3,11 +3,14 @@ import { defaultSimpClient, type SoundCloudComment, type TrackMetadata } from '@
 import {
   getSceneDescriptor,
   loadEnabledVisualizerScenes,
+  loadVisualizerFpsCap,
   saveEnabledVisualizerScenes,
+  saveVisualizerFpsCap,
   VISUALIZER_ENGINES,
   VISUALIZER_MODES,
   VISUALIZER_SCENES,
   type VisualizerEngine,
+  type VisualizerFpsCap,
   type VisualizerMode,
 } from './visualizers/sceneRegistry';
 import { isValidAttributedComment } from './visualizers/VisualizerOverlayHud';
@@ -52,11 +55,14 @@ import { renderAvsV2Scene } from './visualizers/scenes/avsV2Scene';
 export {
   getSceneDescriptor,
   loadEnabledVisualizerScenes,
+  loadVisualizerFpsCap,
   saveEnabledVisualizerScenes,
+  saveVisualizerFpsCap,
   VISUALIZER_ENGINES,
   VISUALIZER_MODES,
   VISUALIZER_SCENES,
   type VisualizerEngine,
+  type VisualizerFpsCap,
   type VisualizerMode,
 };
 
@@ -90,6 +96,7 @@ const UNIFIED_SCENE_RENDERERS: Record<
 interface Props {
   mode: VisualizerMode;
   enabledScenes?: VisualizerEngine[];
+  fpsCap?: VisualizerFpsCap;
   preferredScene?: VisualizerEngine | null;
   onActiveEngineChange?: (engine: VisualizerEngine) => void;
   isPlaying: boolean;
@@ -111,6 +118,7 @@ interface Props {
 export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   mode,
   enabledScenes,
+  fpsCap,
   preferredScene = null,
   onActiveEngineChange,
   isPlaying,
@@ -138,6 +146,8 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const modeRef = useRef<VisualizerMode>(mode);
   modeRef.current = mode;
+  const fpsCapRef = useRef<VisualizerFpsCap>(fpsCap ?? loadVisualizerFpsCap());
+  fpsCapRef.current = fpsCap ?? loadVisualizerFpsCap();
   const enabledScenesRef = useRef<VisualizerEngine[]>(
     enabledScenes && enabledScenes.length > 0 ? enabledScenes : VISUALIZER_ENGINES,
   );
@@ -742,15 +752,17 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       }
 
       // Frame rate governor:
-      // - 30 FPS (32ms budget) when actively playing
-      // - 0 FPS when paused (at most 1 static preview frame if mode changed while paused)
+      // - 60 FPS default (~15.0ms budget for clean 60Hz lock) or 30 FPS Eco (~32.0ms) when playing
+      // - 0 FPS complete freeze when paused (at most 1 static preview frame if mode changed while paused)
+      let dt = 0;
       if (playing) {
         const elapsedMs = nowPerf - lastFramePerf;
-        if (elapsedMs < 32.0) {
+        const minFrameMs = fpsCapRef.current === 30 ? 32.0 : 15.0;
+        if (elapsedMs < minFrameMs) {
           return;
         }
         frameCount++;
-        const dt = Math.min(0.08, Math.max(0.008, elapsedMs * 0.001));
+        dt = Math.min(0.08, Math.max(0.004, elapsedMs * 0.001));
         lastFramePerf = nowPerf;
         simTimeSecRef.current += dt;
         sharedSimTimeSec = simTimeSecRef.current;
@@ -758,7 +770,6 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         lastFramePerf = nowPerf;
       }
 
-      const dt = playing ? 0.033 : 0;
       const timeSec = simTimeSecRef.current;
       lastRenderedModeRef.current = modeRef.current;
 
@@ -830,14 +841,20 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         }
       }
 
-      // Smooth attack / deliberate release for the 16 bands
+      // Smooth attack / deliberate release for the 16 bands (dt-normalized for identical feel at 30 & 60 FPS)
+      const smoothDt = dt > 0 ? dt : 0.0167;
+      const attackAlpha = 1 - Math.exp(-19.8 * smoothDt);
+      const releaseAlpha = 1 - Math.exp(-4.92 * smoothDt);
       let subBass = 0;
       let midEnergy = 0;
       let highEnergy = 0;
       for (let i = 0; i < 16; i++) {
         const target = tb[i];
         const cur = sb[i];
-        const next = target > cur ? cur + (target - cur) * 0.48 : cur + (target - cur) * 0.15;
+        const next =
+          target > cur
+            ? cur + (target - cur) * attackAlpha
+            : cur + (target - cur) * releaseAlpha;
         sb[i] = next;
         if (i < 4) subBass += next;
         else if (i < 10) midEnergy += next;
@@ -883,10 +900,12 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         spawnGlyphMutation(true, 3);
       }
 
-      // Periodic organic mutation & micro-glitch
-      if (highEnergy > 0.56 && glitchTimerRef.current <= 0.05 && (frameCount & 7) === 0) {
+      // Periodic organic mutation & micro-glitch (rate-normalized across 30/60 FPS)
+      const glitchMask = fpsCapRef.current === 30 ? 7 : 15;
+      const mutMask = fpsCapRef.current === 30 ? 63 : 127;
+      if (highEnergy > 0.56 && glitchTimerRef.current <= 0.05 && (frameCount & glitchMask) === 0) {
         triggerGlitchBurst(0.48);
-      } else if ((frameCount & 63) === 0 && isPlayingRef.current) {
+      } else if ((frameCount & mutMask) === 0 && isPlayingRef.current) {
         spawnGlyphMutation(Boolean(activeLyricRef.current));
       }
 
@@ -954,7 +973,8 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       const drawVertigoStyleHologram = (
         rawText: string,
         targetAnchorX = 0,
-        targetAnchorY = 0
+        targetAnchorY = 0,
+        centerVertically = false,
       ) => {
         const trimmed = rawText.trim();
         if (trimmed.length === 0) return;
@@ -1005,14 +1025,26 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         // Dynamically offset below `cropTopY` so 2-line lyrics are never cropped on ultra-wide (21:9 / 32:9) displays
         const safeTopY = Math.max(28, cropTopY + 18);
         const minCenterY = safeTopY + boxH * 0.5;
-        const rawHoloY =
-          minCenterY +
-          6 +
-          vertigoSmoothSpineYRef.current +
-          Math.cos(timeSec * 1.25) * 2.5 -
-          (1 - reveal) * 5;
-        const maxCenterY = Math.max(minCenterY, minCenterY + 22);
-        const holoY = Math.max(minCenterY, Math.min(maxCenterY, rawHoloY));
+        const maxBottomY = Math.min(CANVAS_H - 20, cropBottomY - 16) - boxH * 0.5;
+        let holoY: number;
+        if (centerVertically) {
+          const midY = (cropTopY + cropBottomY) * 0.5;
+          const rawCenterY =
+            midY +
+            vertigoSmoothSpineYRef.current +
+            Math.cos(timeSec * 1.25) * 2.5 -
+            (1 - reveal) * 5;
+          holoY = Math.max(minCenterY, Math.min(Math.max(minCenterY, maxBottomY), rawCenterY));
+        } else {
+          const rawHoloY =
+            minCenterY +
+            6 +
+            vertigoSmoothSpineYRef.current +
+            Math.cos(timeSec * 1.25) * 2.5 -
+            (1 - reveal) * 5;
+          const maxCenterY = Math.max(minCenterY, minCenterY + 22);
+          holoY = Math.max(minCenterY, Math.min(maxCenterY, rawHoloY));
+        }
 
         ctx.save();
         ctx.translate(holoX, holoY);

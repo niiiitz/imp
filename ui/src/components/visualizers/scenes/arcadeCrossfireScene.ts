@@ -60,6 +60,8 @@ const pelletRespawnAt = new Float64Array(PELLET_COUNT);
 // 3 Ground Missile Command Silos State (`siloDisabledUntil[i] > timeSec` means hit & inactivated!)
 const siloDisabledUntil = new Float64Array([0, 0, 0]);
 const siloBlastUntil = new Float64Array([0, 0, 0]);
+const siloInvulnUntil = new Float64Array([0, 0, 0]);
+const siloWasDisabled = new Uint8Array([0, 0, 0]);
 
 // Diving Space Invader State (Invaders don't shoot — they descend/dive to blow up silos!)
 interface DivingInvaderRun {
@@ -375,12 +377,21 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
     rebuildWaveUntilSec = timeSec + 0.65;
     siloDisabledUntil.fill(0);
     siloBlastUntil.fill(0);
+    siloInvulnUntil.fill(0);
+    siloWasDisabled.fill(0);
   }
 
-  // Handle clock seeks backward
+  // Handle clock seeks backward & grant 4.0s respawn invincibility frames whenever an offline silo returns
   for (let i = 0; i < 3; i++) {
     if (siloDisabledUntil[i] > timeSec + 30) siloDisabledUntil[i] = 0;
     if (siloBlastUntil[i] > timeSec + 5) siloBlastUntil[i] = 0;
+    if (siloInvulnUntil[i] > timeSec + 8) siloInvulnUntil[i] = 0;
+    if (siloDisabledUntil[i] > timeSec) {
+      siloWasDisabled[i] = 1;
+    } else if (siloWasDisabled[i] === 1) {
+      siloWasDisabled[i] = 0;
+      siloInvulnUntil[i] = timeSec + 4.0;
+    }
   }
   for (let j = 0; j < 2; j++) {
     if (joustHitUntil[j] > timeSec + 5) joustHitUntil[j] = 0;
@@ -733,9 +744,17 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
       }
 
       // Roughly ~18% low chance the diving Space Invader slips past flak and blows up the silo
-      // (or ~32% if the target silo is already offline and relying on cross-fire)
+      // (or ~32% if the target silo is already offline and relying on cross-fire).
+      // Silos within their 4s respawn invincibility window always line up clean counter-fire!
+      const targetIsInvuln = timeSec < siloInvulnUntil[targetSilo];
       const hitRoll = ((diveRandomCounter >> 8) & 255) / 255;
-      const threshold = firingSilo === targetSilo ? 0.18 : firingSilo >= 0 ? 0.30 : 1.0;
+      const threshold = targetIsInvuln
+        ? 0.0
+        : firingSilo === targetSilo
+          ? 0.18
+          : firingSilo >= 0
+            ? 0.30
+            : 1.0;
 
       run.active = true;
       run.slotIndex = slotIndex;
@@ -803,14 +822,18 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
         run.explosionY = invY;
         spawnBlockShatter(invX, invY, palette[6] || [251, 146, 60], 8);
       } else if (run.progress >= 1.0) {
-        // Direct Kamikaze Hit on the Ground Silo! Blow up and INACTIVATE that silo!
+        // Direct Kamikaze Hit on the Ground Silo! Deflect harmlessly if within 4s respawn i-frames.
         run.active = false;
         run.explodingTimer = 0.75;
         run.explosionX = dstX;
         run.explosionY = dstY;
-        siloDisabledUntil[run.targetSilo] = timeSec + 20.0;
-        siloBlastUntil[run.targetSilo] = timeSec + 1.1;
-        spawnBlockShatter(dstX, dstY, [244, 63, 94], 12);
+        if (timeSec < siloInvulnUntil[run.targetSilo]) {
+          spawnBlockShatter(dstX, dstY - 12, [56, 189, 248], 10);
+        } else {
+          siloDisabledUntil[run.targetSilo] = timeSec + 20.0;
+          siloBlastUntil[run.targetSilo] = timeSec + 1.1;
+          spawnBlockShatter(dstX, dstY, [244, 63, 94], 12);
+        }
       }
     }
 
@@ -880,9 +903,11 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
       ctx.fillText('OFFLINE', sx, siloGroundY - 12);
     } else {
       // Intact Armored Missile Command Silo Bunker + 3 Ready Warheads
-      ctx.fillStyle = rgbToCss(palette[2], 0.94);
-      ctx.strokeStyle = rgbToCss(palette[6], 0.92);
-      ctx.lineWidth = 1.5;
+      const isInvuln = timeSec < siloInvulnUntil[si];
+      const invulnBlink = !isInvuln || ((Math.floor(timeSec * 14) & 1) === 0);
+      ctx.fillStyle = rgbToCss(palette[2], invulnBlink ? 0.94 : 0.56);
+      ctx.strokeStyle = isInvuln ? '#7dd3fc' : rgbToCss(palette[6], 0.92);
+      ctx.lineWidth = isInvuln ? 1.9 : 1.5;
       ctx.beginPath();
       ctx.moveTo(sx - 28, siloGroundY);
       ctx.lineTo(sx - 16, siloGroundY - 15);
@@ -897,10 +922,30 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
       for (let m = -1; m <= 1; m++) {
         ctx.fillRect(sx + m * 7 - 1.5, siloGroundY - 11, 3, 7);
       }
-      ctx.font = '800 7px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = rgbToCss(palette[7], 0.78);
-      ctx.fillText(siloNames[si], sx, siloGroundY - 18);
+
+      // 4s Respawn Invincibility Energy Dome & Shield Label
+      if (isInvuln) {
+        const rem = Math.max(0, siloInvulnUntil[si] - timeSec);
+        const pulse = 0.45 + 0.45 * Math.sin(timeSec * 16 + si);
+        ctx.strokeStyle = `rgba(125, 211, 252, ${(0.55 + pulse * 0.4).toFixed(2)})`;
+        ctx.fillStyle = `rgba(56, 189, 248, ${(0.10 + pulse * 0.10).toFixed(2)})`;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(sx, siloGroundY - 2, 30, Math.PI, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = '800 7px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillText(`SHIELD ${rem.toFixed(0)}s`, sx, siloGroundY - 20);
+      } else {
+        ctx.font = '800 7px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = rgbToCss(palette[7], 0.78);
+        ctx.fillText(siloNames[si], sx, siloGroundY - 18);
+      }
     }
     ctx.restore();
   }

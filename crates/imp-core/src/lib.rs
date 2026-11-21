@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 /// Returns `Some(<exe_dir>/data)` when IMP is running in Portable Mode
-/// (i.e. `portable.txt` exists next to `imp` / `imp.exe`, or `IMP_PORTABLE_DIR` / `SIMP_PORTABLE_DIR` is set).
+/// (i.e. `portable.txt` exists next to `imp` / `Imp.exe`, or `IMP_PORTABLE_DIR` / `SIMP_PORTABLE_DIR` is set).
 pub fn portable_data_dir() -> Option<PathBuf> {
     for env_key in ["IMP_PORTABLE_DIR", "SIMP_PORTABLE_DIR"] {
         if let Ok(env_dir) = std::env::var(env_key) {
@@ -272,7 +272,7 @@ pub fn seed_windows_browser_widevine_profile(profile_dir: &std::path::Path) {
 }
 
 /// Raises/focuses an existing `"SIMP — Simple Integrated Media Player"` window on Windows if one is already open,
-/// preventing duplicate console windows when clicking the System Tray icon or launching `simp.exe`.
+/// preventing duplicate console windows when clicking the System Tray icon or launching `Imp.exe`.
 pub fn focus_existing_windows_ui_window() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -726,7 +726,7 @@ unsafe fn apply_windows_efficiency_mode_to_handle(h_process: *mut std::ffi::c_vo
 /// Applies process-level Efficiency Mode:
 /// - **macOS**: Clamps `simp` into `PRIO_DARWIN_BG` (`TH_BUCKET_SHARE_BG`, equivalent to `taskpolicy -b -p <pid>`)
 ///   so Apple Silicon schedules main/worker threads onto Efficiency Cores while keeping disk I/O unthrottled.
-/// - **Windows 11**: Sets process-wide `EcoQoS` (`ProcessPowerThrottling`) + `IDLE_PRIORITY_CLASS` so `simp.exe`
+/// - **Windows 11**: Sets process-wide `EcoQoS` (`ProcessPowerThrottling`) + `IDLE_PRIORITY_CLASS` so `Imp.exe`
 ///   and child processes appear in Windows Task Manager Efficiency Mode and default to E-cores.
 pub fn prefer_efficiency_cores_for_macos_process() {
     #[cfg(target_os = "macos")]
@@ -756,7 +756,7 @@ pub fn restore_foreground_priority_for_macos_process() {
 }
 
 /// Explicitly enables Windows 11 Efficiency Mode (`EcoQoS` + `IDLE_PRIORITY_CLASS`) on a newly
-/// spawned child process (`simp.exe --daemon`, browser UI window, or Widevine worker). No-op elsewhere.
+/// spawned child process (`Imp.exe --daemon`, browser UI window, or Widevine worker). No-op elsewhere.
 pub fn apply_windows_efficiency_mode_to_child(child: &std::process::Child) {
     #[cfg(target_os = "windows")]
     {

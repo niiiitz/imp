@@ -50,7 +50,7 @@ pub fn ensure_vrmanifest_installed() -> Option<PathBuf> {
 
     let bin_path = {
         let candidate = install_root.join(if cfg!(target_os = "windows") {
-            "bin/imp.exe"
+            "bin/Imp.exe"
         } else {
             "bin/imp"
         });

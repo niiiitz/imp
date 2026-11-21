@@ -3,6 +3,7 @@ import { ImpIcon } from '../icons/ImpIcon';
 import {
   VISUALIZER_SCENES,
   type VisualizerEngine,
+  type VisualizerFpsCap,
   type VisualizerMode,
 } from './sceneRegistry';
 
@@ -12,8 +13,10 @@ interface VisualizerDrawerModalProps {
   vizMode: VisualizerMode;
   activeEngine: VisualizerEngine;
   enabledScenes: VisualizerEngine[];
+  fpsCap: VisualizerFpsCap;
   onSelectMode: (mode: VisualizerMode) => void;
   onToggleSceneInRotation: (engine: VisualizerEngine) => void;
+  onToggleFpsCap: () => void;
   onSetAllScenesInRotation?: (engines: VisualizerEngine[]) => void;
 }
 
@@ -23,8 +26,10 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
   vizMode,
   activeEngine,
   enabledScenes,
+  fpsCap,
   onSelectMode,
   onToggleSceneInRotation,
+  onToggleFpsCap,
 }) => {
   useEffect(() => {
     if (!open) return;
@@ -223,7 +228,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           </button>
         </div>
 
-        {/* Rotation Legend */}
+        {/* Rotation Legend + 60 FPS / 30 FPS Eco Toggle */}
         <div
           style={{
             display: 'flex',
@@ -238,6 +243,31 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           <span>
             <strong>Left toggle</strong> = rotation • <strong>Row</strong> = lock scene
           </span>
+          <button
+            type="button"
+            onClick={onToggleFpsCap}
+            title="Switch visualizer frame rate between 60 FPS smooth and 30 FPS Eco battery saver"
+            style={{
+              minHeight: 28,
+              padding: '3px 10px',
+              borderRadius: 8,
+              background:
+                fpsCap === 60 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(16, 185, 129, 0.14)',
+              border:
+                fpsCap === 60
+                  ? '1px solid rgba(56, 189, 248, 0.48)'
+                  : '1px solid rgba(52, 211, 153, 0.45)',
+              color: fpsCap === 60 ? '#7dd3fc' : '#6ee7b7',
+              fontSize: 10.5,
+              fontFamily: 'monospace',
+              fontWeight: 800,
+              cursor: 'pointer',
+              letterSpacing: '0.03em',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {fpsCap === 60 ? '⚡ 60 FPS' : '🔋 30 FPS ECO'}
+          </button>
         </div>
 
         {/* Scrollable Scene Roster */}

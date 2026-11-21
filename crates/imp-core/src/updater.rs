@@ -442,8 +442,14 @@ pub fn spawn_delayed_daemon_restart() {
             let exe_dir = exe.parent().map(|p| p.to_path_buf());
             let target_exe = exe_dir
                 .as_ref()
-                .map(|d| d.join("imp.exe"))
+                .map(|d| d.join("Imp.exe"))
                 .filter(|p| p.is_file())
+                .or_else(|| {
+                    exe_dir
+                        .as_ref()
+                        .map(|d| d.join("imp.exe"))
+                        .filter(|p| p.is_file())
+                })
                 .or_else(|| {
                     exe_dir
                         .as_ref()
@@ -453,11 +459,11 @@ pub fn spawn_delayed_daemon_restart() {
                 .unwrap_or(exe);
             let old_exe = exe_dir
                 .as_ref()
-                .map(|d| d.join("imp.exe.old"))
+                .map(|d| d.join("Imp.exe.old"))
                 .unwrap_or_else(|| target_exe.with_extension("exe.old"));
             let pid_old_exe = exe_dir
                 .as_ref()
-                .map(|d| d.join(format!("imp.exe.{pid}.old")))
+                .map(|d| d.join(format!("Imp.exe.{pid}.old")))
                 .unwrap_or_else(|| target_exe.with_extension(format!("exe.{pid}.old")));
             let legacy_old_exe = exe_dir
                 .as_ref()
@@ -627,7 +633,7 @@ pub fn restart_daemon_synchronously() -> Result<String> {
             crate::configure_background_command(&mut tk);
             let _ = tk.status();
         }
-        for exe_name in ["imp.exe", "simp.exe"] {
+        for exe_name in ["Imp.exe", "simp.exe"] {
             let mut tk_all = Command::new("taskkill");
             tk_all
                 .args(["/F", "/IM", exe_name, "/FI", &format!("PID ne {}", std::process::id())])
@@ -642,8 +648,9 @@ pub fn restart_daemon_synchronously() -> Result<String> {
         if let Ok(exe) = std::env::current_exe() {
             let target_exe = exe
                 .parent()
-                .map(|d| d.join("imp.exe"))
+                .map(|d| d.join("Imp.exe"))
                 .filter(|p| p.is_file())
+                .or_else(|| exe.parent().map(|d| d.join("imp.exe")).filter(|p| p.is_file()))
                 .or_else(|| exe.parent().map(|d| d.join("simp.exe")).filter(|p| p.is_file()))
                 .unwrap_or(exe);
             let _ = std::fs::remove_file(target_exe.with_extension("exe.old"));
@@ -1284,7 +1291,7 @@ fn apply_windows_self_update(
     restart_after: bool,
 ) -> Result<UpdateApplyResult> {
     let current_exe = std::env::current_exe()
-        .context("Could not determine running imp.exe path")?;
+        .context("Could not determine running Imp.exe path")?;
     let install_dir = current_exe
         .parent()
         .ok_or_else(|| anyhow!("Could not determine IMP install directory"))?
@@ -1396,10 +1403,14 @@ fn apply_windows_self_update(
 
     let imp_root = extract_dir.join("imp-windows-portable");
     let simp_root = extract_dir.join("simp-windows-portable");
-    let (bundle_root, src_exe) = if imp_root.join("imp.exe").is_file() {
+    let (bundle_root, src_exe) = if imp_root.join("Imp.exe").is_file() {
+        (imp_root.clone(), imp_root.join("Imp.exe"))
+    } else if imp_root.join("imp.exe").is_file() {
         (imp_root.clone(), imp_root.join("imp.exe"))
     } else if simp_root.join("simp.exe").is_file() {
         (simp_root.clone(), simp_root.join("simp.exe"))
+    } else if extract_dir.join("Imp.exe").is_file() {
+        (extract_dir.clone(), extract_dir.join("Imp.exe"))
     } else if extract_dir.join("imp.exe").is_file() {
         (extract_dir.clone(), extract_dir.join("imp.exe"))
     } else {
@@ -1409,21 +1420,22 @@ fn apply_windows_self_update(
     if !src_exe.is_file() {
         let _ = std::fs::remove_dir_all(&tmp_dir);
         return Err(anyhow!(
-            "Downloaded Windows archive did not contain imp.exe or simp.exe"
+            "Downloaded Windows archive did not contain Imp.exe, imp.exe, or simp.exe"
         ));
     }
 
-    // 3. In-place atomic replacement of `imp.exe` in `install_dir`:
-    // Windows allows renaming a currently running `.exe` (`imp.exe` -> `imp.exe.old`) in the same folder
+    // 3. In-place atomic replacement of `Imp.exe` in `install_dir`:
+    // Windows allows renaming a currently running `.exe` (`Imp.exe` -> `Imp.exe.old`) in the same folder
     // without Administrator privileges, while keeping `data\` (`library.db`, `settings.vdf`, `art\`) untouched!
-    let dest_exe = install_dir.join("imp.exe");
-    let primary_old_exe = install_dir.join("imp.exe.old");
+    let dest_exe = install_dir.join("Imp.exe");
+    let primary_old_exe = install_dir.join("Imp.exe.old");
     let _ = std::fs::remove_file(&primary_old_exe);
+    let _ = std::fs::remove_file(install_dir.join("imp.exe.old"));
     let _ = std::fs::remove_file(install_dir.join("imp.ico"));
     let _ = std::fs::remove_file(install_dir.join("simp.ico"));
     let old_exe = if primary_old_exe.exists() {
         // Fallback if a previous `.old` file is still locked by another process
-        install_dir.join(format!("imp.exe.{}.old", std::process::id()))
+        install_dir.join(format!("Imp.exe.{}.old", std::process::id()))
     } else {
         primary_old_exe
     };
@@ -1435,13 +1447,12 @@ fn apply_windows_self_update(
                 old_exe.display()
             )
         })?;
-    } else {
-        let legacy_exe = install_dir.join("simp.exe");
-        if legacy_exe.is_file() {
-            let legacy_old = install_dir.join("simp.exe.old");
-            let _ = std::fs::remove_file(&legacy_old);
-            let _ = std::fs::rename(&legacy_exe, &legacy_old);
-        }
+    }
+    let legacy_exe = install_dir.join("simp.exe");
+    if legacy_exe.is_file() {
+        let legacy_old = install_dir.join("simp.exe.old");
+        let _ = std::fs::remove_file(&legacy_old);
+        let _ = std::fs::rename(&legacy_exe, &legacy_old);
     }
     if let Err(e) = std::fs::copy(&src_exe, &dest_exe) {
         if old_exe.is_file() && !dest_exe.is_file() {

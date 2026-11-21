@@ -132,6 +132,8 @@ export function renderRhythmHologramScene(s: SceneRenderContext): void {
     commentAvatarImg,
     cropTopY,
     cropBottomY,
+    cropLeftX,
+    cropRightX,
   } = s;
 
   // Handle track seek / restart
@@ -715,15 +717,21 @@ export function renderRhythmHologramScene(s: SceneRenderContext): void {
   drawHologramBandmate(cx, pedY + 4, 'lead');
   ctx.restore();
 
-  // 6. Left & Right DDR / StepMania Step Arrow Highways (Restored from V1 Micro-Party)
+  // 6. Left & Right DDR / StepMania Step Arrow Highways (pulled inward & clamped to visible viewport)
   const receptorY = Math.max(cropTopY + 28, 54);
   const highwayBottomY = Math.min(CANVAS_H - 18, cropBottomY - 12);
-  const arrowSpacing = 22;
-  const arrowR = 8.5;
+  const arrowSpacing = 19;
+  const arrowR = 7.8;
+  const laneW = arrowSpacing * 4 + 8;
+  const vLeft = cropLeftX ?? 0;
+  const vRight = cropRightX ?? CANVAS_W;
+  // Pull inward from the outer screen edges so dance pads stay fully visible on narrower/smaller displays
+  // while leaving generous breathing room around the flanking bandmates at `cx ± 76`
+  const leftLaneCenterX = Math.min(cx - 148, Math.max(vLeft + laneW * 0.5 + 14, 98));
+  const rightLaneCenterX = Math.max(cx + 148, Math.min(vRight - laneW * 0.5 - 14, CANVAS_W - 98));
 
   for (const side of [-1, 1]) {
-    const laneCenterX = side < 0 ? 64 : CANVAS_W - 64;
-    const laneW = arrowSpacing * 4 + 10;
+    const laneCenterX = side < 0 ? leftLaneCenterX : rightLaneCenterX;
 
     // Translucent dark note highway backing
     ctx.fillStyle = 'rgba(4, 7, 15, 0.62)';

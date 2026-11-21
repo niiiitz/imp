@@ -41,10 +41,10 @@ fi
 
 # Generate legacy `simp-*` transition bridge archives so v0.8.x installs on the alpha
 # channel can self-update cleanly to v0.9.0-alpha.1+ (`simp.exe` / `bin/simp`).
-if [[ -d "dist/imp-windows-portable" && -f "dist/imp-windows-portable/imp.exe" ]]; then
+if [[ -d "dist/imp-windows-portable" && -f "dist/imp-windows-portable/Imp.exe" ]]; then
   rm -rf "dist/simp-windows-portable" "dist/simp-windows-portable-x86_64.zip"
   cp -a "dist/imp-windows-portable" "dist/simp-windows-portable"
-  cp -f "dist/imp-windows-portable/imp.exe" "dist/simp-windows-portable/simp.exe"
+  mv -f "dist/simp-windows-portable/Imp.exe" "dist/simp-windows-portable/simp.exe"
   (cd "dist" && python3 -m zipfile -c "${REPO_ROOT}/dist/simp-windows-portable-x86_64.zip" simp-windows-portable)
   rm -rf "dist/simp-windows-portable"
 fi

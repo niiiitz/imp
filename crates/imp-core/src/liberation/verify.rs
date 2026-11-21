@@ -329,7 +329,9 @@ fn decode_audio_mss(mss: MediaSourceStream, hint_ext: Option<&str>) -> DecodedAu
             }
             Err(SymphError::DecodeError(_)) => {
                 decode_errors += 1;
-                if decode_errors > 64 && decode_errors.saturating_mul(10) > total_packets.max(1) {
+                // Only abort mid-stream on catastrophic corruption (>250 errors & >33% packet failure)
+                // so short/vintage MP3s with harmless Symphonia bit-reservoir quirks decode to EOF.
+                if decode_errors > 250 && decode_errors.saturating_mul(3) > total_packets.max(1) {
                     break;
                 }
             }
@@ -563,9 +565,10 @@ pub fn verify_audio_file(path: &Path, expected_duration_ms: Option<u64>) -> File
         };
     }
 
-    if decoded_frames == 0
-        || (decode_errors > 25 && decode_errors.saturating_mul(20) > total_packets.max(1))
-    {
+    let ok_packets = total_packets.saturating_sub(decode_errors);
+    let excessive_decode_errors = decode_errors > ok_packets
+        || (decode_errors > 120 && decode_errors.saturating_mul(5) > total_packets.max(1));
+    if decoded_frames == 0 || excessive_decode_errors {
         return FileVerificationResult {
             status: "corrupt_decode".to_string(),
             file_size_bytes,

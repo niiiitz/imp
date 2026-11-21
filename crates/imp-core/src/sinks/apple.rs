@@ -1168,7 +1168,7 @@ fn spawn_windows_headless_widevine_browser() -> Option<Child> {
         return None;
     }
 
-    // Prefer IMP's own embedded Edge WebView2 worker (`imp.exe --apple-worker`) so zero
+    // Prefer IMP's own embedded Edge WebView2 worker (`Imp.exe --apple-worker`) so zero
     // external browser process is needed for Widevine/PlayReady DRM playback.
     if std::env::var("IMP_USE_EXTERNAL_BROWSER").ok().as_deref() != Some("1") {
         if let Ok(exe) = std::env::current_exe() {

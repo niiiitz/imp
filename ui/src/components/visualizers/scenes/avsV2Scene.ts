@@ -51,34 +51,39 @@ export function renderAvsV2Scene(scene: SceneRenderContext, rt: ClassicSceneRunt
   const fb = feedbackCanvasRef.current;
   const fbCtx = fb.getContext('2d');
 
-  // 1. Pure #000000 OLED floor clear + V1 Winamp AVS Feedback Zoom/Rotate Pass
+  // 1. Pure #000000 OLED floor clear + V1 Winamp AVS Feedback Zoom/Rotate Pass (dt-normalized for 30/60 FPS parity)
   ctx.fillStyle = '#000000';
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  let zoom = 1.016 + subBass * 0.028 + beat * 0.022 + drop * 0.032;
+  const dtScale = Math.min(2.0, Math.max(0.25, (dt > 0 ? dt : 1 / 60) * 30));
+  let baseZoom = 1.016 + subBass * 0.028 + beat * 0.022 + drop * 0.032;
   let rot = SIN_F32[Math.floor(timeSec * 19) & 255] * (0.011 + midEnergy * 0.016);
 
   if (trans > 0.55) {
     const imp = (trans - 0.55) / 0.45;
-    zoom = 0.91 - imp * 0.05;
+    baseZoom = 0.91 - imp * 0.05;
     rot += imp * 0.16;
   } else if (trans > 0.005) {
     const burst = trans / 0.55;
-    zoom = 1.02 + burst * 0.085;
+    baseZoom = 1.02 + burst * 0.085;
     rot -= burst * 0.09;
   }
+
+  const zoom = Math.pow(baseZoom, dtScale);
+  rot *= dtScale;
 
   ctx.save();
   ctx.translate(CANVAS_W * 0.5, CANVAS_H * 0.5);
   ctx.rotate(rot);
   ctx.scale(zoom, zoom);
-  ctx.globalAlpha = 0.84;
+  ctx.globalAlpha = Math.pow(0.84, dtScale);
   ctx.drawImage(fb, -CANVAS_W * 0.5, -CANVAS_H * 0.5, CANVAS_W, CANVAS_H);
   ctx.restore();
   ctx.globalAlpha = 1.0;
 
   // Black-floor crush pass so old trails fade cleanly to pure #000000 without buildup noise
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  const crushAlpha = 1 - Math.pow(1 - 0.16, dtScale);
+  ctx.fillStyle = `rgba(0, 0, 0, ${crushAlpha.toFixed(3)})`;
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
   const cx = CANVAS_W * 0.5;

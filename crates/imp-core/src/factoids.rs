@@ -47,11 +47,12 @@ pub fn mark_factoid_shown_in_session(text: &str) {
     }
 }
 
-/// Rejects robotic / low-signal metadata filler (such as bare MusicBrainz region codes like `Region: XW`
-/// or trivial catalog dates with no editorial context) so only genuinely interesting trivia is shown.
+/// Rejects robotic / low-signal metadata filler (such as bare MusicBrainz region codes like `Region: XW`,
+/// trivial catalog dates, or dry Billboard/RIAA chart-peak & certification boilerplate with no story)
+/// so only genuinely entertaining VH1 Pop-Up Video style trivia is shown.
 pub fn is_high_signal_factoid_body(body: &str) -> bool {
     let trimmed = body.trim();
-    if trimmed.chars().count() < 28 {
+    if trimmed.chars().count() < 32 {
         return false;
     }
     let lower = trimmed.to_lowercase();
@@ -59,9 +60,91 @@ pub fn is_high_signal_factoid_body(body: &str) -> bool {
         || lower.contains("region: xe")
         || lower.starts_with("first release date recorded as")
         || (lower.starts_with("first cataloged on") && !lower.contains("•"))
+        || lower.contains("isbn ")
+        || lower.contains("retrieved ")
+        || lower.starts_with("see also")
+        || lower.starts_with("track listing")
+        || lower.starts_with("all tracks written by")
+        || lower.starts_with("all lyrics are written by")
     {
         return false;
     }
+
+    // High-drama / story keywords rescue sentences even if they mention a chart or single release
+    let story_markers = [
+        "controvers",
+        "lawsuit",
+        "sued",
+        "plagiarism",
+        "banned",
+        "censor",
+        "feud",
+        "dispute",
+        "arrest",
+        "scandal",
+        "backlash",
+        "protest",
+        "accident",
+        "refused",
+        "fired",
+        "walked out",
+        "recorded in",
+        "recorded at",
+        "inspired by",
+        "originally written",
+        "sampled",
+        "synthesizer",
+        "demo",
+        "music video",
+        "banned from",
+        "court",
+    ];
+    let has_story_hook = story_markers.iter().any(|m| lower.contains(m));
+
+    if !has_story_hook {
+        let dry_chart_boilerplate = [
+            "peaked at number",
+            "peaked at no.",
+            "peaked at #",
+            "debuted at number",
+            "debuted at no.",
+            "charted at number",
+            "charted at no.",
+            "reached number ",
+            "reached no. ",
+            "certified gold",
+            "certified platinum",
+            "certified multi-platinum",
+            "certified diamond",
+            "certified silver",
+            "billboard hot 100",
+            "billboard 200",
+            "uk singles chart",
+            "uk albums chart",
+            "official charts company",
+            "recording industry association",
+            "riaa",
+            "bpi",
+            "copies worldwide",
+            "million copies",
+            "units worldwide",
+            "released as the lead single",
+            "released as the second single",
+            "released as the third single",
+            "released as the fourth single",
+            "is a song by ",
+            "is a studio album by ",
+            "is the debut studio album by ",
+            "is the second studio album by ",
+            "is the third studio album by ",
+            "is the fourth studio album by ",
+            "is the fifth studio album by ",
+        ];
+        if dry_chart_boilerplate.iter().any(|pat| lower.contains(pat)) {
+            return false;
+        }
+    }
+
     true
 }
 
@@ -357,6 +440,264 @@ fn url_encode_component(input: &str) -> String {
     out
 }
 
+/// Parses MediaWiki `explaintext=1&exsectionformat=wiki` plain text into `(section_heading, body)` pairs.
+/// Text before the first `== ... ==` heading is returned under `"Lead"`.
+pub fn parse_wikipedia_sections(plain_text: &str) -> Vec<(String, String)> {
+    let mut sections: Vec<(String, String)> = Vec::new();
+    let mut current_heading = "Lead".to_string();
+    let mut current_body = String::new();
+
+    for line in plain_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("==") && trimmed.ends_with("==") && trimmed.len() >= 5 {
+            let clean_heading = trimmed.trim_matches('=').trim().to_string();
+            if !clean_heading.is_empty() {
+                if !current_body.trim().is_empty() {
+                    sections.push((current_heading, current_body.trim().to_string()));
+                }
+                current_heading = clean_heading;
+                current_body = String::new();
+                continue;
+            }
+        }
+        if !trimmed.is_empty() {
+            if !current_body.is_empty() {
+                current_body.push(' ');
+            }
+            current_body.push_str(trimmed);
+        }
+    }
+    if !current_body.trim().is_empty() {
+        sections.push((current_heading, current_body.trim().to_string()));
+    }
+    sections
+}
+
+/// Classifies a Wikipedia section heading into `(priority_tier, display_category)`.
+/// Returns `None` for dry reference/chart/credits sections we should skip entirely.
+pub fn classify_wikipedia_section(
+    heading: &str,
+    is_artist_article: bool,
+) -> Option<(u8, &'static str)> {
+    let lower = heading.trim().to_lowercase();
+    if lower.is_empty() {
+        return None;
+    }
+
+    // Hard-skip boring tabular / metadata sections
+    let skip_keywords = [
+        "track listing",
+        "tracklist",
+        "personnel",
+        "credits",
+        "chart",
+        "certification",
+        "release history",
+        "discography",
+        "filmography",
+        "videography",
+        "awards",
+        "nominations",
+        "references",
+        "external links",
+        "see also",
+        "notes",
+        "bibliography",
+        "further reading",
+        "sales",
+        "band members",
+        "members",
+        "tour dates",
+        "concert tours",
+        "accolades",
+    ];
+    if skip_keywords.iter().any(|kw| lower.contains(kw)) {
+        return None;
+    }
+
+    // Tier 1 (Highest): Controversies, Legal Battles, Feuds, Censorship & Scandals!
+    let drama_keywords = [
+        "controvers",
+        "legal",
+        "lawsuit",
+        "plagiarism",
+        "feud",
+        "censor",
+        "dispute",
+        "scandal",
+        "backlash",
+        "incident",
+        "arrest",
+        "copyright",
+        "conflict",
+        "criticism",
+        "ban",
+        "allegation",
+        "activism",
+        "political",
+    ];
+    if drama_keywords.iter().any(|kw| lower.contains(kw)) {
+        return Some((
+            100,
+            if is_artist_article {
+                "BAND CONTROVERSY"
+            } else {
+                "CONTROVERSY"
+            },
+        ));
+    }
+
+    // Tier 2: Recording, Production, Background, Writing, Music Video & Artwork Stories
+    let studio_keywords = [
+        "recording",
+        "production",
+        "background",
+        "composition",
+        "writing",
+        "development",
+        "origin",
+        "music video",
+        "artwork",
+        "cover art",
+        "packaging",
+        "sampl",
+        "equipment",
+        "gear",
+        "lyrical",
+        "lyrics",
+        "concept",
+        "inspiration",
+        "sessions",
+        "making of",
+        "sound",
+    ];
+    if studio_keywords.iter().any(|kw| lower.contains(kw)) {
+        return Some((
+            80,
+            if is_artist_article {
+                "ARTIST CRAFT"
+            } else {
+                "STUDIO LORE"
+            },
+        ));
+    }
+
+    // Tier 3: Band History, Legacy, Cultural Impact, Style & Live Lore
+    let lore_keywords = [
+        "legacy",
+        "impact",
+        "influence",
+        "musical style",
+        "artistry",
+        "history",
+        "formation",
+        "early life",
+        "career",
+        "breakup",
+        "reunion",
+        "live performance",
+        "popular culture",
+        "personal life",
+        "trivia",
+        "style",
+    ];
+    if lore_keywords.iter().any(|kw| lower.contains(kw)) {
+        return Some((
+            60,
+            if is_artist_article {
+                "BAND LORE"
+            } else {
+                "LEGACY & LORE"
+            },
+        ));
+    }
+
+    None
+}
+
+/// Extracts prioritized, high-signal VH1 Pop-Up Video trivia items `(category, headline, sentence)`
+/// from a Wikipedia plain-text article, preferring Controversies > Studio Lore > Band Lore
+/// and skipping already-shown session factoids.
+pub fn extract_juicy_section_factoids(
+    canonical_title: &str,
+    plain_text: &str,
+    is_artist_article: bool,
+    max_items: usize,
+) -> Vec<(String, String, String)> {
+    let sections = parse_wikipedia_sections(plain_text);
+    let mut ranked: Vec<(u8, String, String, String)> = Vec::new();
+
+    for (heading, body) in sections {
+        let Some((priority, category)) = classify_wikipedia_section(&heading, is_artist_article)
+        else {
+            continue;
+        };
+        let sentences = split_extract_into_sentences(&body, 2);
+        for sentence in sentences {
+            let headline = if heading.eq_ignore_ascii_case("Lead") {
+                canonical_title.to_string()
+            } else {
+                format!("{canonical_title} — {heading}")
+            };
+            ranked.push((priority, category.to_string(), headline, sentence));
+        }
+    }
+
+    // Sort highest-priority (Controversies = 100) first while preserving section order on ties
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let mut out = Vec::new();
+    let mut seen_categories_or_headlines: Vec<String> = Vec::new();
+    for (_prio, cat, headline, sentence) in ranked {
+        // Keep variety across sections so one single section doesn't hog every bubble
+        let same_section_count = seen_categories_or_headlines
+            .iter()
+            .filter(|h| **h == headline)
+            .count();
+        if same_section_count >= 1 && out.len() + 1 < max_items {
+            continue;
+        }
+        seen_categories_or_headlines.push(headline.clone());
+        out.push((cat, headline, sentence));
+        if out.len() >= max_items {
+            break;
+        }
+    }
+    out
+}
+
+fn query_wikipedia_full_extract(page_title: &str) -> Option<String> {
+    let trimmed = page_title.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let url = format!(
+        "https://en.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&exsectionformat=wiki&redirects=1&titles={}&format=json&formatversion=2",
+        url_encode_component(trimmed)
+    );
+    let body = http_get_text(
+        &url,
+        &[
+            ("User-Agent", "IMP-MediaPlayer/0.9 (https://github.com/niiiitz/imp)"),
+            ("Accept", "application/json"),
+        ],
+        5,
+    )
+    .ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let page = json
+        .get("query")
+        .and_then(|q| q.get("pages"))
+        .and_then(|p| p.as_array())
+        .and_then(|arr| arr.first())?;
+    let extract = page.get("extract").and_then(|v| v.as_str())?;
+    if extract.trim().is_empty() {
+        None
+    } else {
+        Some(extract.to_string())
+    }
+}
+
 fn query_wikipedia_summary(page_title: &str) -> Option<(String, String)> {
     let slug = page_title.trim().replace(' ', "_");
     if slug.is_empty() {
@@ -607,20 +948,25 @@ pub fn fetch_track_factoids(
     let key = normalize_key(clean_title, clean_artist, clean_album);
 
     if let Some(mut cached) = load_factoids_from_db(&key, track_uri) {
-        // Filter out any legacy low-signal boilerplate or bubbles already shown in this session
-        let filtered_raw: Vec<(String, String, String, String)> = cached
-            .bubbles
-            .into_iter()
-            .filter(|b| is_high_signal_factoid_body(&b.body) && !was_factoid_shown_in_session(&b.body))
-            .map(|b| (b.category, b.headline, b.body, b.source))
-            .collect();
-        if !filtered_raw.is_empty() {
-            for (_, _, body, _) in &filtered_raw {
-                mark_factoid_shown_in_session(body);
+        // Automatically upgrade legacy v1 summary-only cache rows to the v2 deep-section engine
+        let is_v2_cache = cached.provider.contains("v2");
+        if is_v2_cache {
+            let filtered_raw: Vec<(String, String, String, String)> = cached
+                .bubbles
+                .into_iter()
+                .filter(|b| {
+                    is_high_signal_factoid_body(&b.body) && !was_factoid_shown_in_session(&b.body)
+                })
+                .map(|b| (b.category, b.headline, b.body, b.source))
+                .collect();
+            if !filtered_raw.is_empty() {
+                for (_, _, body, _) in &filtered_raw {
+                    mark_factoid_shown_in_session(body);
+                }
+                cached.bubbles = schedule_factoid_bubbles(filtered_raw, duration_ms);
+                cached.found = !cached.bubbles.is_empty();
+                return cached;
             }
-            cached.bubbles = schedule_factoid_bubbles(filtered_raw, duration_ms);
-            cached.found = !cached.bubbles.is_empty();
-            return cached;
         }
     }
 
@@ -633,18 +979,7 @@ pub fn fetch_track_factoids(
     let mut raw_items: Vec<(String, String, String, String)> = Vec::new();
     let mut providers: Vec<&str> = Vec::new();
 
-    // 1. MusicBrainz Recording / Release Metadata
-    if let Some(mb_fact) = query_musicbrainz_recording_factoid(clean_title, primary_artist) {
-        raw_items.push((
-            "RELEASE ARCHIVE".to_string(),
-            clean_title.to_string(),
-            mb_fact,
-            "MusicBrainz".to_string(),
-        ));
-        providers.push("musicbrainz");
-    }
-
-    // 2. Wikipedia REST v1 Summary — Song or Album (even when album metadata is absent)
+    // 1. Wikipedia Deep-Section Lore — Song or Album (Controversies > Studio Lore > Legacy, fallback to Summary)
     {
         let mut work_candidates = Vec::new();
         if let Some(alb) = clean_album {
@@ -672,26 +1007,34 @@ pub fn fetch_track_factoids(
                     query_wikipedia_search_fallback(&format!("{clean_title} {primary_artist} song"));
             }
         }
-        if let Some((canon, extract)) = matched_work {
-            for sentence in split_extract_into_sentences(&extract, 1) {
-                raw_items.push((
-                    "TRACK & ALBUM LORE".to_string(),
-                    canon.clone(),
-                    sentence,
-                    "Wikipedia".to_string(),
-                ));
+        if let Some((canon, summary_extract)) = matched_work {
+            let mut work_added = 0usize;
+            if let Some(full_text) = query_wikipedia_full_extract(&canon) {
+                for (cat, headline, sentence) in
+                    extract_juicy_section_factoids(&canon, &full_text, false, 2)
+                {
+                    raw_items.push((cat, headline, sentence, "Wikipedia".to_string()));
+                    work_added += 1;
+                }
             }
-            if !providers.contains(&"wikipedia") {
-                providers.push("wikipedia");
+            if work_added == 0 {
+                for sentence in split_extract_into_sentences(&summary_extract, 1) {
+                    raw_items.push((
+                        "TRACK & ALBUM LORE".to_string(),
+                        canon.clone(),
+                        sentence,
+                        "Wikipedia".to_string(),
+                    ));
+                }
+            }
+            if !providers.contains(&"wikipedia-v2") {
+                providers.push("wikipedia-v2");
             }
         }
     }
 
-    // 3. Wikipedia REST v1 Summary — Artist Bio (with Search API fallback)
-    if !primary_artist.is_empty()
-        && !primary_artist.eq_ignore_ascii_case("Unknown Artist")
-        && raw_items.len() < 4
-    {
+    // 2. Wikipedia Deep-Section Lore — Band / Artist (Always checked for Band Controversies, Feuds & Lore!)
+    if !primary_artist.is_empty() && !primary_artist.eq_ignore_ascii_case("Unknown Artist") {
         let artist_candidates = [
             format!("{primary_artist} (band)"),
             format!("{primary_artist} (musician)"),
@@ -709,21 +1052,58 @@ pub fn fetch_track_factoids(
             matched_artist =
                 query_wikipedia_search_fallback(&format!("{primary_artist} musician band"));
         }
-        if let Some((canon, extract)) = matched_artist {
-            let needed = (4usize).saturating_sub(raw_items.len()).min(2);
-            for sentence in split_extract_into_sentences(&extract, needed) {
-                raw_items.push((
-                    "ARTIST PROFILE".to_string(),
-                    canon.clone(),
-                    sentence,
-                    "Wikipedia".to_string(),
-                ));
+        if let Some((canon, summary_extract)) = matched_artist {
+            let artist_quota = (4usize).saturating_sub(raw_items.len()).max(1).min(2);
+            let mut artist_added = 0usize;
+            if let Some(full_text) = query_wikipedia_full_extract(&canon) {
+                for (cat, headline, sentence) in
+                    extract_juicy_section_factoids(&canon, &full_text, true, artist_quota)
+                {
+                    raw_items.push((cat, headline, sentence, "Wikipedia".to_string()));
+                    artist_added += 1;
+                }
             }
-            if !providers.contains(&"wikipedia") {
-                providers.push("wikipedia");
+            if artist_added == 0 && raw_items.len() < 4 {
+                for sentence in split_extract_into_sentences(&summary_extract, 1) {
+                    raw_items.push((
+                        "ARTIST PROFILE".to_string(),
+                        canon.clone(),
+                        sentence,
+                        "Wikipedia".to_string(),
+                    ));
+                }
+            }
+            if !providers.contains(&"wikipedia-v2") {
+                providers.push("wikipedia-v2");
             }
         }
     }
+
+    // 3. MusicBrainz Recording / Release Metadata (curatorial fallback if < 4 bubbles)
+    if raw_items.len() < 4 {
+        if let Some(mb_fact) = query_musicbrainz_recording_factoid(clean_title, primary_artist) {
+            raw_items.push((
+                "RELEASE ARCHIVE".to_string(),
+                clean_title.to_string(),
+                mb_fact,
+                "MusicBrainz".to_string(),
+            ));
+            providers.push("musicbrainz");
+        }
+    }
+
+    // Bubble Controversies to the front so the juiciest pop-up fires early in the track!
+    raw_items.sort_by_key(|(cat, _, _, _)| {
+        if cat.contains("CONTROVERSY") {
+            0u8
+        } else if cat.contains("STUDIO") || cat.contains("CRAFT") {
+            1u8
+        } else if cat.contains("LORE") {
+            2u8
+        } else {
+            3u8
+        }
+    });
 
     for (_, _, body, _) in &raw_items {
         mark_factoid_shown_in_session(body);
@@ -799,6 +1179,13 @@ mod tests {
         assert!(!is_high_signal_factoid_body("First cataloged on \"Track 01\" (2021) • Region: XW"));
         assert!(!is_high_signal_factoid_body("First release date recorded as 2019"));
         assert!(!is_high_signal_factoid_body("Too short."));
+        assert!(!is_high_signal_factoid_body(
+            "Sample Track peaked at number 14 on the Billboard Hot 100 and was certified Gold by the RIAA."
+        ));
+        // Drama/controversy hook rescues a sentence even if it references charts or bans
+        assert!(is_high_signal_factoid_body(
+            "Despite being banned from broadcast over censorship controversy, the track still topped the charts."
+        ));
         assert!(is_high_signal_factoid_body(
             "Recorded at Abbey Road Studios using vintage analog synthesizers and tape loops."
         ));
@@ -812,5 +1199,52 @@ mod tests {
         let second_pass = split_extract_into_sentences(extract, 1);
         assert_eq!(second_pass.len(), 1);
         assert!(second_pass[0].starts_with("Sentence beta"));
+    }
+
+    #[test]
+    fn test_wikipedia_deep_sections_prioritize_controversies_and_skip_charts() {
+        let article = r#"
+Sample Band is an electronic group formed in 1998.
+
+== Track listing ==
+All tracks written by Example Artist and Co-Writer for the album release.
+
+== Recording ==
+The rhythm tracks were tracked live in an abandoned concrete warehouse using a salvaged tape machine.
+
+== Charts and certifications ==
+The album peaked at number 8 on the Billboard 200 and was certified Platinum worldwide.
+
+=== Legal controversies ===
+In 2003 the band faced a high-profile copyright lawsuit after sampling a vintage public-access jingle without clearance.
+
+== Legacy ==
+Critics later credited the group with pioneering DIY hardware live-coding performances across underground clubs.
+"#;
+
+        let sections = parse_wikipedia_sections(article);
+        assert!(sections.len() >= 5);
+        assert_eq!(
+            classify_wikipedia_section("Legal controversies", true),
+            Some((100, "BAND CONTROVERSY"))
+        );
+        assert_eq!(
+            classify_wikipedia_section("Recording", false),
+            Some((80, "STUDIO LORE"))
+        );
+        assert_eq!(
+            classify_wikipedia_section("Charts and certifications", false),
+            None
+        );
+        assert_eq!(classify_wikipedia_section("Track listing", false), None);
+
+        let extracted = extract_juicy_section_factoids("Sample Band", article, true, 3);
+        assert_eq!(extracted.len(), 3);
+        // Controversies MUST rank #1 ahead of Recording & Legacy!
+        assert_eq!(extracted[0].0, "BAND CONTROVERSY");
+        assert!(extracted[0].2.contains("copyright lawsuit"));
+        assert_eq!(extracted[1].0, "ARTIST CRAFT");
+        assert!(extracted[1].2.contains("abandoned concrete warehouse"));
+        assert_eq!(extracted[2].0, "BAND LORE");
     }
 }

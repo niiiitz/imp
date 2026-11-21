@@ -385,8 +385,8 @@ function drawAbductedCow(
 }
 
 /**
- * Draws the Monty-Python / Stagehand Cutout Hand & Sleeve reaching in from the right edge
- * to place or swap the center stage prop at (handX, handY).
+ * Draws the Monty-Python / Stagehand Cutout Hand & Sleeve rising straight up from underneath
+ * the bottom edge to place or swap the center stage prop at (handX, handY).
  */
 function drawStagehandArm(
   ctx: CanvasRenderingContext2D,
@@ -395,18 +395,18 @@ function drawStagehandArm(
   pinchClosed: number,
 ): void {
   ctx.save();
-  const edgeX = CANVAS_W + 40;
-  const armY = handY - 6;
+  const bottomEdgeY = CANVAS_H + 56;
+  const wristY = handY + 28;
 
-  // 1. Dark Theatrical Suit Sleeve extending from right screen edge
+  // 1. Dark Theatrical Suit Sleeve rising vertically from below the stage frame
   ctx.fillStyle = '#0f172a';
   ctx.strokeStyle = '#475569';
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(handX + 34, armY - 19);
-  ctx.lineTo(edgeX, armY - 30);
-  ctx.lineTo(edgeX, armY + 26);
-  ctx.lineTo(handX + 34, armY + 19);
+  ctx.moveTo(handX - 18, wristY + 8);
+  ctx.lineTo(handX - 24, bottomEdgeY);
+  ctx.lineTo(handX + 24, bottomEdgeY);
+  ctx.lineTo(handX + 18, wristY + 8);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
@@ -416,44 +416,44 @@ function drawStagehandArm(
   ctx.strokeStyle = '#94a3b8';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.roundRect(handX + 22, armY - 17, 16, 34, 4);
+  ctx.roundRect(handX - 17, wristY - 4, 34, 15, 4);
   ctx.fill();
   ctx.stroke();
 
   ctx.fillStyle = '#facc15';
   ctx.beginPath();
-  ctx.arc(handX + 30, armY + 9, 2.8, 0, Math.PI * 2);
+  ctx.arc(handX + 9, wristY + 3.5, 2.8, 0, Math.PI * 2);
   ctx.fill();
 
-  // 3. Illustrated Stagehand Hand (Palm + Articulated Thumb & Fingers)
+  // 3. Illustrated Stagehand Hand (Palm + Articulated Upward Fingers & Opposing Thumb)
   const skinFill = '#fcd34d';
   const skinStroke = '#78350f';
   ctx.fillStyle = skinFill;
   ctx.strokeStyle = skinStroke;
   ctx.lineWidth = 1.6;
 
-  // Palm & Back of Hand
+  // Palm & Back of Hand cradling from beneath
   ctx.beginPath();
-  ctx.roundRect(handX - 4, armY - 14, 28, 26, 9);
+  ctx.roundRect(handX - 14, handY + 2, 28, 24, 9);
   ctx.fill();
   ctx.stroke();
 
-  // Curled Top Fingers pinching the prop from above
-  const fingerCurl = pinchClosed * 5;
+  // Three upward-reaching fingers gripping/cupping the prop from underneath
+  const fingerCurl = pinchClosed * 4.5;
   for (let f = 0; f < 3; f++) {
-    const fy = armY - 13 + f * 5.5;
+    const fx = handX - 13 + f * 7.5;
     ctx.beginPath();
-    ctx.roundRect(handX - 20 + f * 2, fy + fingerCurl * 0.4, 20, 6.5, 3.2);
+    ctx.roundRect(fx, handY - 14 + fingerCurl + (f === 1 ? -2 : 0), 7, 19, 3.2);
     ctx.fill();
     ctx.stroke();
   }
 
-  // Articulated Opposing Thumb underneath
-  ctx.beginPath();
+  // Articulated Opposing Thumb on the right side
   ctx.save();
-  ctx.translate(handX + 2, armY + 10);
-  ctx.rotate(0.32 - pinchClosed * 0.25);
-  ctx.roundRect(-18, -3, 20, 7.5, 3.8);
+  ctx.translate(handX + 12, handY + 12);
+  ctx.rotate(-0.38 + pinchClosed * 0.28);
+  ctx.beginPath();
+  ctx.roundRect(-2, -16, 7.5, 19, 3.6);
   ctx.fill();
   ctx.stroke();
   ctx.restore();
@@ -464,8 +464,8 @@ function drawStagehandArm(
 /**
  * Scene `c` — Cosmic Warp & 50s Saucer (High-DPI Canvas2D)
  * - Starts (`0%–25%`) with the glowing Light Swirl & Orbiting Light Dots + 3D Starfield
- * - At ~25%: A giant Stagehand Hand reaches in from the side and places a 3D Ringed Planet (with front/back ring occlusion)
- * - At ~50%: The Stagehand Hand reaches back in and swaps the Planet out for a retro 1950s Finned Rocket Spaceship
+ * - At ~25%: A Stagehand Hand rises from underneath and places a 3D Ringed Planet (with front/back ring occlusion)
+ * - At ~50%: The Stagehand Hand reaches up and swaps the Planet out for a retro 1950s Finned Rocket Spaceship
  * - At ~75%: The Stagehand Hand swaps the Spaceship out for an Abducted Floating Holstein Cow for the final quarter!
  */
 export function renderCosmosScene(s: SceneRenderContext): void {
@@ -606,19 +606,21 @@ export function renderCosmosScene(s: SceneRenderContext): void {
   }
 
   // 6. Stagehand Prop Placement & Swap Choreography at ~25%, ~50%, and ~75% of the Track!
+  //    Arm rises briskly straight up from underneath (shorter natural reach, snappier timing).
   //    - 0.00 .. 0.25: Light Swirl & Dots only ('none')
   //    - 0.25 .. 0.50: 3D Ringed Planet ('planet')
   //    - 0.50 .. 0.75: Retro 1950s Rocket Spaceship ('spaceship')
   //    - 0.75 .. 1.00: Abducted Floating Holstein Cow ('cow')
-  const hoverBobY = cy + 16 + Math.sin(timeSec * 1.7) * 6;
-  const offRightX = CANVAS_W + 95;
-  const swapHalfWindow = 0.022; // ~4.4% total window for the hand reach-in & swap
+  const hoverBobY = cy + 14 + Math.sin(timeSec * 1.7) * 6;
+  const offBottomY = CANVAS_H + 78;
+  const swapHalfWindow = 0.015; // Snappy ~3.0% total window for vertical rise & swap
 
   let activeProp: CosmicPropKind = 'none';
-  let propX = cx;
-  const propY = hoverBobY;
+  const propX = cx;
+  let propY = hoverBobY;
   let showHand = false;
-  let handX = offRightX;
+  const handX = cx;
+  let handY = offBottomY;
   let handPinch = 1;
 
   const evalSwap = (
@@ -630,58 +632,59 @@ export function renderCosmosScene(s: SceneRenderContext): void {
     if (Math.abs(d) > swapHalfWindow) return false;
     showHand = true;
     if (prevProp === 'none') {
-      // At 25%: Hand brings the Planet in from off-screen right (milestone - w .. milestone),
-      // releases it at center, and retracts (milestone .. milestone + w)
+      // At 25%: Hand lifts the Planet straight up from underneath, releases it, and drops back down
       if (d < 0) {
-        const u = (d + swapHalfWindow) / swapHalfWindow; // 0 -> 1 approaching center
+        const u = (d + swapHalfWindow) / swapHalfWindow; // 0 -> 1 rising to center
         const ease = 1 - Math.pow(1 - u, 2.2);
         activeProp = nextProp;
-        propX = offRightX + (cx - offRightX) * ease;
-        handX = propX + 24;
+        propY = offBottomY + (hoverBobY - offBottomY) * ease;
+        handY = propY + 26;
         handPinch = 1;
       } else {
-        const u = d / swapHalfWindow; // 0 -> 1 retracting back to right
+        const u = d / swapHalfWindow; // 0 -> 1 retracting downward
         const ease = Math.pow(u, 1.8);
         activeProp = nextProp;
-        propX = cx;
-        handX = cx + 24 + (offRightX - (cx + 24)) * ease;
+        propY = hoverBobY;
+        handY = hoverBobY + 26 + (offBottomY - (hoverBobY + 26)) * ease;
         handPinch = Math.max(0, 1 - u * 2.5);
       }
     } else {
-      // At 50% & 75%: Hand reaches in & pulls out prevProp (d < 0), then brings in nextProp & retracts (d >= 0)
+      // At 50% & 75%: Hand reaches up & pulls prevProp down (d < 0), then lifts nextProp up & drops away (d >= 0)
       if (d < 0) {
         const u = (d + swapHalfWindow) / swapHalfWindow; // 0 -> 1
         if (u < 0.5) {
-          // Hand reaches in empty toward center prop
+          // Hand reaches up empty toward center prop
           const reach = u * 2;
+          const ease = 1 - Math.pow(1 - reach, 2);
           activeProp = prevProp;
-          propX = cx;
-          handX = offRightX + (cx + 24 - offRightX) * reach;
-          handPinch = reach;
+          propY = hoverBobY;
+          handY = offBottomY + (hoverBobY + 26 - offBottomY) * ease;
+          handPinch = ease;
         } else {
-          // Hand pulls old prop off-screen to the right
+          // Hand pulls old prop straight down off-screen
           const pull = (u - 0.5) * 2;
+          const ease = pull * pull;
           activeProp = prevProp;
-          propX = cx + (offRightX - cx) * pull;
-          handX = propX + 24;
+          propY = hoverBobY + (offBottomY - hoverBobY) * ease;
+          handY = propY + 26;
           handPinch = 1;
         }
       } else {
         const u = d / swapHalfWindow; // 0 -> 1
         if (u < 0.55) {
-          // Hand brings new prop in from right to center
+          // Hand lifts new prop up from underneath into center stage
           const push = u / 0.55;
-          const ease = 1 - Math.pow(1 - push, 2);
+          const ease = 1 - Math.pow(1 - push, 2.2);
           activeProp = nextProp;
-          propX = offRightX + (cx - offRightX) * ease;
-          handX = propX + 24;
+          propY = offBottomY + (hoverBobY - offBottomY) * ease;
+          handY = propY + 26;
           handPinch = 1;
         } else {
-          // Hand releases new prop at center and retracts off-screen
+          // Hand releases new prop at center and retracts back underneath
           const ret = (u - 0.55) / 0.45;
           activeProp = nextProp;
-          propX = cx;
-          handX = cx + 24 + (offRightX - (cx + 24)) * (ret * ret);
+          propY = hoverBobY;
+          handY = hoverBobY + 26 + (offBottomY - (hoverBobY + 26)) * (ret * ret);
           handPinch = Math.max(0, 1 - ret * 2.2);
         }
       }
@@ -709,7 +712,7 @@ export function renderCosmosScene(s: SceneRenderContext): void {
   }
 
   if (showHand) {
-    drawStagehandArm(ctx, handX, propY, handPinch);
+    drawStagehandArm(ctx, handX, handY, handPinch);
   }
 
   // 7. Draw Visible Pendulum String & Raytraced 1950s Plan-9 Flying Saucer

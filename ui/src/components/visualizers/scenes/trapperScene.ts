@@ -565,13 +565,14 @@ export function renderTrapperScene(scene: SceneRenderContext, rt: ClassicSceneRu
           }
         }
 
-        // 5. Preferred AVS-Style Floating 3D Hologram Lyrics (always used when lyrics are active)
+        // 5. Preferred AVS-Style Floating 3D Hologram Lyrics (centered vertically on screen)
         const trapperLyricText = (activeLyricRef.current || '').trim();
         if (trapperLyricText.length > 0) {
           drawVertigoStyleHologram(
             trapperLyricText,
             Math.sin(timeSec * 0.52) * 4,
-            0
+            0,
+            true,
           );
         }
 

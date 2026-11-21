@@ -10,7 +10,7 @@ pub mod macos_app;
 #[cfg(target_os = "windows")]
 pub mod windows_app;
 
-/// Runs the hidden embedded Edge WebView2 Apple Music audio worker (`imp.exe --apple-worker`).
+/// Runs the hidden embedded Edge WebView2 Apple Music audio worker (`Imp.exe --apple-worker`).
 #[cfg(target_os = "windows")]
 pub fn run_windows_apple_worker() {
     if let Err(err) =
@@ -51,6 +51,7 @@ pub fn ensure_daemon_running() {
         if let Ok(exe) = std::env::current_exe() {
             let _ = std::fs::remove_file(exe.with_extension("exe.old"));
             if let Some(dir) = exe.parent() {
+                let _ = std::fs::remove_file(dir.join("Imp.exe.old"));
                 let _ = std::fs::remove_file(dir.join("imp.exe.old"));
                 let _ = std::fs::remove_file(dir.join("simp.exe.old"));
                 let _ = std::fs::remove_file(dir.join("imp.ico"));
@@ -59,12 +60,16 @@ pub fn ensure_daemon_running() {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
-                        if (name_str.starts_with("imp.exe.") || name_str.starts_with("simp.exe."))
-                            && name_str.ends_with(".old")
+                        let lower = name_str.to_ascii_lowercase();
+                        if (lower.starts_with("imp.exe.") || lower.starts_with("simp.exe."))
+                            && lower.ends_with(".old")
                         {
                             let _ = std::fs::remove_file(entry.path());
                         }
                     }
+                }
+                if exe.file_name().and_then(|n| n.to_str()) == Some("imp.exe") {
+                    let _ = std::fs::rename(&exe, dir.join("Imp.exe"));
                 }
             }
         }
@@ -136,9 +141,17 @@ pub fn ensure_daemon_running() {
         }
     }
 
-    // 2. Fallback (or primary on Windows): spawn `simp --daemon` directly as a headless background process
+    // 2. Fallback (or primary on Windows): spawn `imp --daemon` directly as a headless background process
     if let Ok(exe) = std::env::current_exe() {
-        let mut cmd = Command::new(exe);
+        #[cfg(target_os = "windows")]
+        let daemon_exe = exe
+            .parent()
+            .map(|d| d.join("Imp.exe"))
+            .filter(|p| p.is_file())
+            .unwrap_or(exe);
+        #[cfg(not(target_os = "windows"))]
+        let daemon_exe = exe;
+        let mut cmd = Command::new(daemon_exe);
         cmd.arg("--daemon")
             .stdin(Stdio::null())
             .stdout(Stdio::null())

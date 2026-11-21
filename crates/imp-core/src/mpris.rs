@@ -103,7 +103,7 @@ pub fn current_now_playing_summary() -> Option<(String, bool)> {
 }
 
 /// Raises an existing `org.imp.player` window or launches the IMP Desktop Application via
-/// `org.imp.player.desktop` (Linux) or `imp` / `imp.exe` (macOS / Windows).
+/// `org.imp.player.desktop` (Linux) or `imp` / `Imp.exe` (macOS / Windows).
 pub fn launch_simp_desktop_window() {
     if let Some(raiser) = NATIVE_WINDOW_RAISER.get() {
         raiser();

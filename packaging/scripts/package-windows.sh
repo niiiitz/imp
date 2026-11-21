@@ -95,7 +95,7 @@ PY
 )"
   if [[ -n "${EMBEDDED_JWT}" ]]; then
     export SIMP_EMBEDDED_APPLE_DEV_TOKEN="${EMBEDDED_JWT}"
-    echo "   • Baked 150-day ES256 Apple Developer Token into imp.exe"
+    echo "   • Baked 150-day ES256 Apple Developer Token into Imp.exe"
   fi
 fi
 
@@ -103,11 +103,11 @@ if [[ -f "${ENV_FILE}" ]]; then
   SC_ID="$(ENV_FILE="${ENV_FILE}" python3 -c 'import os; env=dict(l.strip().split("=",1) for l in open(os.environ["ENV_FILE"]) if l.strip() and not l.strip().startswith("#") and "=" in l); print(env.get("SOUNDCLOUD_CLIENT_ID","").strip().strip("\x27\x22"), end="")' 2>/dev/null || true)"
   if [[ -n "${SC_ID}" ]]; then
     export SIMP_EMBEDDED_SOUNDCLOUD_CLIENT_ID="${SC_ID}"
-    echo "   • Baked public SoundCloud Client ID into imp.exe (OAuth 2.1 token exchange proxied via simp-tap-67 Cloudflare Worker; zero client_secret in binary)"
+    echo "   • Baked public SoundCloud Client ID into Imp.exe (OAuth 2.1 token exchange proxied via simp-tap-67 Cloudflare Worker; zero client_secret in binary)"
   fi
 fi
 
-echo "3/4 Cross-compiling release Rust binary (imp.exe for ${RUST_TARGET})..."
+echo "3/4 Cross-compiling release Rust binary (Imp.exe for ${RUST_TARGET})..."
 chmod +x "${REPO_ROOT}/packaging/scripts/setup-windows-toolchain.sh"
 TOOLCHAIN_BIN="$("${REPO_ROOT}/packaging/scripts/setup-windows-toolchain.sh")"
 mkdir -p /tmp/simp-zig-cache
@@ -126,28 +126,28 @@ echo "4/4 Assembling dist/imp-windows-portable/ and ZIP archive..."
 rm -rf "${OUT_DIR}" "${ZIP_ARCHIVE}"
 mkdir -p "${OUT_DIR}/ui" "${OUT_DIR}/data/lib" "${OUT_DIR}/data/bin"
 
-cp "${BUILT_EXE}" "${OUT_DIR}/imp.exe"
-# Also stage WebView2Loader.dll in data\lib\ (fallback copy is embedded inside imp.exe, keeping root clean).
+cp "${BUILT_EXE}" "${OUT_DIR}/Imp.exe"
+# Also stage WebView2Loader.dll in data\lib\ (fallback copy is embedded inside Imp.exe, keeping root clean).
 WEBVIEW2_DLL_PATH="$(find "${REPO_ROOT}/target/${RUST_TARGET}/release/build" -path "*/webview2-com-sys-*/out/x64/WebView2Loader.dll" 2>/dev/null | head -n 1 || true)"
 if [[ -n "${WEBVIEW2_DLL_PATH}" && -f "${WEBVIEW2_DLL_PATH}" ]]; then
   cp "${WEBVIEW2_DLL_PATH}" "${OUT_DIR}/data/lib/WebView2Loader.dll"
   echo "   • Staged data/lib/WebView2Loader.dll for Embedded Edge WebView2"
 fi
-# Note: multi-resolution icon is already compiled into `imp.exe` PE resources via `build.rs`.
-# Do not copy a loose `.ico` next to `imp.exe` in the root portable folder so users never
-# confuse the icon file with the `imp.exe` application launcher when file extensions are hidden.
+# Note: multi-resolution icon is already compiled into `Imp.exe` PE resources via `build.rs`.
+# Do not copy a loose `.ico` next to `Imp.exe` in the root portable folder so users never
+# confuse the icon file with the `Imp.exe` application launcher when file extensions are hidden.
 cp -r "${REPO_ROOT}/ui/dist/"* "${OUT_DIR}/ui/"
 
 # Optional Authenticode Code Signing (via osslsigncode on Linux/macOS or signtool.exe)
 WINDOWS_TIMESTAMP_URL="${WINDOWS_TIMESTAMP_URL:-http://timestamp.digicert.com}"
 WIN_SIGN_CMD="${IMP_WINDOWS_SIGN_CMD:-${SIMP_WINDOWS_SIGN_CMD:-}}"
 if [[ -n "${WIN_SIGN_CMD}" ]]; then
-  echo "   • Signing imp.exe via custom sign command..."
-  ${WIN_SIGN_CMD} "${OUT_DIR}/imp.exe"
+  echo "   • Signing Imp.exe via custom sign command..."
+  ${WIN_SIGN_CMD} "${OUT_DIR}/Imp.exe"
 elif [[ -n "${WINDOWS_PFX_PATH:-}" && -f "${WINDOWS_PFX_PATH}" ]]; then
   if command -v osslsigncode >/dev/null 2>&1; then
-    echo "   • Signing imp.exe with Authenticode certificate (${WINDOWS_PFX_PATH})..."
-    mv "${OUT_DIR}/imp.exe" "${OUT_DIR}/imp-unsigned.exe"
+    echo "   • Signing Imp.exe with Authenticode certificate (${WINDOWS_PFX_PATH})..."
+    mv "${OUT_DIR}/Imp.exe" "${OUT_DIR}/imp-unsigned.exe"
     osslsigncode sign \
       -pkcs12 "${WINDOWS_PFX_PATH}" \
       -pass "${WINDOWS_PFX_PASSWORD:-}" \
@@ -156,13 +156,13 @@ elif [[ -n "${WINDOWS_PFX_PATH:-}" && -f "${WINDOWS_PFX_PATH}" ]]; then
       -h sha256 \
       -t "${WINDOWS_TIMESTAMP_URL}" \
       -in "${OUT_DIR}/imp-unsigned.exe" \
-      -out "${OUT_DIR}/imp.exe"
+      -out "${OUT_DIR}/Imp.exe"
     rm -f "${OUT_DIR}/imp-unsigned.exe"
-    echo "   ✓ Authenticode signature embedded into imp.exe"
+    echo "   ✓ Authenticode signature embedded into Imp.exe"
   elif command -v signtool.exe >/dev/null 2>&1; then
-    echo "   • Signing imp.exe with signtool.exe (${WINDOWS_PFX_PATH})..."
-    signtool.exe sign /f "${WINDOWS_PFX_PATH}" /p "${WINDOWS_PFX_PASSWORD:-}" /fd SHA256 /tr "${WINDOWS_TIMESTAMP_URL}" /td SHA256 "${OUT_DIR}/imp.exe"
-    echo "   ✓ Authenticode signature embedded into imp.exe"
+    echo "   • Signing Imp.exe with signtool.exe (${WINDOWS_PFX_PATH})..."
+    signtool.exe sign /f "${WINDOWS_PFX_PATH}" /p "${WINDOWS_PFX_PASSWORD:-}" /fd SHA256 /tr "${WINDOWS_TIMESTAMP_URL}" /td SHA256 "${OUT_DIR}/Imp.exe"
+    echo "   ✓ Authenticode signature embedded into Imp.exe"
   else
     echo "   ⚠ WINDOWS_PFX_PATH is set, but neither osslsigncode nor signtool.exe was found in PATH"
   fi
@@ -171,7 +171,7 @@ fi
 cat > "${OUT_DIR}/portable.txt" <<'EOF'
 IMP Portable Mode Marker
 ========================
-Keeping this file (portable.txt) next to imp.exe tells IMP to store all
+Keeping this file (portable.txt) next to Imp.exe tells IMP to store all
 library databases (data\library.db), settings (data\settings.vdf), cached
 cover art (data\art\), and chromeless window state (data\window-profile\)
 self-contained inside this folder.
@@ -181,8 +181,8 @@ EOF
 
 cat > "${OUT_DIR}/Stop-IMP-Background-Audio.bat" <<'EOF'
 @echo off
-echo Stopping IMP headless background audio service (imp.exe)...
-taskkill /F /IM imp.exe >nul 2>&1
+echo Stopping IMP headless background audio service (Imp.exe)...
+taskkill /F /IM Imp.exe >nul 2>&1
 taskkill /F /IM simp.exe >nul 2>&1
 echo Done.
 EOF
@@ -193,8 +193,8 @@ cat > "${OUT_DIR}/README-WINDOWS.txt" <<'EOF'
 ======================================================================
 
 1. HOW TO LAUNCH
-   Double-click `imp.exe`.
-   - Starts the ultra-lightweight headless Rust audio daemon (`imp.exe --daemon`)
+   Double-click `Imp.exe`.
+   - Starts the ultra-lightweight headless Rust audio daemon (`Imp.exe --daemon`)
      in the background (~0.1% CPU, native Windows WASAPI audio).
    - Places the IMP Portal Icon in the Windows System Tray (Notification Area).
    - Opens the chromeless IMP Console window via built-in Embedded Edge WebView2
@@ -213,17 +213,17 @@ cat > "${OUT_DIR}/README-WINDOWS.txt" <<'EOF'
      Windows 10/11 Volume Flyout work automatically while in-game.
 
 3. PORTABLE MODE (`data\` FOLDER)
-   - Because `portable.txt` is present next to `imp.exe`, all settings,
+   - Because `portable.txt` is present next to `Imp.exe`, all settings,
      playlists, SQLite library metadata, and Apple Music tokens are stored
      inside the local `data\` folder. You can move this folder anywhere
      (including an external SSD or USB drive).
 
 4. IN-PLACE SELF-UPDATE & AUTHENTICODE SIGNING
-   - Open Settings -> Updates inside IMP (or run `imp.exe update` from
+   - Open Settings -> Updates inside IMP (or run `Imp.exe update` from
      PowerShell / Command Prompt) to check GitHub and self-update in-place.
    - IMP downloads `imp-windows-portable-x86_64.zip`, renames the running
-     `imp.exe` -> `imp.exe.old` (cleaned up automatically on next startup),
-     updates `imp.exe` and `ui\` in place while preserving your `data\`
+     `Imp.exe` -> `Imp.exe.old` (cleaned up automatically on next startup),
+     updates `Imp.exe` and `ui\` in place while preserving your `data\`
      folder, and restarts the background audio daemon automatically.
    - To produce an Authenticode-signed binary that avoids Windows SmartScreen
      prompts, provide an OV or EV Code Signing `.pfx` (or Azure Artifact

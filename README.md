@@ -5,14 +5,14 @@
 
   **A lightweight, controller-first & desktop-native audio and video player for SteamOS, Linux, macOS, Windows, and SteamVR.**
 
-  [![Status: v0.9.0-alpha.3](https://img.shields.io/badge/status-v0.9.0--alpha.3-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
+  [![Status: v0.9.0-alpha.4](https://img.shields.io/badge/status-v0.9.0--alpha.4-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
   [![Platforms: SteamOS | Linux | macOS | Windows | SteamVR](https://img.shields.io/badge/platforms-SteamOS%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20SteamVR-000000?style=flat-square)](#installation)
   [![Backend: 100% Native Rust](https://img.shields.io/badge/backend-Native%20Rust-dea584?style=flat-square)](#development--building-from-source)
 </div>
 
 ---
 
-## ⬇️ Download IMP (`v0.9.0-alpha.3`)
+## ⬇️ Download IMP (`v0.9.0-alpha.4`)
 
 Grab the ready-to-run installer or portable bundle for your platform directly below (or browse **[All Releases](https://github.com/niiiitz/imp/releases)**):
 
@@ -22,7 +22,7 @@ Grab the ready-to-run installer or portable bundle for your platform directly be
 | **Steam Frame / Linux (`aarch64` ARM64)** | **[`imp-steamos-userland-aarch64.tar.gz`](https://github.com/niiiitz/imp/releases/latest/download/imp-steamos-userland-aarch64.tar.gz)** | Extract & run `./install-steamos.sh` *(native ARM64 + SteamVR overlay)* |
 | **Decky Loader Add-On (`SteamOS QAM`)** | **[`imp-decky.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-decky.zip)** | In Decky Loader: **Settings → Developer → Install Plugin from ZIP** |
 | **macOS (`Apple Silicon arm64`)** | **[`IMP-macos-arm64.zip`](https://github.com/niiiitz/imp/releases/latest/download/IMP-macos-arm64.zip)** | Unzip and drag **`IMP.app`** to `/Applications` *(signed w/ Hardened Runtime)* |
-| **Windows (`x86_64` Portable)** | **[`imp-windows-portable-x86_64.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-windows-portable-x86_64.zip)** | Unzip anywhere and launch **`imp.exe`** *(zero-install portable folder)* |
+| **Windows (`x86_64` Portable)** | **[`imp-windows-portable-x86_64.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-windows-portable-x86_64.zip)** | Unzip anywhere and launch **`Imp.exe`** *(zero-install portable folder)* |
 
 ---
 
@@ -66,7 +66,7 @@ Playing your own music, soundtracks, and video across a Steam Deck, desktop, liv
 
 ## Installation
 
-Grab the package for your platform from the **[latest GitHub Release (`v0.9.0-alpha.3`)](https://github.com/niiiitz/imp/releases/latest)**:
+Grab the package for your platform from the **[latest GitHub Release (`v0.9.0-alpha.4`)](https://github.com/niiiitz/imp/releases/latest)**:
 
 ### SteamOS / Bazzite / Linux (`x86_64` & `aarch64`)
 
@@ -87,7 +87,7 @@ Download **[`IMP-macos-arm64.zip`](https://github.com/niiiitz/imp/releases/lates
 
 ### Windows (`x86_64` Portable)
 
-Download **[`imp-windows-portable-x86_64.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-windows-portable-x86_64.zip)**, extract anywhere, and run `imp.exe`.
+Download **[`imp-windows-portable-x86_64.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-windows-portable-x86_64.zip)**, extract anywhere, and run `Imp.exe`.
 
 ### In-App Updates (`Alpha` & `Stable` Channels)
 

@@ -12,11 +12,14 @@ import {
 } from '@simp/client';
 import {
   loadEnabledVisualizerScenes,
+  loadVisualizerFpsCap,
   PlayerBackgroundVisualizer,
   saveEnabledVisualizerScenes,
+  saveVisualizerFpsCap,
   VISUALIZER_MODES,
   VISUALIZER_ENGINES,
   type VisualizerEngine,
+  type VisualizerFpsCap,
   type VisualizerMode,
 } from '../components/PlayerBackgroundVisualizer';
 import {
@@ -197,6 +200,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [enabledVizScenes, setEnabledVizScenes] = useState<VisualizerEngine[]>(() =>
     loadEnabledVisualizerScenes(),
   );
+  const [vizFpsCap, setVizFpsCap] = useState<VisualizerFpsCap>(() => loadVisualizerFpsCap());
+  const handleToggleVizFpsCap = useCallback(() => {
+    setVizFpsCap((prev) => {
+      const next: VisualizerFpsCap = prev === 60 ? 30 : 60;
+      saveVisualizerFpsCap(next);
+      return next;
+    });
+  }, []);
   const [activeVizEngine, setActiveVizEngine] = useState<VisualizerEngine>('glyph');
   const [vizDrawerOpen, setVizDrawerOpen] = useState<boolean>(false);
   const [equalizerOpen, setEqualizerOpen] = useState<boolean>(false);
@@ -1690,6 +1701,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <PlayerBackgroundVisualizer
             mode={effectiveVizMode}
             enabledScenes={enabledVizScenes}
+            fpsCap={vizFpsCap}
             preferredScene={
               (trackPropsState.preferred_viz_mode as VisualizerEngine | null | undefined) || null
             }
@@ -1960,8 +1972,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         vizMode={vizMode}
         activeEngine={activeVizEngine}
         enabledScenes={enabledVizScenes}
+        fpsCap={vizFpsCap}
         onSelectMode={handleSelectVizMode}
         onToggleSceneInRotation={handleToggleSceneInRotation}
+        onToggleFpsCap={handleToggleVizFpsCap}
         onSetAllScenesInRotation={handleSetAllScenesInRotation}
       />
 
