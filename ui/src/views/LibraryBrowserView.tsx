@@ -678,7 +678,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         source: 'local',
         mount_root: null,
         search: null,
-        limit: 10000,
+        limit: 50000,
         offset: 0,
       })
       .then((res) => {
@@ -1387,7 +1387,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         source: null,
         mount_root: activeMountRoot,
         search: searchParam,
-        limit: 1000,
+        limit: 25000,
         offset: 0,
       })
       .then((res) => {
@@ -1399,7 +1399,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         source: null,
         mount_root: activeMountRoot,
         search: searchParam,
-        limit: 2000,
+        limit: 50000,
         offset: 0,
       })
       .then((res) => {
@@ -3210,7 +3210,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           source: null,
           mount_root: target.id,
           search: null,
-          limit: 2000,
+          limit: 50000,
           offset: 0,
         });
       }

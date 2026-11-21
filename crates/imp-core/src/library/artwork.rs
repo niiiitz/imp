@@ -1,9 +1,9 @@
-use lofty::file::TaggedFileExt;
+use lofty::file::{TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, PictureType};
 use lofty::probe::Probe;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Artwork Fallback Cascade:
 /// 1. Embedded ID3v2 APIC / Vorbis PICTURE (`lofty`) -> `simp_art_emb_{hash}.{ext}`
@@ -60,6 +60,58 @@ pub fn folder_has_local_artwork_file(dir: &Path) -> bool {
     false
 }
 
+/// Picks the highest-priority local cover image from a directory's pre-collected image list.
+pub fn pick_preferred_folder_image(candidates: &[PathBuf]) -> Option<PathBuf> {
+    if candidates.is_empty() {
+        return None;
+    }
+    for prio in PRIORITY_FOLDER_IMAGES {
+        if let Some(exact) = candidates.iter().find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n == *prio)
+                .unwrap_or(false)
+        }) {
+            return Some(exact.clone());
+        }
+        if let Some(ci) = candidates.iter().find(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.eq_ignore_ascii_case(prio))
+                .unwrap_or(false)
+        }) {
+            return Some(ci.clone());
+        }
+    }
+    candidates.first().cloned()
+}
+
+/// Reads and caches a folder cover artwork image file into the local art cache.
+pub fn cache_folder_artwork_file(image_path: &Path) -> Option<ExtractedArtwork> {
+    if !image_path.is_file() {
+        return None;
+    }
+    let bytes = fs::read(image_path).ok()?;
+    let ext_lower = image_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let ext = match ext_lower.as_str() {
+        "png" => "png",
+        "webp" => "webp",
+        "gif" => "gif",
+        _ => "jpg",
+    };
+    write_art_bytes(&bytes, ext, "dir")
+}
+
+/// Extracts and caches embedded cover artwork directly from an already-parsed `TaggedFile`.
+pub fn extract_and_cache_artwork_from_tagged(tagged_file: &TaggedFile) -> Option<ExtractedArtwork> {
+    let (bytes, ext) = extract_embedded_bytes_from_tagged(tagged_file)?;
+    write_art_bytes(&bytes, ext, "emb")
+}
+
 pub fn resolve_and_cache_artwork(audio_file_path: &Path) -> Option<ExtractedArtwork> {
     if let Some((bytes, ext)) = extract_embedded_bytes(audio_file_path) {
         return write_art_bytes(&bytes, ext, "emb");
@@ -68,46 +120,27 @@ pub fn resolve_and_cache_artwork(audio_file_path: &Path) -> Option<ExtractedArtw
     if let Some(parent) = audio_file_path.parent() {
         for name in PRIORITY_FOLDER_IMAGES {
             let candidate_path = parent.join(name);
-            if candidate_path.is_file() {
-                if let Ok(bytes) = fs::read(&candidate_path) {
-                    let lower = name.to_lowercase();
-                    let ext = if lower.ends_with(".png") {
-                        "png"
-                    } else if lower.ends_with(".webp") {
-                        "webp"
-                    } else {
-                        "jpg"
-                    };
-                    return write_art_bytes(&bytes, ext, "dir");
-                }
+            if let Some(art) = cache_folder_artwork_file(&candidate_path) {
+                return Some(art);
             }
         }
 
         // Fallback: check any image file in the parent folder
         if let Ok(entries) = fs::read_dir(parent) {
+            let mut fallback_imgs = Vec::new();
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
                     if let Some(ext_os) = path.extension().and_then(|e| e.to_str()) {
                         let ext_lower = ext_os.to_lowercase();
-                        if ext_lower == "png"
-                            || ext_lower == "jpg"
-                            || ext_lower == "jpeg"
-                            || ext_lower == "webp"
-                        {
-                            if let Ok(bytes) = fs::read(&path) {
-                                let ext = if ext_lower == "png" {
-                                    "png"
-                                } else if ext_lower == "webp" {
-                                    "webp"
-                                } else {
-                                    "jpg"
-                                };
-                                return write_art_bytes(&bytes, ext, "dir");
-                            }
+                        if matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+                            fallback_imgs.push(path);
                         }
                     }
                 }
+            }
+            if let Some(chosen) = pick_preferred_folder_image(&fallback_imgs) {
+                return cache_folder_artwork_file(&chosen);
             }
         }
     }
@@ -115,8 +148,9 @@ pub fn resolve_and_cache_artwork(audio_file_path: &Path) -> Option<ExtractedArtw
     None
 }
 
-fn extract_embedded_bytes(file_path: &Path) -> Option<(Vec<u8>, &'static str)> {
-    let tagged_file = Probe::open(file_path).ok()?.read().ok()?;
+fn extract_embedded_bytes_from_tagged(
+    tagged_file: &TaggedFile,
+) -> Option<(Vec<u8>, &'static str)> {
     let tag = tagged_file
         .primary_tag()
         .or_else(|| tagged_file.first_tag())?;
@@ -133,6 +167,11 @@ fn extract_embedded_bytes(file_path: &Path) -> Option<(Vec<u8>, &'static str)> {
     };
 
     Some((picture.data().to_vec(), ext))
+}
+
+fn extract_embedded_bytes(file_path: &Path) -> Option<(Vec<u8>, &'static str)> {
+    let tagged_file = Probe::open(file_path).ok()?.read().ok()?;
+    extract_embedded_bytes_from_tagged(&tagged_file)
 }
 
 fn write_art_bytes(bytes: &[u8], ext: &str, kind: &str) -> Option<ExtractedArtwork> {
@@ -378,7 +417,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
     if let Ok(bytes) = crate::http_pool::http_get_bytes(
         url,
         &[
-            ("User-Agent", "IMP/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         None,
@@ -406,7 +445,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
         "--max-time",
         "15",
         "-H",
-        "User-Agent: IMP/1.0.0 (https://github.com/niiiitz/imp)",
+        "User-Agent: IMP/1.0.1 (https://github.com/niiiitz/imp)",
         "-H",
         "Accept: application/json",
         url,
@@ -425,7 +464,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
 fn download_cover_art_to(url: &str, dest_path: &Path) -> bool {
     if let Ok(bytes) = crate::http_pool::http_get_bytes(
         url,
-        &[("User-Agent", "IMP/1.0.0 (https://github.com/niiiitz/imp)")],
+        &[("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)")],
         None,
         10,
     ) {
@@ -443,7 +482,7 @@ fn download_cover_art_to(url: &str, dest_path: &Path) -> bool {
         "--max-time",
         "10",
         "-H",
-        "User-Agent: IMP/1.0.0 (https://github.com/niiiitz/imp)",
+        "User-Agent: IMP/1.0.1 (https://github.com/niiiitz/imp)",
         "-o",
         &dest_path.to_string_lossy(),
         url,

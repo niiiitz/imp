@@ -1008,7 +1008,7 @@ fn fetch_musicbrainz_metadata(disc_id: &str, toc_param: &str) -> Option<MusicBra
     let bytes = crate::http_pool::http_get_bytes(
         &url,
         &[
-            ("User-Agent", "IMP/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         None,
@@ -1140,7 +1140,7 @@ fn fetch_and_cache_cover_art(disc_id: &str, release_mbid: &str) -> Option<String
     let caa_url = format!("https://coverartarchive.org/release/{release_mbid}/front-500");
     if let Ok(bytes) = crate::http_pool::http_get_bytes(
         &caa_url,
-        &[("User-Agent", "IMP/1.0.0 (https://github.com/niiiitz/imp)")],
+        &[("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)")],
         None,
         8,
     ) {

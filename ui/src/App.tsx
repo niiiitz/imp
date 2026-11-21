@@ -855,7 +855,7 @@ const ConsoleMainApp: React.FC = () => {
         source: sourceParam,
         mount_root: null,
         search: searchParam,
-        limit: 1000,
+        limit: 25000,
         offset: 0,
       })
       .then((res) => {
@@ -941,7 +941,7 @@ const ConsoleMainApp: React.FC = () => {
       defaultSimpClient
         .query<TrackMetadata[]>('get_playlist_items', {
           playlist_id: browserTarget.id,
-          limit: 2000,
+          limit: 10000,
           offset: 0,
         })
         .then(setBrowserTracks)
@@ -952,7 +952,7 @@ const ConsoleMainApp: React.FC = () => {
           source: null,
           mount_root: browserTarget.id,
           search: browserSearch.trim() ? browserSearch.trim() : null,
-          limit: 2000,
+          limit: 50000,
           offset: 0,
         })
         .then(setBrowserTracks)

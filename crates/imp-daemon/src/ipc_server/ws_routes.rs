@@ -143,7 +143,7 @@ fn execute_query(req_id: u64, query: LibraryQuery, state: &DaemonIpcState) -> Se
             source.as_deref(),
             mount_root.as_deref(),
             search.as_deref(),
-            limit.max(1).min(2000),
+            limit.max(1).min(50_000),
             offset,
         ) {
             Ok(albums) => ServerEnvelope::QueryResponse {
@@ -183,7 +183,7 @@ fn execute_query(req_id: u64, query: LibraryQuery, state: &DaemonIpcState) -> Se
             source.as_deref(),
             mount_root.as_deref(),
             search.as_deref(),
-            limit.max(1).min(5000),
+            limit.max(1).min(100_000),
             offset,
         ) {
             Ok(tracks) => ServerEnvelope::QueryResponse {
@@ -219,7 +219,7 @@ fn execute_query(req_id: u64, query: LibraryQuery, state: &DaemonIpcState) -> Se
             offset,
         } => match state
             .db
-            .get_playlist_items(&playlist_id, limit.max(1).min(500), offset)
+            .get_playlist_items(&playlist_id, limit.max(1).min(10_000), offset)
         {
             Ok(items) => ServerEnvelope::QueryResponse {
                 req_id,

@@ -407,13 +407,16 @@ pub(crate) fn apple_get_json(url: &str, dev_token: &str, user_token: &str) -> Re
     };
 
     let auth_header = format!("Bearer {}", dev_token.trim());
-    let headers = [
+    let mut headers = vec![
         ("Authorization", auth_header.as_str()),
-        ("Music-User-Token", user_token.trim()),
-        ("X-Apple-Music-User-Token", user_token.trim()),
         ("Origin", "https://music.apple.com"),
         ("Referer", "https://music.apple.com/"),
     ];
+    let trimmed_user = user_token.trim();
+    if !trimmed_user.is_empty() {
+        headers.push(("Music-User-Token", trimmed_user));
+        headers.push(("X-Apple-Music-User-Token", trimmed_user));
+    }
 
     const BACKOFF_MS: &[u64] = &[250, 600];
     let mut attempt = 0usize;

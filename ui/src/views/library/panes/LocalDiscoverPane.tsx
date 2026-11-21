@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlbumRecord,
   defaultSimpClient,
@@ -245,6 +245,22 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   const { syncedUris, allLyricsUris } = useLibraryLyricsStatus();
   const isMountedMode = browseHubTarget === 'mount';
   const effectiveSubTab: LocalSubTab = isMountedMode ? 'folders' : localSubTab;
+
+  const [visibleAlbumsCount, setVisibleAlbumsCount] = useState<number>(180);
+  const [visibleArtistsCount, setVisibleArtistsCount] = useState<number>(180);
+
+  useEffect(() => {
+    setVisibleAlbumsCount(180);
+    setVisibleArtistsCount(180);
+  }, [
+    localAlpha,
+    localGenreFilter,
+    localYearFilter,
+    localArtworkFilter,
+    localLyricsFilter,
+    effectiveSubTab,
+    mediaTypeFilter,
+  ]);
 
   const hasRichFilter =
     localGenreFilter !== 'all' ||
@@ -962,15 +978,68 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
         >
           {filteredArtistsList.length > 0 ? (
-            <div style={tileGridStyle}>
-              {filteredArtistsList.map((a) =>
-                renderLocalArtistCard(
-                  a.name,
-                  a.artUrl,
-                  `${a.albumCount} albums • ${a.trackCount} tracks`
-                )
+            <>
+              <div style={tileGridStyle}>
+                {filteredArtistsList
+                  .slice(0, visibleArtistsCount)
+                  .map((a) =>
+                    renderLocalArtistCard(
+                      a.name,
+                      a.artUrl,
+                      `${a.albumCount} albums • ${a.trackCount} tracks`
+                    )
+                  )}
+              </div>
+              {filteredArtistsList.length > visibleArtistsCount && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 10,
+                    paddingTop: 6,
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <button
+                    type="button"
+                    data-right-tile="true"
+                    data-tile-key="local_artists_load_more"
+                    onClick={() => setVisibleArtistsCount((prev) => prev + 240)}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: 10,
+                      border: '1px solid #10b981',
+                      background: 'rgba(16, 185, 129, 0.14)',
+                      color: '#6ee7b7',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Load 240 More (showing {visibleArtistsCount} of {filteredArtistsList.length})
+                  </button>
+                  <button
+                    type="button"
+                    data-right-tile="true"
+                    data-tile-key="local_artists_show_all"
+                    onClick={() => setVisibleArtistsCount(filteredArtistsList.length)}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: 10,
+                      border: '1px solid #262936',
+                      background: '#11151d',
+                      color: '#cbd5e1',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Show All ({filteredArtistsList.length})
+                  </button>
+                </div>
               )}
-            </div>
+            </>
           ) : (
             <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
               No local artists match the active filters.
@@ -989,7 +1058,60 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
             style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
           >
             {filteredAlbumsList.length > 0 ? (
-              <div style={tileGridStyle}>{filteredAlbumsList.map(renderSimpAlbumCard)}</div>
+              <>
+                <div style={tileGridStyle}>
+                  {filteredAlbumsList.slice(0, visibleAlbumsCount).map(renderSimpAlbumCard)}
+                </div>
+                {filteredAlbumsList.length > visibleAlbumsCount && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 10,
+                      paddingTop: 6,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      data-right-tile="true"
+                      data-tile-key="local_albums_load_more"
+                      onClick={() => setVisibleAlbumsCount((prev) => prev + 240)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 10,
+                        border: '1px solid #10b981',
+                        background: 'rgba(16, 185, 129, 0.14)',
+                        color: '#6ee7b7',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Load 240 More (showing {visibleAlbumsCount} of {filteredAlbumsList.length})
+                    </button>
+                    <button
+                      type="button"
+                      data-right-tile="true"
+                      data-tile-key="local_albums_show_all"
+                      onClick={() => setVisibleAlbumsCount(filteredAlbumsList.length)}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: 10,
+                        border: '1px solid #262936',
+                        background: '#11151d',
+                        color: '#cbd5e1',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Show All ({filteredAlbumsList.length})
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <div style={{ padding: 20, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
                 No local albums match the current filters.

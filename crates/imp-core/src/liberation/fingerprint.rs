@@ -16,7 +16,7 @@ use base64::{
 };
 use rusty_chromaprint::{match_fingerprints, Configuration, FingerprintCompressor, Fingerprinter};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{Cursor, ErrorKind, Read};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,7 @@ use symphonia::default::{get_codecs, get_probe};
 use walkdir::WalkDir;
 
 const ACOUSTID_API_URL: &str = "https://api.acoustid.org/v2/lookup";
-const ACOUSTID_USER_AGENT: &str = "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)";
+const ACOUSTID_USER_AGENT: &str = "IMP-MediaPlayer/1.0.1 (https://github.com/niiiitz/imp)";
 const MAX_FINGERPRINT_SECONDS: u64 = 120;
 const MIN_ACOUSTID_SCORE: f64 = 0.85;
 const MAX_DURATION_DRIFT_SEC: i64 = 8;
@@ -1537,9 +1537,27 @@ impl AcousticMendController {
         let root_str = root_dir.to_string_lossy().to_string();
         let filter_lower = folder_filter.to_ascii_lowercase();
 
-        let mut audio_files: Vec<PathBuf> = Vec::new();
-        for entry in WalkDir::new(&root_dir).into_iter().filter_map(Result::ok) {
+        struct AcousticCandidate {
+            path: PathBuf,
+            path_str: String,
+            file_name: String,
+            file_size_bytes: u64,
+            mtime_sec: i64,
+            meta: ScannedAudioFile,
+            container_format: String,
+        }
+
+        let mut raw_entries: Vec<(PathBuf, u64, i64)> = Vec::new();
+        for entry in WalkDir::new(&root_dir)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(Result::ok)
+        {
             if !entry.file_type().is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy();
+            if name.starts_with("._") || name.ends_with(".imp.part") {
                 continue;
             }
             let path = entry.path();
@@ -1552,45 +1570,7 @@ impl AcousticMendController {
                     continue;
                 }
             }
-            audio_files.push(path.to_path_buf());
-        }
-        audio_files.sort();
-
-        {
-            let mut rt = self.runtime.lock().unwrap();
-            rt.total_files = audio_files.len();
-            rt.last_message = format!(
-                "Computing Chromaprint fingerprints for {} audio files...",
-                audio_files.len()
-            );
-            rt.updated_at = current_unix_sec();
-        }
-
-        let mut fp_entries: Vec<LocalFingerprintEntry> = Vec::with_capacity(audio_files.len());
-        let mut proposed_items: Vec<ReunionMoveItem> = Vec::new();
-        let mut seen_targets: HashSet<String> = HashSet::new();
-        let mut last_api_call: Option<Instant> = None;
-
-        for path in &audio_files {
-            if self.pause_flag.load(Ordering::SeqCst) {
-                break;
-            }
-            let path_str = path.to_string_lossy().to_string();
-            let file_name = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(&path_str)
-                .to_string();
-            {
-                let mut rt = self.runtime.lock().unwrap();
-                rt.current_file = file_name;
-                rt.updated_at = current_unix_sec();
-            }
-
-            let Ok(fs_meta) = std::fs::metadata(path) else {
-                let mut rt = self.runtime.lock().unwrap();
-                rt.errors += 1;
-                rt.processed_files += 1;
+            let Ok(fs_meta) = entry.metadata() else {
                 continue;
             };
             let file_size_bytes = fs_meta.len();
@@ -1600,105 +1580,254 @@ impl AcousticMendController {
                 .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
+            raw_entries.push((path.to_path_buf(), file_size_bytes, mtime_sec));
+        }
+        raw_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-            let scanned_meta = scan_reunion_audio_file(path);
-            let container_format = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|s| s.to_ascii_uppercase())
-                .unwrap_or_else(|| "AUDIO".to_string());
+        let total_files = raw_entries.len();
+        let skip_clean_tags = enable_acoustid_lookup && target_mode != "all";
 
-            let mut record = match cache.get_cached_liberation_fingerprint(
-                &path_str,
-                file_size_bytes,
-                mtime_sec,
-            ) {
-                Ok(Some(hit)) if !hit.fingerprint_b64.is_empty() && !hit.raw_fingerprint_b64.is_empty() => {
-                    let mut rt = self.runtime.lock().unwrap();
-                    rt.fingerprinted_cached += 1;
-                    hit
-                }
-                _ => match compute_chromaprint_fingerprint(path) {
-                    Ok(computed) => {
-                        let rec = LiberationFingerprintRecord {
-                            file_path: path_str.clone(),
-                            root_dir: root_str.clone(),
+        {
+            let mut rt = self.runtime.lock().unwrap();
+            rt.total_files = total_files;
+            rt.last_message = format!("Reading tags in parallel across {total_files} audio files...");
+            rt.updated_at = current_unix_sec();
+        }
+
+        // Phase 1: Parallel lightweight tag inspection across 8 workers so clean files can be
+        // skipped immediately in `drifted_only` mode before decoding PCM audio over SMB.
+        let mut tagged_candidates: Vec<AcousticCandidate> = Vec::with_capacity(total_files);
+        if !raw_entries.is_empty() {
+            let worker_count = raw_entries.len().min(8);
+            let queue = Mutex::new(VecDeque::from(raw_entries));
+            let out = Mutex::new(Vec::with_capacity(total_files));
+            let clean_counter = Mutex::new(0usize);
+            let root_ref = &root_dir;
+
+            std::thread::scope(|s| {
+                for _ in 0..worker_count {
+                    s.spawn(|| loop {
+                        if self.pause_flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let next_item = { queue.lock().unwrap().pop_front() };
+                        let Some((path, file_size_bytes, mtime_sec)) = next_item else {
+                            break;
+                        };
+                        let path_str = path.to_string_lossy().to_string();
+                        let file_name = path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or(&path_str)
+                            .to_string();
+                        let container_format = path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|s| s.to_ascii_uppercase())
+                            .unwrap_or_else(|| "AUDIO".to_string());
+                        let meta = scan_reunion_audio_file(&path).unwrap_or_else(|| ScannedAudioFile {
+                            path: path.clone(),
+                            dir_path: path.parent().unwrap_or(root_ref).to_path_buf(),
+                            title: path
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("Track")
+                                .to_string(),
+                            artist: String::new(),
+                            album_artist: String::new(),
+                            album: String::new(),
+                            track_number: None,
+                            track_total: None,
+                            disc_number: None,
+                            year: None,
+                            isrc: None,
+                            duration_ms: 0,
+                        });
+
+                        if skip_clean_tags && !is_drifted_or_unknown_audio_file(&meta) {
+                            *clean_counter.lock().unwrap() += 1;
+                            if let Ok(mut rt) = self.runtime.try_lock() {
+                                rt.clean_skipped += 1;
+                                rt.processed_files += 1;
+                                rt.current_file = file_name;
+                                rt.updated_at = current_unix_sec();
+                            }
+                            continue;
+                        }
+
+                        out.lock().unwrap().push(AcousticCandidate {
+                            path,
+                            path_str,
+                            file_name,
                             file_size_bytes,
                             mtime_sec,
-                            decoded_duration_sec: computed.duration_sec,
-                            fingerprint_b64: computed.compressed_b64,
-                            raw_fingerprint_b64: encode_raw_subfingerprints_b64(
-                                &computed.raw_subfingerprints,
-                            ),
-                            acoustid_score: None,
-                            mb_recording_id: None,
-                            mb_release_id: None,
-                            matched_title: None,
-                            matched_artist: None,
-                            matched_album: None,
-                            matched_album_artist: None,
-                            matched_track_number: None,
-                            matched_track_total: None,
-                            matched_disc_number: None,
-                            matched_year: None,
-                            matched_isrc: None,
-                            lookup_status: "local_only".to_string(),
-                            updated_at: current_unix_sec(),
+                            meta,
+                            container_format,
+                        });
+                    });
+                }
+            });
+
+            tagged_candidates = out.into_inner().unwrap();
+            tagged_candidates.sort_by(|a, b| a.path.cmp(&b.path));
+            let clean_total = *clean_counter.lock().unwrap();
+            let mut rt = self.runtime.lock().unwrap();
+            rt.clean_skipped = clean_total;
+            rt.processed_files = clean_total;
+            rt.last_message = format!(
+                "Computing Chromaprint fingerprints for {} audio files ({} clean skipped)...",
+                tagged_candidates.len(),
+                clean_total
+            );
+            rt.updated_at = current_unix_sec();
+        }
+
+        // Phase 2: Check fingerprint SQLite cache first, then compute missing Chromaprints in
+        // parallel batches of 32 (4 workers) so slow SMB PCM reads don't serialize.
+        let mut ready_records: Vec<(AcousticCandidate, LiberationFingerprintRecord)> =
+            Vec::with_capacity(tagged_candidates.len());
+        let mut need_fp: Vec<AcousticCandidate> = Vec::new();
+
+        for cand in tagged_candidates {
+            if self.pause_flag.load(Ordering::SeqCst) {
+                break;
+            }
+            match cache.get_cached_liberation_fingerprint(
+                &cand.path_str,
+                cand.file_size_bytes,
+                cand.mtime_sec,
+            ) {
+                Ok(Some(hit))
+                    if !hit.fingerprint_b64.is_empty() && !hit.raw_fingerprint_b64.is_empty() =>
+                {
+                    let mut rt = self.runtime.lock().unwrap();
+                    rt.fingerprinted_cached += 1;
+                    rt.current_file = cand.file_name.clone();
+                    rt.updated_at = current_unix_sec();
+                    ready_records.push((cand, hit));
+                }
+                _ => need_fp.push(cand),
+            }
+        }
+
+        while !need_fp.is_empty() {
+            if self.pause_flag.load(Ordering::SeqCst) {
+                break;
+            }
+            let take_n = need_fp.len().min(32);
+            let batch: Vec<AcousticCandidate> = need_fp.drain(..take_n).collect();
+            let worker_count = batch.len().min(4);
+            let queue = Mutex::new(VecDeque::from(batch));
+            let batch_results: Mutex<Vec<Result<(AcousticCandidate, LiberationFingerprintRecord), ()>>> =
+                Mutex::new(Vec::with_capacity(take_n));
+
+            std::thread::scope(|s| {
+                for _ in 0..worker_count {
+                    s.spawn(|| loop {
+                        if self.pause_flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let next_cand = { queue.lock().unwrap().pop_front() };
+                        let Some(cand) = next_cand else {
+                            break;
                         };
+                        if let Ok(mut rt) = self.runtime.try_lock() {
+                            rt.current_file = cand.file_name.clone();
+                            rt.updated_at = current_unix_sec();
+                        }
+                        match compute_chromaprint_fingerprint(&cand.path) {
+                            Ok(computed) => {
+                                let rec = LiberationFingerprintRecord {
+                                    file_path: cand.path_str.clone(),
+                                    root_dir: root_str.clone(),
+                                    file_size_bytes: cand.file_size_bytes,
+                                    mtime_sec: cand.mtime_sec,
+                                    decoded_duration_sec: computed.duration_sec,
+                                    fingerprint_b64: computed.compressed_b64,
+                                    raw_fingerprint_b64: encode_raw_subfingerprints_b64(
+                                        &computed.raw_subfingerprints,
+                                    ),
+                                    acoustid_score: None,
+                                    mb_recording_id: None,
+                                    mb_release_id: None,
+                                    matched_title: None,
+                                    matched_artist: None,
+                                    matched_album: None,
+                                    matched_album_artist: None,
+                                    matched_track_number: None,
+                                    matched_track_total: None,
+                                    matched_disc_number: None,
+                                    matched_year: None,
+                                    matched_isrc: None,
+                                    lookup_status: "local_only".to_string(),
+                                    updated_at: current_unix_sec(),
+                                };
+                                batch_results.lock().unwrap().push(Ok((cand, rec)));
+                            }
+                            Err(_) => {
+                                batch_results.lock().unwrap().push(Err(()));
+                            }
+                        }
+                    });
+                }
+            });
+
+            for res in batch_results.into_inner().unwrap() {
+                match res {
+                    Ok((cand, rec)) => {
                         let _ = cache.upsert_liberation_fingerprint(&rec);
                         let mut rt = self.runtime.lock().unwrap();
                         rt.fingerprinted_fresh += 1;
-                        rec
+                        rt.updated_at = current_unix_sec();
+                        ready_records.push((cand, rec));
                     }
-                    Err(_) => {
+                    Err(()) => {
                         let mut rt = self.runtime.lock().unwrap();
                         rt.errors += 1;
                         rt.processed_files += 1;
-                        continue;
+                        rt.updated_at = current_unix_sec();
                     }
-                },
-            };
+                }
+            }
+        }
+
+        ready_records.sort_by(|a, b| a.0.path.cmp(&b.0.path));
+
+        // Phase 3: Collect offline duplicate fingerprint entries and perform strictly rate-limited
+        // AcoustID / MusicBrainz metadata lookups on candidates.
+        let mut fp_entries: Vec<LocalFingerprintEntry> = Vec::with_capacity(ready_records.len());
+        let mut proposed_items: Vec<ReunionMoveItem> = Vec::new();
+        let mut seen_targets: HashSet<String> = HashSet::new();
+        let mut last_api_call: Option<Instant> = None;
+
+        for (cand, mut record) in ready_records {
+            if self.pause_flag.load(Ordering::SeqCst) {
+                break;
+            }
+            {
+                let mut rt = self.runtime.lock().unwrap();
+                rt.current_file = cand.file_name.clone();
+                rt.updated_at = current_unix_sec();
+            }
 
             let raw_subfingerprints = decode_raw_subfingerprints_b64(&record.raw_fingerprint_b64);
-            let fallback_meta = scanned_meta.unwrap_or_else(|| ScannedAudioFile {
-                path: path.clone(),
-                dir_path: path.parent().unwrap_or(&root_dir).to_path_buf(),
-                title: path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("Track")
-                    .to_string(),
-                artist: String::new(),
-                album_artist: String::new(),
-                album: String::new(),
-                track_number: None,
-                track_total: None,
-                disc_number: None,
-                year: None,
-                isrc: None,
-                duration_ms: (record.decoded_duration_sec as u64) * 1000,
-            });
+            let mut fallback_meta = cand.meta;
+            if fallback_meta.duration_ms == 0 {
+                fallback_meta.duration_ms = (record.decoded_duration_sec as u64) * 1000;
+            }
 
             fp_entries.push(LocalFingerprintEntry {
-                file_path: path_str.clone(),
+                file_path: cand.path_str.clone(),
                 title: fallback_meta.title.clone(),
                 artist: fallback_meta.artist.clone(),
                 album: fallback_meta.album.clone(),
-                file_size_bytes,
+                file_size_bytes: cand.file_size_bytes,
                 duration_sec: record.decoded_duration_sec,
-                container_format,
+                container_format: cand.container_format,
                 raw_subfingerprints,
             });
 
-            let should_lookup = enable_acoustid_lookup
-                && (target_mode == "all" || is_drifted_or_unknown_audio_file(&fallback_meta));
-
-            if enable_acoustid_lookup && !should_lookup {
-                let mut rt = self.runtime.lock().unwrap();
-                rt.clean_skipped += 1;
-            }
-
-            if should_lookup {
+            if enable_acoustid_lookup {
                 if let Some(ref key) = api_key {
                     let resolved_opt: Option<AcoustIdResolvedMatch> =
                         if record.lookup_status == "matched" {

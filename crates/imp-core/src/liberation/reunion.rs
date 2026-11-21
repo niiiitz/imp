@@ -793,15 +793,26 @@ where
     let incomplete_albums_found = incomplete_families.len();
 
     let apple_tokens = if use_apple_catalog {
-        settings.and_then(|s| resolve_tokens(s).ok()).map(|(d, u)| {
-            let sf = get_storefront(&d, &u);
-            (d, u, sf)
+        settings.and_then(|s| {
+            resolve_tokens(s)
+                .ok()
+                .map(|(d, u)| {
+                    let sf = get_storefront(&d, &u);
+                    (d, u, sf)
+                })
+                .or_else(|| {
+                    crate::sinks::apple::AppleMusicSink::get_or_sign_developer_token(s)
+                        .ok()
+                        .map(|d| (d, String::new(), "us".to_string()))
+                })
         })
     } else {
         None
     };
 
     let mut catalog_lookups_performed = 0usize;
+    let mut catalog_cache: HashMap<(String, String), Option<Vec<CanonicalCatalogTrack>>> =
+        HashMap::new();
     let mut consumed_paths = HashSet::new();
     let mut proposed_items = Vec::new();
     let mut next_id = 0usize;
@@ -825,7 +836,10 @@ where
         }
 
         let cat_tracks = if let Some((ref dev_t, ref usr_t, ref sf)) = apple_tokens {
-            if catalog_lookups_performed < 60 {
+            let cache_key = (family.norm_artist.clone(), family.norm_album.clone());
+            if let Some(cached) = catalog_cache.get(&cache_key) {
+                cached.clone()
+            } else if catalog_lookups_performed < 2500 {
                 catalog_lookups_performed += 1;
                 on_lookup_progress(
                     incomplete_albums_found,
@@ -833,7 +847,10 @@ where
                     proposed_items.len(),
                     &format!("{} — {}", family.artist, family.album),
                 );
-                fetch_canonical_album_tracks(dev_t, usr_t, sf, &family.artist, &family.album)
+                let fetched =
+                    fetch_canonical_album_tracks(dev_t, usr_t, sf, &family.artist, &family.album);
+                catalog_cache.insert(cache_key, fetched.clone());
+                fetched
             } else {
                 None
             }

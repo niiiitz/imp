@@ -66,6 +66,24 @@ pub struct TrackPropertiesPatch {
     pub preferred_viz_mode: Option<String>,
 }
 
+/// Batched payload for committing indexed album, track, and capability rows inside one SQLite transaction.
+#[derive(Debug, Clone)]
+pub struct IndexedTrackBatchItem {
+    pub album_id: String,
+    pub album_title: String,
+    pub album_artist: String,
+    pub steam_app_id: Option<u32>,
+    pub release_year: Option<i32>,
+    pub art_cache_path: Option<String>,
+    pub genre: Option<String>,
+    pub parent_folder: Option<String>,
+    pub track: TrackMetadata,
+    pub file_mtime: Option<i64>,
+    pub file_size: Option<i64>,
+    pub has_art: bool,
+    pub has_local_lrc: bool,
+}
+
 #[derive(Clone)]
 pub struct LibraryDatabase {
     conn: Arc<Mutex<Connection>>,
@@ -678,6 +696,194 @@ impl LibraryDatabase {
                 clean_folder
             ],
         )?;
+        Ok(())
+    }
+
+    /// Commits a batch of indexed albums, tracks, and `track_properties` rows in a single SQLite transaction.
+    pub fn upsert_indexed_batch(&self, items: &[IndexedTrackBatchItem]) -> Result<()> {
+        if items.is_empty() {
+            return Ok(());
+        }
+
+        struct PendingAlbum<'a> {
+            id: &'a str,
+            title: &'a str,
+            album_artist: &'a str,
+            release_year: Option<i32>,
+            steam_app_id: Option<u32>,
+            art_cache_path: Option<&'a str>,
+            genre: Option<&'a str>,
+            parent_folder: Option<&'a str>,
+        }
+
+        let mut unique_albums: HashMap<&str, PendingAlbum<'_>> = HashMap::new();
+        for item in items {
+            let clean_genre = item.genre.as_deref().map(str::trim).filter(|s| !s.is_empty());
+            let clean_folder = item
+                .parent_folder
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let clean_art = item
+                .art_cache_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+
+            unique_albums
+                .entry(item.album_id.as_str())
+                .and_modify(|existing| {
+                    if existing.release_year.is_none() {
+                        existing.release_year = item.release_year;
+                    }
+                    if existing.steam_app_id.is_none() {
+                        existing.steam_app_id = item.steam_app_id;
+                    }
+                    if existing.art_cache_path.is_none() {
+                        existing.art_cache_path = clean_art;
+                    }
+                    if existing.genre.is_none() {
+                        existing.genre = clean_genre;
+                    }
+                    if existing.parent_folder.is_none() {
+                        existing.parent_folder = clean_folder;
+                    }
+                })
+                .or_insert(PendingAlbum {
+                    id: item.album_id.as_str(),
+                    title: item.album_title.as_str(),
+                    album_artist: item.album_artist.as_str(),
+                    release_year: item.release_year,
+                    steam_app_id: item.steam_app_id,
+                    art_cache_path: clean_art,
+                    genre: clean_genre,
+                    parent_folder: clean_folder,
+                });
+        }
+
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        {
+            let mut album_stmt = tx.prepare(
+                "INSERT INTO albums (id, title, album_artist, release_year, steam_app_id, art_cache_path, genre, parent_folder, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, strftime('%s', 'now'))
+                 ON CONFLICT(id) DO UPDATE SET
+                   release_year = COALESCE(excluded.release_year, albums.release_year),
+                   art_cache_path = CASE
+                     WHEN excluded.art_cache_path IS NOT NULL THEN excluded.art_cache_path
+                     WHEN albums.art_cache_path LIKE '%/mb_%' OR albums.art_cache_path LIKE '%mzstatic.com%' THEN albums.art_cache_path
+                     ELSE NULL
+                   END,
+                   steam_app_id = COALESCE(excluded.steam_app_id, albums.steam_app_id),
+                   genre = COALESCE(NULLIF(TRIM(excluded.genre), ''), albums.genre),
+                   parent_folder = COALESCE(NULLIF(TRIM(excluded.parent_folder), ''), albums.parent_folder)",
+            )?;
+            for alb in unique_albums.values() {
+                album_stmt.execute(params![
+                    alb.id,
+                    alb.title,
+                    alb.album_artist,
+                    alb.release_year,
+                    alb.steam_app_id,
+                    alb.art_cache_path,
+                    alb.genre,
+                    alb.parent_folder
+                ])?;
+            }
+
+            let mut track_stmt = tx.prepare(
+                "INSERT INTO tracks (
+                    uri, source, mount_root, album_id, title, artists_json,
+                    album_title, track_number, disc_number, duration_ms, art_url, file_mtime, file_size, content_rating,
+                    genre, release_year, parent_folder
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+                 ON CONFLICT(uri) DO UPDATE SET
+                    album_id = COALESCE(excluded.album_id, tracks.album_id),
+                    title = CASE
+                      WHEN excluded.title != '' AND excluded.title != 'Apple Music Track' THEN excluded.title
+                      ELSE tracks.title
+                    END,
+                    artists_json = CASE
+                      WHEN excluded.artists_json != '[]' AND excluded.artists_json != '[\"\"]' THEN excluded.artists_json
+                      ELSE tracks.artists_json
+                    END,
+                    album_title = CASE
+                      WHEN excluded.album_title != '' THEN excluded.album_title
+                      ELSE tracks.album_title
+                    END,
+                    track_number = COALESCE(excluded.track_number, tracks.track_number),
+                    disc_number = COALESCE(excluded.disc_number, tracks.disc_number),
+                    duration_ms = CASE
+                      WHEN excluded.duration_ms > 0 THEN excluded.duration_ms
+                      ELSE tracks.duration_ms
+                    END,
+                    art_url = CASE
+                      WHEN excluded.art_url IS NOT NULL AND excluded.art_url NOT LIKE '%blobstore.apple.com%' THEN excluded.art_url
+                      WHEN tracks.art_url LIKE '%/mb_%' OR tracks.art_url LIKE '%mzstatic.com%' THEN tracks.art_url
+                      ELSE COALESCE(excluded.art_url, tracks.art_url)
+                    END,
+                    file_mtime = COALESCE(excluded.file_mtime, tracks.file_mtime),
+                    file_size = COALESCE(excluded.file_size, tracks.file_size),
+                    content_rating = COALESCE(excluded.content_rating, tracks.content_rating),
+                    genre = COALESCE(NULLIF(TRIM(excluded.genre), ''), tracks.genre),
+                    release_year = COALESCE(excluded.release_year, tracks.release_year),
+                    parent_folder = COALESCE(NULLIF(TRIM(excluded.parent_folder), ''), tracks.parent_folder)",
+            )?;
+
+            let mut cap_stmt = tx.prepare(
+                "INSERT INTO track_properties (
+                    uri, has_art, has_lyrics, has_synced_lyrics, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))
+                 ON CONFLICT(uri) DO UPDATE SET
+                    has_art = CASE WHEN excluded.has_art = 1 THEN 1 ELSE track_properties.has_art END,
+                    has_lyrics = CASE WHEN excluded.has_lyrics = 1 THEN 1 ELSE track_properties.has_lyrics END,
+                    has_synced_lyrics = CASE WHEN excluded.has_synced_lyrics = 1 THEN 1 ELSE track_properties.has_synced_lyrics END,
+                    updated_at = strftime('%s', 'now')",
+            )?;
+
+            for item in items {
+                let meta = &item.track;
+                let artists_json =
+                    serde_json::to_string(&meta.artists).unwrap_or_else(|_| "[]".to_string());
+                let clean_genre = meta.genre.as_deref().map(str::trim).filter(|s| !s.is_empty());
+                let clean_folder = meta
+                    .parent_folder
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty());
+
+                track_stmt.execute(params![
+                    meta.uri,
+                    meta.source,
+                    meta.mount_root,
+                    meta.album_id,
+                    meta.title,
+                    artists_json,
+                    meta.album,
+                    meta.track_number,
+                    meta.disc_number.unwrap_or(1),
+                    meta.duration_ms,
+                    meta.art_url,
+                    item.file_mtime,
+                    item.file_size,
+                    meta.content_rating,
+                    clean_genre,
+                    meta.release_year,
+                    clean_folder
+                ])?;
+
+                let trimmed_uri = meta.uri.trim();
+                if !trimmed_uri.is_empty() && (item.has_art || item.has_local_lrc) {
+                    cap_stmt.execute(params![
+                        trimmed_uri,
+                        if item.has_art { 1 } else { 0 },
+                        if item.has_local_lrc { 1 } else { 0 },
+                        if item.has_local_lrc { 1 } else { 0 },
+                    ])?;
+                }
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -1988,6 +2194,44 @@ impl LibraryDatabase {
         Ok(())
     }
 
+    /// Commits a batch of `(uri, has_art, has_lyrics, has_synced_lyrics)` capability updates in one transaction.
+    pub fn record_indexed_capabilities_batch(
+        &self,
+        rows: &[(String, bool, bool, bool)],
+    ) -> Result<()> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO track_properties (
+                    uri, has_art, has_lyrics, has_synced_lyrics, updated_at
+                 ) VALUES (?1, ?2, ?3, ?4, strftime('%s', 'now'))
+                 ON CONFLICT(uri) DO UPDATE SET
+                    has_art = CASE WHEN excluded.has_art = 1 THEN 1 ELSE track_properties.has_art END,
+                    has_lyrics = CASE WHEN excluded.has_lyrics = 1 THEN 1 ELSE track_properties.has_lyrics END,
+                    has_synced_lyrics = CASE WHEN excluded.has_synced_lyrics = 1 THEN 1 ELSE track_properties.has_synced_lyrics END,
+                    updated_at = strftime('%s', 'now')",
+            )?;
+            for (uri, has_art, has_lyrics, has_synced_lyrics) in rows {
+                let trimmed = uri.trim();
+                if trimmed.is_empty() || (!*has_art && !*has_lyrics && !*has_synced_lyrics) {
+                    continue;
+                }
+                stmt.execute(params![
+                    trimmed,
+                    if *has_art { 1 } else { 0 },
+                    if *has_lyrics { 1 } else { 0 },
+                    if *has_synced_lyrics { 1 } else { 0 },
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Synchronizes retrieved entries from `lyrics.db` (`lyrics_entries`) into `library.db` (`track_properties`),
     /// matching both direct `track_uri` and normalized `(title, artist)` across `tracks`.
     pub fn sync_lyrics_properties_from_cache(&self) -> Result<()> {
@@ -3014,6 +3258,110 @@ mod tests {
             tracks[0].parent_folder.as_deref(),
             Some("Electronic/Example Artist/Sample Album")
         );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_upsert_indexed_batch_commits_albums_tracks_and_capabilities() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("imp_db_batch_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db = LibraryDatabase::open(&temp_dir.join("library.db")).unwrap();
+
+        let mount_root = "/tmp/music";
+        db.upsert_mount(mount_root, "Music", "user_custom", true)
+            .unwrap();
+
+        let items = vec![
+            IndexedTrackBatchItem {
+                album_id: "alb_batch_1".to_string(),
+                album_title: "Sample Album".to_string(),
+                album_artist: "Example Artist".to_string(),
+                steam_app_id: None,
+                release_year: Some(2022),
+                art_cache_path: Some("http://127.0.0.1:18888/art/sample.jpg".to_string()),
+                genre: Some("Ambient".to_string()),
+                parent_folder: Some("Example Artist/Sample Album".to_string()),
+                track: TrackMetadata {
+                    uri: "file:///tmp/music/01.flac".to_string(),
+                    title: "Track 01".to_string(),
+                    artists: vec!["Example Artist".to_string()],
+                    album: "Sample Album".to_string(),
+                    album_id: Some("alb_batch_1".to_string()),
+                    track_number: Some(1),
+                    disc_number: Some(1),
+                    art_url: Some("http://127.0.0.1:18888/art/sample.jpg".to_string()),
+                    duration_ms: 180_000,
+                    source: "local".to_string(),
+                    mount_root: Some(mount_root.to_string()),
+                    content_rating: None,
+                    genre: Some("Ambient".to_string()),
+                    release_year: Some(2022),
+                    parent_folder: Some("Example Artist/Sample Album".to_string()),
+                },
+                file_mtime: Some(1700000000),
+                file_size: Some(1234567),
+                has_art: true,
+                has_local_lrc: true,
+            },
+            IndexedTrackBatchItem {
+                album_id: "alb_batch_1".to_string(),
+                album_title: "Sample Album".to_string(),
+                album_artist: "Example Artist".to_string(),
+                steam_app_id: None,
+                release_year: Some(2022),
+                art_cache_path: Some("http://127.0.0.1:18888/art/sample.jpg".to_string()),
+                genre: Some("Ambient".to_string()),
+                parent_folder: Some("Example Artist/Sample Album".to_string()),
+                track: TrackMetadata {
+                    uri: "file:///tmp/music/02.flac".to_string(),
+                    title: "Track 02".to_string(),
+                    artists: vec!["Example Artist".to_string()],
+                    album: "Sample Album".to_string(),
+                    album_id: Some("alb_batch_1".to_string()),
+                    track_number: Some(2),
+                    disc_number: Some(1),
+                    art_url: Some("http://127.0.0.1:18888/art/sample.jpg".to_string()),
+                    duration_ms: 195_000,
+                    source: "local".to_string(),
+                    mount_root: Some(mount_root.to_string()),
+                    content_rating: None,
+                    genre: Some("Ambient".to_string()),
+                    release_year: Some(2022),
+                    parent_folder: Some("Example Artist/Sample Album".to_string()),
+                },
+                file_mtime: Some(1700000001),
+                file_size: Some(2345678),
+                has_art: true,
+                has_local_lrc: false,
+            },
+        ];
+
+        db.upsert_indexed_batch(&items).unwrap();
+
+        let albums = db.get_albums(Some("local"), None, 20, 0).unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].track_count, 2);
+
+        let tracks = db.get_tracks(Some("local"), None, 20, 0).unwrap();
+        assert_eq!(tracks.len(), 2);
+
+        let props1 = db.get_track_properties("file:///tmp/music/01.flac").unwrap();
+        assert!(props1.has_art);
+        assert!(props1.has_lyrics);
+        assert!(props1.has_synced_lyrics);
+
+        db.record_indexed_capabilities_batch(&[(
+            "file:///tmp/music/02.flac".to_string(),
+            true,
+            true,
+            true,
+        )])
+        .unwrap();
+        let props2 = db.get_track_properties("file:///tmp/music/02.flac").unwrap();
+        assert!(props2.has_synced_lyrics);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

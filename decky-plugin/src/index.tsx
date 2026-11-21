@@ -12,7 +12,7 @@ import {
  */
 const SP_REACT: typeof ReactTypes = (window as any).SP_REACT || (globalThis as any).SP_REACT || (window as any).React;
 
-const IMP_VERSION = 'v1.0.0';
+const IMP_VERSION = 'v1.0.1';
 let cachedLiveDaemonVersion = IMP_VERSION;
 const SIMP_CONSOLE_ROUTE = '/simp-console';
 

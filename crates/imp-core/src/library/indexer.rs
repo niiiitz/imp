@@ -1,16 +1,19 @@
 use crate::library::artwork::{
-    fetch_musicbrainz_cover_for_album, folder_has_local_artwork_file, resolve_and_cache_artwork,
+    cache_folder_artwork_file, extract_and_cache_artwork_from_tagged,
+    fetch_musicbrainz_cover_for_album, pick_preferred_folder_image, resolve_and_cache_artwork,
     MusicBrainzArtOutcome,
 };
-use crate::library::db::LibraryDatabase;
+use crate::library::db::{IndexedTrackBatchItem, LibraryDatabase};
 use crate::library::mounts::discover_removable_mounts;
 use crate::library::vdf::{discover_steam_music_directories, normalize_platform_path};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::Accessor;
 use imp_protocol::{SimpSettings, TrackMetadata};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -149,8 +152,9 @@ pub fn scan_all_storage(db: &LibraryDatabase, settings: &SimpSettings) -> (usize
         }
     }
 
-    // 4. Polite MusicBrainz + Cover Art Archive lookup for any local albums still missing cover art
-    resolve_missing_local_album_artwork_via_musicbrainz(db);
+    // 4. Polite MusicBrainz + Cover Art Archive lookup runs asynchronously in the background
+    // so large local/SMB mount scans complete and populate SQLite without blocking on 1 req/1.5s pauses.
+    spawn_background_musicbrainz_artwork_crawl(db.clone());
 
     let (albums, tracks) = db.get_library_counts().unwrap_or((0, 0));
     tracing::info!(
@@ -159,6 +163,36 @@ pub fn scan_all_storage(db: &LibraryDatabase, settings: &SimpSettings) -> (usize
         tracks
     );
     (albums, tracks)
+}
+
+static MB_ART_CRAWL_RUNNING: AtomicBool = AtomicBool::new(false);
+
+struct MbCrawlGuard;
+
+impl Drop for MbCrawlGuard {
+    fn drop(&mut self) {
+        MB_ART_CRAWL_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+fn spawn_background_musicbrainz_artwork_crawl(db: LibraryDatabase) {
+    if MB_ART_CRAWL_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    if std::thread::Builder::new()
+        .name("imp-mb-art".to_string())
+        .spawn(move || {
+            let _guard = MbCrawlGuard;
+            crate::prefer_efficiency_core_for_current_thread();
+            resolve_missing_local_album_artwork_via_musicbrainz(&db);
+        })
+        .is_err()
+    {
+        MB_ART_CRAWL_RUNNING.store(false, Ordering::SeqCst);
+    }
 }
 
 fn resolve_missing_local_album_artwork_via_musicbrainz(db: &LibraryDatabase) {
@@ -306,66 +340,86 @@ fn probe_audio_genre_and_year(path: &Path) -> (Option<String>, Option<i32>) {
     (None, None)
 }
 
+fn resolve_folder_art_cached(
+    parent_dir: &Path,
+    folder_images: &HashMap<PathBuf, Vec<PathBuf>>,
+    cache: &Mutex<HashMap<PathBuf, Option<String>>>,
+) -> Option<String> {
+    if let Ok(guard) = cache.lock() {
+        if let Some(cached) = guard.get(parent_dir) {
+            return cached.clone();
+        }
+    }
+    let resolved = folder_images
+        .get(parent_dir)
+        .and_then(|imgs| pick_preferred_folder_image(imgs))
+        .and_then(|chosen| cache_folder_artwork_file(&chosen))
+        .map(|art| art.http_art_url);
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(parent_dir.to_path_buf(), resolved.clone());
+    }
+    resolved
+}
+
 fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, source: &str) {
     let fingerprints = db.get_mount_file_fingerprints(mount_root).unwrap_or_default();
     let needs_backfill = db
         .get_tracks_missing_folder_metadata(mount_root)
         .unwrap_or_default();
 
-    // Collect candidate files and deduplicate dual-format Steam OSTs (e.g., identical `.mp3` and `.wav` stems in the same folder)
-    let mut audio_files: Vec<PathBuf> = WalkDir::new(dir)
+    let mut audio_files: Vec<(PathBuf, i64, i64)> = Vec::new();
+    let mut video_files: Vec<(PathBuf, i64, i64)> = Vec::new();
+    let mut lrc_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    let mut folder_images: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+
+    // Single directory walk capturing audio, video, sidecar `.lrc`, and folder artwork files
+    // alongside stat metadata to avoid redundant SMB RPC round-trips per file.
+    for entry in WalkDir::new(dir)
         .follow_links(false)
         .max_depth(10)
         .into_iter()
         .filter_entry(|e| !is_ignored_walk_entry(e))
         .filter_map(Result::ok)
-        .map(|e| e.into_path())
-        .filter(|p| {
-            p.is_file()
-                && p.extension()
-                    .and_then(|e| e.to_str())
-                    .map(|ext| SUPPORTED_EXTENSIONS.iter().any(|s| s.eq_ignore_ascii_case(ext)))
-                    .unwrap_or(false)
-        })
-        .collect();
-
-    // Sort so preferred tagged formats (`flac`, `mp3`, `m4a`, `ogg`) come before raw `wav` when deduplicating identical stems
-    audio_files.sort_by_key(|p| {
-        let ext = p
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        let Some(ext_lower) = path
             .extension()
             .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-        let rank = match ext.as_str() {
-            "flac" => 0,
-            "mp3" => 1,
-            "m4a" | "ogg" | "opus" => 2,
-            "wav" => 3,
-            _ => 4,
+            .map(|e| e.to_ascii_lowercase())
+        else {
+            continue;
         };
-        (p.parent().map(|d| d.to_path_buf()), p.file_stem().map(|s| s.to_os_string()), rank)
-    });
 
-    let mut seen_stems: HashSet<(PathBuf, String)> = HashSet::new();
-    let mut folder_art_present: HashMap<PathBuf, bool> = HashMap::new();
-
-    for path in audio_files {
-        let parent_dir = path.parent().unwrap_or(dir).to_path_buf();
-        let has_local_dir_art = *folder_art_present
-            .entry(parent_dir.clone())
-            .or_insert_with(|| folder_has_local_artwork_file(&parent_dir));
-        let stem_key = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-
-        if !seen_stems.insert((parent_dir, stem_key)) {
-            // Skip duplicate format (e.g., `.wav` twin of an already-indexed `.mp3`/`.flac` in the same folder)
+        if ext_lower == "lrc" {
+            if let (Some(parent), Some(stem)) = (
+                path.parent().map(|p| p.to_path_buf()),
+                path.file_stem().map(|s| s.to_string_lossy().to_lowercase()),
+            ) {
+                lrc_stems.insert((parent, stem));
+            }
             continue;
         }
 
-        let uri = format!("file://{}", path.to_string_lossy());
-        let Ok(fs_meta) = std::fs::metadata(&path) else {
+        if matches!(ext_lower.as_str(), "png" | "jpg" | "jpeg" | "webp") {
+            let parent = path.parent().unwrap_or(dir).to_path_buf();
+            folder_images
+                .entry(parent)
+                .or_default()
+                .push(path.to_path_buf());
+            continue;
+        }
+
+        let is_audio = SUPPORTED_EXTENSIONS.iter().any(|s| *s == ext_lower);
+        let is_video =
+            !is_audio && source == "local" && SUPPORTED_VIDEO_EXTENSIONS.iter().any(|s| *s == ext_lower);
+        if !is_audio && !is_video {
+            continue;
+        }
+
+        let Ok(fs_meta) = entry.metadata() else {
             continue;
         };
         let file_size = fs_meta.len() as i64;
@@ -376,7 +430,52 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
 
-        let has_local_lrc = path.with_extension("lrc").is_file();
+        if is_audio {
+            audio_files.push((path.to_path_buf(), file_size, file_mtime));
+        } else {
+            video_files.push((path.to_path_buf(), file_size, file_mtime));
+        }
+    }
+
+    // Sort so preferred tagged formats (`flac`, `mp3`, `m4a`, `ogg`) come before raw `wav` when deduplicating identical stems
+    audio_files.sort_by(|a, b| {
+        let key = |p: &PathBuf| {
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let rank = match ext.as_str() {
+                "flac" => 0,
+                "mp3" => 1,
+                "m4a" | "ogg" | "opus" => 2,
+                "wav" => 3,
+                _ => 4,
+            };
+            (p.parent().map(|d| d.to_path_buf()), p.file_stem().map(|s| s.to_os_string()), rank)
+        };
+        key(&a.0).cmp(&key(&b.0))
+    });
+
+    let mut seen_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    let mut cached_caps: Vec<(String, bool, bool, bool)> = Vec::new();
+    let mut to_parse: Vec<(PathBuf, String, i64, i64, bool)> = Vec::new();
+
+    for (path, file_size, file_mtime) in audio_files {
+        let parent_dir = path.parent().unwrap_or(dir).to_path_buf();
+        let has_local_dir_art = folder_images.contains_key(&parent_dir);
+        let stem_key = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+
+        if !seen_stems.insert((parent_dir.clone(), stem_key.clone())) {
+            // Skip duplicate format (e.g., `.wav` twin of an already-indexed `.mp3`/`.flac` in the same folder)
+            continue;
+        }
+
+        let uri = format!("file://{}", path.to_string_lossy());
+        let has_local_lrc = lrc_stems.contains(&(parent_dir, stem_key));
 
         if let Some((cached_mtime, cached_size, cached_art)) = fingerprints.get(&uri) {
             if *cached_mtime == file_mtime && *cached_size == file_size {
@@ -390,12 +489,12 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
                 // This ensures deleting or adding `cover.png`/`cover.jpg` in a folder is immediately detected!
                 if is_emb || (is_mb && !has_local_dir_art) || (!is_mb && has_local_dir_art) {
                     if has_local_lrc || !art_str.is_empty() {
-                        let _ = db.record_indexed_track_capabilities(
-                            &uri,
+                        cached_caps.push((
+                            uri.clone(),
                             !art_str.is_empty(),
                             has_local_lrc,
                             has_local_lrc,
-                        );
+                        ));
                     }
                     if needs_backfill.contains(&uri) {
                         let parent_folder = compute_relative_parent_folder(mount_root, &path);
@@ -412,56 +511,54 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
             }
         }
 
-        if let Some(track_meta) = parse_audio_file(db, &path, &uri, mount_root, source) {
-            let has_art = track_meta
-                .art_url
-                .as_deref()
-                .map(|s| !s.trim().is_empty())
-                .unwrap_or(false);
-            let _ = db.upsert_track(&track_meta, Some(file_mtime), Some(file_size));
-            let _ = db.record_indexed_track_capabilities(
-                &uri,
-                has_art,
-                has_local_lrc,
-                has_local_lrc,
-            );
+        to_parse.push((path, uri, file_size, file_mtime, has_local_lrc));
+    }
+
+    for chunk in cached_caps.chunks(500) {
+        let _ = db.record_indexed_capabilities_batch(chunk);
+    }
+
+    let folder_art_cache: Mutex<HashMap<PathBuf, Option<String>>> = Mutex::new(HashMap::new());
+
+    if !to_parse.is_empty() {
+        let worker_count = to_parse.len().min(8);
+        let queue = Mutex::new(VecDeque::from(to_parse));
+        let parsed_out: Mutex<Vec<IndexedTrackBatchItem>> = Mutex::new(Vec::new());
+
+        std::thread::scope(|s| {
+            for _ in 0..worker_count {
+                s.spawn(|| loop {
+                    let next_item = { queue.lock().unwrap().pop_front() };
+                    let Some((path, uri, file_size, file_mtime, has_local_lrc)) = next_item else {
+                        break;
+                    };
+                    if let Some(batch_item) = parse_audio_file_detached(
+                        &path,
+                        &uri,
+                        mount_root,
+                        source,
+                        file_mtime,
+                        file_size,
+                        has_local_lrc,
+                        &folder_images,
+                        &folder_art_cache,
+                    ) {
+                        parsed_out.lock().unwrap().push(batch_item);
+                    }
+                });
+            }
+        });
+
+        let parsed_items = parsed_out.into_inner().unwrap();
+        for chunk in parsed_items.chunks(250) {
+            let _ = db.upsert_indexed_batch(chunk);
         }
     }
 
-    if source == "local" {
-        let video_files: Vec<PathBuf> = WalkDir::new(dir)
-            .follow_links(false)
-            .max_depth(10)
-            .into_iter()
-            .filter_entry(|e| !is_ignored_walk_entry(e))
-            .filter_map(Result::ok)
-            .map(|e| e.into_path())
-            .filter(|p| {
-                p.is_file()
-                    && p.extension()
-                        .and_then(|e| e.to_str())
-                        .map(|ext| {
-                            SUPPORTED_VIDEO_EXTENSIONS
-                                .iter()
-                                .any(|s| s.eq_ignore_ascii_case(ext))
-                        })
-                        .unwrap_or(false)
-            })
-            .collect();
-
-        for path in video_files {
+    if source == "local" && !video_files.is_empty() {
+        let mut video_batch: Vec<IndexedTrackBatchItem> = Vec::new();
+        for (path, file_size, file_mtime) in video_files {
             let uri = format!("video://local/{}", path.to_string_lossy());
-            let Ok(fs_meta) = std::fs::metadata(&path) else {
-                continue;
-            };
-            let file_size = fs_meta.len() as i64;
-            let file_mtime = fs_meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-
             if let Some((cached_mtime, cached_size, _)) = fingerprints.get(&uri) {
                 if *cached_mtime == file_mtime && *cached_size == file_size {
                     if needs_backfill.contains(&uri) {
@@ -477,19 +574,33 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
                 }
             }
 
-            if let Some(video_meta) = parse_local_video_file(db, &path, &uri, mount_root) {
-                let _ = db.upsert_track(&video_meta, Some(file_mtime), Some(file_size));
+            if let Some(video_item) = parse_local_video_file_detached(
+                &path,
+                &uri,
+                mount_root,
+                file_mtime,
+                file_size,
+                &folder_images,
+                &folder_art_cache,
+            ) {
+                video_batch.push(video_item);
             }
+        }
+        for chunk in video_batch.chunks(250) {
+            let _ = db.upsert_indexed_batch(chunk);
         }
     }
 }
 
-fn parse_local_video_file(
-    db: &LibraryDatabase,
+fn parse_local_video_file_detached(
     path: &Path,
     uri: &str,
     mount_root: &str,
-) -> Option<TrackMetadata> {
+    file_mtime: i64,
+    file_size: i64,
+    folder_images: &HashMap<PathBuf, Vec<PathBuf>>,
+    folder_art_cache: &Mutex<HashMap<PathBuf, Option<String>>>,
+) -> Option<IndexedTrackBatchItem> {
     let raw_stem = path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -500,8 +611,10 @@ fn parse_local_video_file(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Local Videos".to_string());
     let (parsed_track_no, parsed_artist, parsed_title) = parse_stem_metadata(&raw_stem);
-    let art = resolve_and_cache_artwork(path);
-    let art_http = art.as_ref().map(|a| a.http_art_url.clone());
+    let folder_art = path
+        .parent()
+        .and_then(|parent| resolve_folder_art_cached(parent, folder_images, folder_art_cache));
+    let art_http = folder_art.or_else(|| resolve_and_cache_artwork(path).map(|a| a.http_art_url));
 
     let parent_folder_key = path
         .parent()
@@ -515,44 +628,56 @@ fn parse_local_video_file(
     );
     let album_id = blake3::hash(album_id_input.as_bytes()).to_hex()[..16].to_string();
     let artist_label = parsed_artist.unwrap_or_else(|| "Local Video".to_string());
+    let has_art = art_http
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
 
-    let _ = db.upsert_album_with_metadata(
-        &album_id,
-        &folder_album,
-        "Local Video",
-        None,
-        None,
-        art_http.as_deref(),
-        None,
-        Some(&parent_folder),
-    );
-
-    Some(TrackMetadata {
-        uri: uri.to_string(),
-        title: parsed_title,
-        artists: vec![artist_label],
-        album: folder_album,
-        album_id: Some(album_id),
-        track_number: parsed_track_no,
-        disc_number: Some(1),
-        art_url: art_http,
-        duration_ms: 0,
-        source: "local_video".to_string(),
-        mount_root: Some(mount_root.to_string()),
-        content_rating: None,
-        genre: None,
+    Some(IndexedTrackBatchItem {
+        album_id: album_id.clone(),
+        album_title: folder_album.clone(),
+        album_artist: "Local Video".to_string(),
+        steam_app_id: None,
         release_year: None,
-        parent_folder: Some(parent_folder),
+        art_cache_path: art_http.clone(),
+        genre: None,
+        parent_folder: Some(parent_folder.clone()),
+        track: TrackMetadata {
+            uri: uri.to_string(),
+            title: parsed_title,
+            artists: vec![artist_label],
+            album: folder_album,
+            album_id: Some(album_id),
+            track_number: parsed_track_no,
+            disc_number: Some(1),
+            art_url: art_http,
+            duration_ms: 0,
+            source: "local_video".to_string(),
+            mount_root: Some(mount_root.to_string()),
+            content_rating: None,
+            genre: None,
+            release_year: None,
+            parent_folder: Some(parent_folder),
+        },
+        file_mtime: Some(file_mtime),
+        file_size: Some(file_size),
+        has_art,
+        has_local_lrc: false,
     })
 }
 
-fn parse_audio_file(
-    db: &LibraryDatabase,
+#[allow(clippy::too_many_arguments)]
+fn parse_audio_file_detached(
     path: &Path,
     uri: &str,
     mount_root: &str,
     source: &str,
-) -> Option<TrackMetadata> {
+    file_mtime: i64,
+    file_size: i64,
+    has_local_lrc: bool,
+    folder_images: &HashMap<PathBuf, Vec<PathBuf>>,
+    folder_art_cache: &Mutex<HashMap<PathBuf, Option<String>>>,
+) -> Option<IndexedTrackBatchItem> {
     let raw_stem = path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -569,7 +694,6 @@ fn parse_audio_file(
         .map(|s| s.to_string_lossy().to_string())
         .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("music") && !s.eq_ignore_ascii_case("media"));
 
-    // Parse filename patterns like "01 - kidkanevil - Big City Life" or "01 Death&Pleasure"
     let (parsed_track_no, parsed_artist, parsed_title) = parse_stem_metadata(&raw_stem);
 
     let mut title = parsed_title;
@@ -584,10 +708,13 @@ fn parse_audio_file(
     let mut genre: Option<String> = None;
     let mut duration_ms = 0u32;
     let mut content_rating: Option<String> = None;
+    let mut embedded_art_url: Option<String> = None;
 
     if let Ok(probe) = Probe::open(path) {
         if let Ok(tagged) = probe.read() {
             duration_ms = tagged.properties().duration().as_millis() as u32;
+            embedded_art_url =
+                extract_and_cache_artwork_from_tagged(&tagged).map(|a| a.http_art_url);
             if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
                 if let Some(t) = tag.title() {
                     if !t.trim().is_empty() {
@@ -630,11 +757,17 @@ fn parse_audio_file(
         }
     }
 
-    let art = resolve_and_cache_artwork(path);
-    let art_http = art.as_ref().map(|a| a.http_art_url.clone());
+    let art_http = embedded_art_url.or_else(|| {
+        path.parent()
+            .and_then(|parent| resolve_folder_art_cached(parent, folder_images, folder_art_cache))
+    });
+    let has_art = art_http
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
 
     // Group compilation / OST albums by `(album_title, parent_folder)` so multi-artist soundtracks
-    // (like Bomb Rush Cyberfunk) stay together as a single album instead of splitting per track artist!
+    // stay together as a single album instead of splitting per track artist.
     let parent_folder_key = path
         .parent()
         .map(|p| p.to_string_lossy().to_lowercase())
@@ -653,33 +786,36 @@ fn parse_audio_file(
         artist.clone()
     };
 
-    let _ = db.upsert_album_with_metadata(
-        &album_id,
-        &album,
-        &album_artist_owned,
-        year,
-        None,
-        art_http.as_deref(),
-        genre.as_deref(),
-        Some(&parent_folder),
-    );
-
-    Some(TrackMetadata {
-        uri: uri.to_string(),
-        title,
-        artists: vec![artist],
-        album,
-        album_id: Some(album_id),
-        track_number,
-        disc_number,
-        art_url: art_http,
-        duration_ms,
-        source: source.to_string(),
-        mount_root: Some(mount_root.to_string()),
-        content_rating,
-        genre,
+    Some(IndexedTrackBatchItem {
+        album_id: album_id.clone(),
+        album_title: album.clone(),
+        album_artist: album_artist_owned,
+        steam_app_id: None,
         release_year: year,
-        parent_folder: Some(parent_folder),
+        art_cache_path: art_http.clone(),
+        genre: genre.clone(),
+        parent_folder: Some(parent_folder.clone()),
+        track: TrackMetadata {
+            uri: uri.to_string(),
+            title,
+            artists: vec![artist],
+            album,
+            album_id: Some(album_id),
+            track_number,
+            disc_number,
+            art_url: art_http,
+            duration_ms,
+            source: source.to_string(),
+            mount_root: Some(mount_root.to_string()),
+            content_rating,
+            genre,
+            release_year: year,
+            parent_folder: Some(parent_folder),
+        },
+        file_mtime: Some(file_mtime),
+        file_size: Some(file_size),
+        has_art,
+        has_local_lrc,
     })
 }
 

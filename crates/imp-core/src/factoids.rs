@@ -678,7 +678,7 @@ fn query_wikipedia_full_extract(page_title: &str) -> Option<String> {
     let body = http_get_text(
         &url,
         &[
-            ("User-Agent", "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP-MediaPlayer/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         5,
@@ -710,7 +710,7 @@ fn query_wikipedia_summary(page_title: &str) -> Option<(String, String)> {
     let body = http_get_text(
         &url,
         &[
-            ("User-Agent", "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP-MediaPlayer/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         4,
@@ -748,7 +748,7 @@ fn query_wikipedia_search_fallback(search_query: &str) -> Option<(String, String
     let body = http_get_text(
         &url,
         &[
-            ("User-Agent", "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP-MediaPlayer/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         4,
@@ -785,7 +785,7 @@ fn query_musicbrainz_recording_factoid(title: &str, artist: &str) -> Option<Stri
     let body = http_get_text(
         &url,
         &[
-            ("User-Agent", "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP-MediaPlayer/1.0.1 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         4,
