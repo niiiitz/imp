@@ -1,12 +1,12 @@
 {
-  "name": "SIMP",
-  "author": "SIMP Contributors",
+  "name": "IMP",
+  "author": "IMP Contributors",
   "flags": [],
   "api_version": 1,
   "publish": {
     "tags": ["audio", "music", "media", "soundtrack", "mpris"],
-    "description": "Simple Integrated Media Player (SIMP) — Quick Access Menu drawer connected directly to simp-daemon (:18888).",
-    "image": "https://raw.githubusercontent.com/niiiitz/simp/main/ui/public/simp-icon-dark.png"
+    "description": "Integrated Media Player (IMP) — Quick Access Menu drawer connected directly to imp-daemon (:18888).",
+    "image": "https://raw.githubusercontent.com/niiiitz/imp/main/ui/public/simp-icon-dark.png"
   }
 }
 

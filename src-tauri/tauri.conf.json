@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SIMP",
-  "version": "0.8.2",
-  "identifier": "org.simp.player",
+  "productName": "IMP",
+  "version": "1.0.0",
+  "identifier": "org.imp.player",
   "build": {
     "beforeDevCommand": "npm --prefix ui run dev",
     "beforeBuildCommand": "npm --prefix ui run build",
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "SIMP",
+        "title": "IMP",
         "width": 1280,
         "height": 800,
         "resizable": true,

@@ -21,6 +21,8 @@ import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { BrowserTarget } from './PlayerView';
 import { ImpIcon } from '../components/icons/ImpIcon';
 import { FolderChooserModal } from '../components/FolderChooserModal';
+import { LiberationModal } from '../components/LiberationModal';
+import { resolveDaemonUrl } from '../api/servicesCacheApi';
 
 interface DaemonPerfSnapshot {
   cpu_percent: number;
@@ -35,6 +37,7 @@ export interface SimpUpdateStatus {
   latest_version?: string;
   latest_tag?: string;
   update_available?: boolean;
+  channel_switch_available?: boolean;
   target_arch?: string;
   channel?: string;
   checking?: boolean;
@@ -54,7 +57,7 @@ export interface SettingsModalProps {
   customFolderPath: string;
   setCustomFolderPath: React.Dispatch<React.SetStateAction<string>>;
   setOskTarget: React.Dispatch<React.SetStateAction<OskTargetKind>>;
-  handleAddFolder: (folderPath: string) => void;
+  handleAddFolder: (folderPath: string, opts?: { navigateAfterAdd?: boolean }) => void;
   handleRemoveFolder: (mountRoot: string, label: string) => void;
   setView: React.Dispatch<React.SetStateAction<'lock' | 'browser'>>;
   setSourceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -149,6 +152,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [scAuthOpen, setScAuthOpen] = useState(false);
   const [addPathOpen, setAddPathOpen] = useState(false);
   const [folderChooserOpen, setFolderChooserOpen] = useState(false);
+  const [liberationModalOpen, setLiberationModalOpen] = useState(false);
   const [confirmPurgeSource, setConfirmPurgeSource] = useState<string | null>(null);
 
   const handlePurgeSource = async (source: 'local' | 'apple' | 'soundcloud' | 'ia', label: string) => {
@@ -339,6 +343,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Determine if a sub-level inside Folders & Accounts or Brightness scrub is open so `B` / `ESC` walks back cleanly
   const hasNestedChildOpen =
+    liberationModalOpen ||
     brightnessScrubActive ||
     confirmHardReset ||
     addPathOpen ||
@@ -347,7 +352,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     scAuthOpen;
 
   const handleWalkBackNested = () => {
-    if (brightnessScrubActive) {
+    const chooserClose = document.querySelector<HTMLElement>('[data-folder-chooser-close="true"]');
+    if (chooserClose) {
+      chooserClose.click();
+    } else if (liberationModalOpen) {
+      setLiberationModalOpen(false);
+    } else if (brightnessScrubActive) {
       setBrightnessScrubActive(false);
     } else if (confirmHardReset) {
       setConfirmHardReset(false);
@@ -621,20 +631,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         {appleBusy ? 'Working...' : 'Authorize Apple ID'}
                       </button>
                     ) : (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await disconnectAppleMusicCleanSlate(showToast);
-                          const updated = await defaultSimpClient
-                            .getAppleMusicAuthConfig()
-                            .catch(() => null);
-                          if (updated) setAppleAuthCfg(updated);
-                        }}
-                        style={compactDangerBtnStyle}
-                      >
-                        <ImpIcon name="sign-out" size={11} style={{ marginRight: 4 }} />
-                        Sign Out (Keep DB)
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setLiberationModalOpen(true)}
+                          style={{
+                            ...compactPrimaryBtnStyle,
+                            minHeight: 28,
+                            padding: '0 9px',
+                            background: 'rgba(16, 185, 129, 0.14)',
+                            borderColor: 'rgba(52, 211, 153, 0.5)',
+                            color: '#6ee7b7',
+                          }}
+                        >
+                          Project Liberation Census
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await disconnectAppleMusicCleanSlate(showToast);
+                            const updated = await defaultSimpClient
+                              .getAppleMusicAuthConfig()
+                              .catch(() => null);
+                            if (updated) setAppleAuthCfg(updated);
+                          }}
+                          style={compactDangerBtnStyle}
+                        >
+                          <ImpIcon name="sign-out" size={11} style={{ marginRight: 4 }} />
+                          Sign Out (Keep DB)
+                        </button>
+                      </>
                     )}
                     <button
                       type="button"
@@ -926,13 +952,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }
                       }}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleAddFolder(customFolderPath);
+                        if (e.key === 'Enter') {
+                          handleAddFolder(customFolderPath, { navigateAfterAdd: true });
+                        }
                       }}
                       style={compactInputStyle}
                     />
                     <button
                       type="button"
-                      onClick={() => handleAddFolder(customFolderPath)}
+                      onClick={() =>
+                        handleAddFolder(customFolderPath, { navigateAfterAdd: true })
+                      }
                       style={compactPrimaryBtnStyle}
                     >
                       Add
@@ -1237,6 +1267,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 if (e.shiftKey) {
                   defaultSimpClient.pause();
                   defaultSimpClient.restartDaemon();
+                  fetch(resolveDaemonUrl('/api/v1/transport'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'restart_daemon' }),
+                    keepalive: true,
+                  }).catch(() => {});
                   showToast('Restarting IMP background service...');
                   closeSettingsDrawer();
                   if (window.parent && window.parent !== window) {
@@ -1247,8 +1283,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   return;
                 }
                 defaultSimpClient.shutdownDaemon();
+                fetch(resolveDaemonUrl('/api/v1/transport'), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ command: 'shutdown_daemon' }),
+                  keepalive: true,
+                }).catch(() => {});
                 closeSettingsDrawer();
-                window.setTimeout(() => dismissConsole(), 250);
+                window.setTimeout(() => dismissConsole(), 180);
               }}
               style={{
                 minHeight: 46,
@@ -1494,7 +1536,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="button"
                 disabled={Boolean(updateStatus.checking || updateStatus.applying)}
                 onClick={() => {
-                  if (updateStatus.update_available) {
+                  if (updateStatus.update_available || updateStatus.channel_switch_available) {
                     applySimpUpdate();
                   } else {
                     checkSimpUpdates(false);
@@ -1504,11 +1546,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   minHeight: 42,
                   padding: '0 12px',
                   borderRadius: 12,
-                  background: updateStatus.update_available ? '#0f2936' : '#0f222a',
+                  background:
+                    updateStatus.update_available || updateStatus.channel_switch_available
+                      ? '#0f2936'
+                      : '#0f222a',
                   border: updateStatus.update_available
                     ? '1px solid #6ee7b7'
-                    : '1px solid #2aa3c4',
-                  color: updateStatus.update_available ? '#6ee7b7' : '#bfeaf5',
+                    : updateStatus.channel_switch_available
+                      ? '1px solid #f59e0b'
+                      : '1px solid #2aa3c4',
+                  color: updateStatus.update_available
+                    ? '#6ee7b7'
+                    : updateStatus.channel_switch_available
+                      ? '#fcd34d'
+                      : '#bfeaf5',
                   fontSize: 11.5,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -1524,7 +1575,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ? 'Checking...'
                     : updateStatus.update_available
                       ? `⬆️ Update (${updateStatus.latest_tag})`
-                      : `Update${updateStatus.current_version ? ` (v${updateStatus.current_version})` : ''}`}
+                      : updateStatus.channel_switch_available
+                        ? `⬇ Switch to Stable (${updateStatus.latest_tag})`
+                        : `Update${updateStatus.current_version ? ` (v${updateStatus.current_version})` : ''}`}
               </button>
             </div>
             {updateStatus.error && (
@@ -1542,7 +1595,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         applyFocusMarker={applyFocusMarker}
         onSelectFolder={(folderPath) => {
           setCustomFolderPath(folderPath);
-          handleAddFolder(folderPath);
+          setFolderChooserOpen(false);
+          handleAddFolder(folderPath, { navigateAfterAdd: true });
         }}
         onClose={() => {
           setFolderChooserOpen(false);
@@ -1559,6 +1613,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
           }, 30);
         }}
+      />
+
+      <LiberationModal
+        open={liberationModalOpen}
+        onClose={() => setLiberationModalOpen(false)}
+        showToast={showToast}
       />
     </div>
   );

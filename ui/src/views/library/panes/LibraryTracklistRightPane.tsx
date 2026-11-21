@@ -1252,7 +1252,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                           e.stopPropagation();
                           handleAddTracksToPlaylist([t.uri], `"${t.title}"`, [t]);
                         }}
-                        title="Add track to selected SIMP Playlist (SELECT)"
+                        title="Add track to selected IMP Playlist (SELECT)"
                         style={{
                           padding: '5px 9px',
                           borderRadius: 8,

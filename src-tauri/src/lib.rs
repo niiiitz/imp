@@ -7,8 +7,23 @@ use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 pub mod macos_app;
+#[cfg(target_os = "windows")]
+pub mod windows_app;
 
-fn query_running_daemon_health(addr: &SocketAddr) -> Option<(String, Option<u32>)> {
+/// Runs the hidden embedded Edge WebView2 Apple Music audio worker (`Imp.exe --apple-worker`).
+#[cfg(target_os = "windows")]
+pub fn run_windows_apple_worker() {
+    if let Err(err) =
+        windows_app::run_windows_apple_worker("http://127.0.0.1:18888/apple-worker?worker=apple")
+    {
+        eprintln!("IMP WebView2 Apple worker failed: {err}");
+        std::process::exit(2);
+    }
+}
+
+fn query_running_daemon_health(
+    addr: &SocketAddr,
+) -> Option<(String, Option<u32>, Option<String>)> {
     let mut stream = TcpStream::connect_timeout(addr, Duration::from_millis(150)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(250)));
     let _ = stream.set_write_timeout(Some(Duration::from_millis(250)));
@@ -21,7 +36,11 @@ fn query_running_daemon_health(addr: &SocketAddr) -> Option<(String, Option<u32>
     let val: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
     let ver = val.get("version")?.as_str()?.to_string();
     let pid = val.get("pid").and_then(|v| v.as_u64()).map(|n| n as u32);
-    Some((ver, pid))
+    let platform = val
+        .get("platform")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Some((ver, pid, platform))
 }
 
 /// Ensures `simp --daemon` is listening on `127.0.0.1:18888`.
@@ -32,36 +51,58 @@ pub fn ensure_daemon_running() {
         if let Ok(exe) = std::env::current_exe() {
             let _ = std::fs::remove_file(exe.with_extension("exe.old"));
             if let Some(dir) = exe.parent() {
+                let _ = std::fs::remove_file(dir.join("Imp.exe.old"));
+                let _ = std::fs::remove_file(dir.join("imp.exe.old"));
                 let _ = std::fs::remove_file(dir.join("simp.exe.old"));
+                let _ = std::fs::remove_file(dir.join("imp.ico"));
                 let _ = std::fs::remove_file(dir.join("simp.ico"));
                 if let Ok(entries) = std::fs::read_dir(dir) {
                     for entry in entries.flatten() {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
-                        if name_str.starts_with("simp.exe.") && name_str.ends_with(".old") {
+                        let lower = name_str.to_ascii_lowercase();
+                        if (lower.starts_with("imp.exe.") || lower.starts_with("simp.exe."))
+                            && lower.ends_with(".old")
+                        {
                             let _ = std::fs::remove_file(entry.path());
                         }
                     }
+                }
+                if exe.file_name().and_then(|n| n.to_str()) == Some("imp.exe") {
+                    let _ = std::fs::rename(&exe, dir.join("Imp.exe"));
                 }
             }
         }
     }
     let addr = SocketAddr::from(([127, 0, 0, 1], 18888));
-    if let Some((running_ver, running_pid)) = query_running_daemon_health(&addr) {
-        if running_ver == env!("CARGO_PKG_VERSION") {
+    if let Some((running_ver, running_pid, _running_platform)) = query_running_daemon_health(&addr)
+    {
+        let same_version = running_ver == env!("CARGO_PKG_VERSION");
+        #[cfg(target_os = "windows")]
+        let platform_ok = _running_platform.as_deref().unwrap_or("windows") == "windows";
+        #[cfg(not(target_os = "windows"))]
+        let platform_ok = true;
+
+        if same_version && platform_ok {
             return;
         }
-        // A stale daemon from a previous version is listening on :18888 — replace it cleanly
         #[cfg(target_os = "windows")]
         {
-            simp_core::close_windows_headless_worker_windows();
+            if _running_platform.as_deref() == Some("linux") {
+                eprintln!(
+                    "⚠️  Port 18888 is occupied by a Linux/WSL daemon (pid={running_pid:?}, version={running_ver}). \
+                     Stop it in WSL (`systemctl --user disable --now simp.service imp.service`) so native Windows IMP daemon & system tray can bind :18888."
+                );
+                return;
+            }
+            imp_core::close_windows_headless_worker_windows();
             if let Some(pid) = running_pid {
                 let mut tk = Command::new("taskkill");
                 tk.args(["/F", "/PID", &pid.to_string()])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
-                simp_core::configure_background_command(&mut tk);
+                imp_core::configure_background_command(&mut tk);
                 let _ = tk.status();
             }
             std::thread::sleep(Duration::from_millis(250));
@@ -86,7 +127,7 @@ pub fn ensure_daemon_running() {
     #[cfg(target_os = "linux")]
     {
         let _ = Command::new("systemctl")
-            .args(["--user", "start", "simp.service"])
+            .args(["--user", "start", "imp.service"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -100,16 +141,24 @@ pub fn ensure_daemon_running() {
         }
     }
 
-    // 2. Fallback (or primary on Windows): spawn `simp --daemon` directly as a headless background process
+    // 2. Fallback (or primary on Windows): spawn `imp --daemon` directly as a headless background process
     if let Ok(exe) = std::env::current_exe() {
-        let mut cmd = Command::new(exe);
+        #[cfg(target_os = "windows")]
+        let daemon_exe = exe
+            .parent()
+            .map(|d| d.join("Imp.exe"))
+            .filter(|p| p.is_file())
+            .unwrap_or(exe);
+        #[cfg(not(target_os = "windows"))]
+        let daemon_exe = exe;
+        let mut cmd = Command::new(daemon_exe);
         cmd.arg("--daemon")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        simp_core::configure_background_command(&mut cmd);
+        imp_core::configure_background_command(&mut cmd);
         if let Ok(child) = cmd.spawn() {
-            simp_core::apply_windows_efficiency_mode_to_child(&child);
+            imp_core::apply_windows_efficiency_mode_to_child(&child);
         }
 
         // Wait up to 2.0s for the daemon socket to come online
@@ -127,7 +176,9 @@ pub fn run_ui() {
 
     #[cfg(target_os = "macos")]
     {
-        if std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1") {
+        if std::env::var("IMP_NO_WINDOW").ok().as_deref() == Some("1")
+            || std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1")
+        {
             ensure_daemon_running();
             return;
         }
@@ -137,21 +188,23 @@ pub fn run_ui() {
     #[cfg(not(target_os = "macos"))]
     {
         ensure_daemon_running();
-        println!("SIMP daemon verified online at {ui_url} (IPC: ws://127.0.0.1:18888/ws)");
+        println!("IMP daemon verified online at {ui_url} (IPC: ws://127.0.0.1:18888/ws)");
 
-        if std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1") {
+        if std::env::var("IMP_NO_WINDOW").ok().as_deref() == Some("1")
+            || std::env::var("SIMP_NO_WINDOW").ok().as_deref() == Some("1")
+        {
             return;
         }
 
         #[cfg(target_os = "windows")]
         {
-            let _ = simp_core::hide_windows_headless_worker_windows();
-            if simp_core::focus_existing_windows_ui_window() {
+            let _ = imp_core::hide_windows_headless_worker_windows();
+            if imp_core::focus_existing_windows_ui_window() {
                 return;
             }
         }
 
-        let profile_dir_path = simp_core::simp_data_dir().join("window-profile");
+        let profile_dir_path = imp_core::simp_data_dir().join("window-profile");
         let _ = std::fs::create_dir_all(&profile_dir_path);
         // Create the Chromium "First Run" sentinel file and clear any stale Crash/Singleton locks
         let _ = std::fs::File::create(profile_dir_path.join("First Run"));
@@ -162,7 +215,21 @@ pub fn run_ui() {
 
         #[cfg(target_os = "windows")]
         {
-            run_windows_ui(ui_url, &profile_dir_path, &user_data_arg);
+            let use_external_browser = std::env::var("IMP_USE_EXTERNAL_BROWSER")
+                .ok()
+                .as_deref()
+                == Some("1");
+            if !use_external_browser {
+                match windows_app::run_windows_native_app(ui_url) {
+                    Ok(()) => return,
+                    Err(err) => {
+                        eprintln!(
+                            "Embedded Edge WebView2 unavailable ({err}); falling back to external browser app mode."
+                        );
+                    }
+                }
+            }
+            run_windows_external_browser_ui(ui_url, &profile_dir_path, &user_data_arg);
             return;
         }
 
@@ -171,17 +238,17 @@ pub fn run_ui() {
             // Ensure DISPLAY / WAYLAND_DISPLAY are populated even if invoked from a background D-Bus/systemd context
             let mut wmctrl = Command::new("wmctrl");
             wmctrl
-                .args(["-xa", "org.simp.player"])
+                .args(["-xa", "org.imp.player"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            simp_core::mpris::apply_desktop_display_env(&mut wmctrl);
+            imp_core::mpris::apply_desktop_display_env(&mut wmctrl);
             if wmctrl.status().map(|s| s.success()).unwrap_or(false) {
                 return;
             }
 
             // 1. Try native Chromium/Chrome/Edge/Brave in chromeless 1280x800 app mode
-            // Pass `--ozone-platform=x11` so `--class=org.simp.player` sets X11 `WM_CLASS="org.simp.player"`
-            // (preventing KWin Wayland's generic yellow "W" icon and allowing `wmctrl -xa org.simp.player` to raise it).
+            // Pass `--ozone-platform=x11` so `--class=org.imp.player` sets X11 `WM_CLASS="org.imp.player"`
+            // (preventing KWin Wayland's generic yellow "W" icon and allowing `wmctrl -xa org.imp.player` to raise it).
             let native_browsers = [
                 "chromium",
                 "chromium-browser",
@@ -196,7 +263,7 @@ pub fn run_ui() {
                 let mut cmd = Command::new(bin);
                 cmd.arg(format!("--app={ui_url}"))
                     .arg("--window-size=1280,800")
-                    .arg("--class=org.simp.player")
+                    .arg("--class=org.imp.player")
                     .arg("--ozone-platform=x11")
                     .arg("--no-first-run")
                     .arg("--no-default-browser-check")
@@ -205,7 +272,7 @@ pub fn run_ui() {
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
-                simp_core::mpris::apply_desktop_display_env(&mut cmd);
+                imp_core::mpris::apply_desktop_display_env(&mut cmd);
                 if let Ok(mut child) = cmd.spawn() {
                     let _ = child.wait();
                     return;
@@ -232,12 +299,12 @@ pub fn run_ui() {
                 {
                     let mut cmd = Command::new("flatpak");
                     cmd.arg("run")
-                        .arg("--filesystem=xdg-data/simp:create")
+                        .arg("--filesystem=xdg-data/imp:create")
                         .arg("--device=all")
                         .arg(app_id)
                         .arg(format!("--app={ui_url}"))
                         .arg("--window-size=1280,800")
-                        .arg("--class=org.simp.player")
+                        .arg("--class=org.imp.player")
                         .arg("--ozone-platform=x11")
                         .arg("--no-first-run")
                         .arg("--no-default-browser-check")
@@ -246,7 +313,7 @@ pub fn run_ui() {
                         .stdin(Stdio::null())
                         .stdout(Stdio::null())
                         .stderr(Stdio::null());
-                    simp_core::mpris::apply_desktop_display_env(&mut cmd);
+                    imp_core::mpris::apply_desktop_display_env(&mut cmd);
                     if let Ok(mut child) = cmd.spawn() {
                         let _ = child.wait();
                         return;
@@ -266,14 +333,18 @@ pub fn run_ui() {
 }
 
 #[cfg(target_os = "windows")]
-fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &str) {
-    if simp_core::focus_existing_windows_ui_window() {
+fn run_windows_external_browser_ui(
+    ui_url: &str,
+    profile_dir: &std::path::Path,
+    user_data_arg: &str,
+) {
+    if imp_core::focus_existing_windows_ui_window() {
         return;
     }
 
-    simp_core::seed_windows_browser_widevine_profile(profile_dir);
+    imp_core::seed_windows_browser_widevine_profile(profile_dir);
 
-    for bin in simp_core::windows_browser_candidates() {
+    for bin in imp_core::windows_browser_candidates() {
         let mut cmd = Command::new(&bin);
         cmd.arg(format!("--app={ui_url}"))
             .arg("--window-size=1280,800")
@@ -285,9 +356,9 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        simp_core::configure_background_command(&mut cmd);
+        imp_core::configure_background_command(&mut cmd);
         if let Ok(child) = cmd.spawn() {
-            simp_core::apply_windows_efficiency_mode_to_child(&child);
+            imp_core::apply_windows_efficiency_mode_to_child(&child);
             return;
         }
     }
@@ -299,9 +370,9 @@ fn run_windows_ui(ui_url: &str, profile_dir: &std::path::Path, user_data_arg: &s
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    simp_core::configure_background_command(&mut fallback);
+    imp_core::configure_background_command(&mut fallback);
     if let Ok(child) = fallback.spawn() {
-        simp_core::apply_windows_efficiency_mode_to_child(&child);
+        imp_core::apply_windows_efficiency_mode_to_child(&child);
     }
 }
 

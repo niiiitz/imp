@@ -180,6 +180,104 @@ export function emitSimpToast(message: string): void {
   }
 }
 
+let nativeWebViewFullscreen = false;
+let nativeWebViewListenerInstalled = false;
+
+function getNativeWebViewBridge(): {
+  postMessage: (msg: unknown) => void;
+  addEventListener?: (type: string, cb: (ev: MessageEvent) => void) => void;
+} | null {
+  if (typeof window === 'undefined') return null;
+  const wv = (window as unknown as { chrome?: { webview?: unknown } }).chrome?.webview as
+    | {
+        postMessage?: (msg: unknown) => void;
+        addEventListener?: (type: string, cb: (ev: MessageEvent) => void) => void;
+      }
+    | undefined;
+  if (!wv || typeof wv.postMessage !== 'function') return null;
+  if (!nativeWebViewListenerInstalled && typeof wv.addEventListener === 'function') {
+    nativeWebViewListenerInstalled = true;
+    wv.addEventListener('message', (ev: MessageEvent) => {
+      const payload = ev?.data;
+      if (payload && typeof payload === 'object' && payload.type === 'imp_fullscreen_state') {
+        const next = Boolean((payload as { fullscreen?: boolean }).fullscreen);
+        if (nativeWebViewFullscreen !== next) {
+          nativeWebViewFullscreen = next;
+          window.dispatchEvent(
+            new CustomEvent('simp-fullscreen-change', { detail: { fullscreen: next } })
+          );
+        }
+      }
+    });
+  }
+  return wv as {
+    postMessage: (msg: unknown) => void;
+    addEventListener?: (type: string, cb: (ev: MessageEvent) => void) => void;
+  };
+}
+
+if (typeof window !== 'undefined') {
+  getNativeWebViewBridge();
+}
+
+export function isNativeWebView2Host(): boolean {
+  return getNativeWebViewBridge() !== null;
+}
+
+export function isAppFullscreenActive(): boolean {
+  if (typeof document !== 'undefined' && document.fullscreenElement) {
+    return true;
+  }
+  return nativeWebViewFullscreen;
+}
+
+export function setAppFullscreen(enter: boolean): void {
+  const bridge = getNativeWebViewBridge();
+  if (bridge) {
+    if (!enter && typeof document !== 'undefined' && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    bridge.postMessage(enter ? 'imp:enter_fullscreen' : 'imp:exit_fullscreen');
+    return;
+  }
+  if (typeof document === 'undefined') return;
+  if (enter) {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+  } else if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+export function toggleAppFullscreen(): void {
+  const bridge = getNativeWebViewBridge();
+  if (bridge) {
+    if (typeof document !== 'undefined' && document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    }
+    bridge.postMessage('imp:toggle_fullscreen');
+    return;
+  }
+  if (typeof document === 'undefined') return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  } else {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+}
+
+export function quitNativeAppWindow(): void {
+  const bridge = getNativeWebViewBridge();
+  if (bridge) {
+    bridge.postMessage('imp:quit_app');
+    return;
+  }
+  if (typeof window !== 'undefined') {
+    window.close();
+  }
+}
+
 export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
   {
     shelfUid: 'local:discover:smart_stations',

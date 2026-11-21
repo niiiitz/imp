@@ -379,6 +379,7 @@ export function renderReef3dScene(s: SceneRenderContext): void {
     midEnergy,
     highEnergy,
     drop,
+    trans,
     sb,
     palette,
     artCanvas,
@@ -1572,4 +1573,47 @@ export function renderReef3dScene(s: SceneRenderContext): void {
     cropBottomY,
     false,
   );
+
+  // 11. Caustic Prism Wipe Transition (`trans > 0.01`)
+  if (trans > 0.01) {
+    const wave = Math.sin(trans * Math.PI);
+    const p = 1 - trans; // 0 -> 1 sweeping left to right
+    const sweepX = p * (CANVAS_W + 240) - 120;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // Three chromatic angled underwater caustic prism shafts sweeping across the reef
+    for (let band = 0; band < 3; band++) {
+      const bx = sweepX + (band - 1) * 34;
+      const bw = 54 + band * 12;
+      const grad = ctx.createLinearGradient(bx - bw, 0, bx + bw, 0);
+      grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      grad.addColorStop(0.5, rgbToCss(palette[5 + band], 0.44 * wave));
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(bx - bw + 44, 0);
+      ctx.lineTo(bx + bw + 44, 0);
+      ctx.lineTo(bx + bw - 44, CANVAS_H);
+      ctx.lineTo(bx - bw - 44, CANVAS_H);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Trailing pearlescent caustic bubbles stirred up by the prism wave
+    for (let b = 0; b < 18; b++) {
+      const bx = sweepX - 18 - (b * 13) % 95 + Math.sin(timeSec * 8 + b) * 6;
+      const by = ((b * 47 + 22) % (CANVAS_H - 36)) + 18 - p * 34;
+      const br = 2.5 + (b % 4) * 1.6;
+      ctx.strokeStyle = rgbToCss(palette[7], 0.65 * wave);
+      ctx.fillStyle = rgbToCss(palette[6], 0.22 * wave);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(bx, by, br, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 }

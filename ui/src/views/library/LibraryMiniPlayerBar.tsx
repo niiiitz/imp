@@ -289,7 +289,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         zIndex: 40,
       }}
     >
-      {/* Row 1 — SELECT (left column, aligned over VIZ) + Transport Controls (aligned with art/scrub bar) + Volume + Brightness + START (right-aligned) */}
+      {/* Row 1 — SELECT (left) + Centered Transport Controls + Volume + Brightness + START (right) */}
       <div
         style={{
           display: 'flex',
@@ -301,51 +301,41 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
           zIndex: volumePopoverOpen || brightnessPopoverOpen ? 65 : 46,
         }}
       >
-        <div
+        <button
+          type="button"
+          data-row-aux="true"
+          onClick={openSelectOptions}
+          title="Track Options, Visualizer & Interface Settings (SELECT)"
           style={{
-            width: 96,
-            flexShrink: 0,
-            display: 'flex',
+            height: 24,
+            padding: '0 8px',
+            borderRadius: 6,
+            background: '#10121a',
+            border: '1px solid #222634',
+            color: '#d4d4dc',
+            display: 'inline-flex',
             alignItems: 'center',
-            justifyContent: 'flex-start',
+            justifyContent: 'center',
+            gap: 5,
+            cursor: 'pointer',
+            flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            data-row-aux="true"
-            onClick={openSelectOptions}
-            title="Track Options, Visualizer & Interface Settings (SELECT)"
+          <ImpIcon name="gamepad-select" size={12} color="#9ca3af" />
+          <span
+            className="simp-gp-badge"
             style={{
-              height: 24,
-              padding: '0 8px',
-              borderRadius: 6,
-              background: '#10121a',
-              border: '1px solid #222634',
-              color: '#d4d4dc',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 5,
-              cursor: 'pointer',
-              flexShrink: 0,
+              color: '#9ca3af',
+              fontSize: 9,
+              fontFamily: 'monospace',
+              fontWeight: 700,
+              letterSpacing: 0.3,
+              lineHeight: 1,
             }}
           >
-            <ImpIcon name="gamepad-select" size={12} color="#9ca3af" />
-            <span
-              className="simp-gp-badge"
-              style={{
-                color: '#9ca3af',
-                fontSize: 9,
-                fontFamily: 'monospace',
-                fontWeight: 700,
-                letterSpacing: 0.3,
-                lineHeight: 1,
-              }}
-            >
-              SELECT
-            </span>
-          </button>
-        </div>
+            SELECT
+          </span>
+        </button>
 
         <div
           style={{
@@ -353,8 +343,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             minWidth: 0,
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
+            justifyContent: 'center',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -481,16 +470,16 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               )}
             </button>
           </div>
+        </div>
 
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              marginLeft: 'auto',
-              flexShrink: 0,
-            }}
-          >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexShrink: 0,
+          }}
+        >
             <div
               onWheel={(e) => {
                 e.preventDefault();
@@ -759,7 +748,6 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               </span>
               <span style={{ lineHeight: 1 }}>☰</span>
             </button>
-          </div>
         </div>
       </div>
 

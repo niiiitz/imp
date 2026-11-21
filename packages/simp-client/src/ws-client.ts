@@ -3,6 +3,7 @@ import type {
   AppleMusicAuthConfig,
   AppleSinkCommandPayload,
   AudioSpectrumFrame,
+  DspConfigEventPayload,
   InternetArchiveConfig,
   OpticalDiscStatus,
   PlaylistRecord,
@@ -21,6 +22,7 @@ type ProgressListener = (
 ) => void;
 type AppleSinkListener = (cmd: AppleSinkCommandPayload) => void;
 type SpectrumListener = (frame: AudioSpectrumFrame) => void;
+type DspListener = (cfg: DspConfigEventPayload) => void;
 
 /**
  * Shared auto-reconnecting WebSocket client connecting to `simp --daemon` (`ws://127.0.0.1:18888/ws`).
@@ -55,6 +57,7 @@ export class SimpDaemonClient {
   private progressListeners = new Set<ProgressListener>();
   private appleSinkListeners = new Set<AppleSinkListener>();
   private spectrumListeners = new Set<SpectrumListener>();
+  private dspListeners = new Set<DspListener>();
   private state: SimpStateSnapshot = {
     active_engine: 'none',
     is_playing: false,
@@ -237,6 +240,14 @@ export class SimpDaemonClient {
             );
           }
           break;
+        case 'dsp_config_updated':
+          if (this.dspListeners.size > 0 && msg.data) {
+            const cfg = msg.data as DspConfigEventPayload;
+            for (const fn of this.dspListeners) {
+              fn(cfg);
+            }
+          }
+          break;
       }
     }
   }
@@ -414,6 +425,11 @@ export class SimpDaemonClient {
   public subscribeSpectrum(fn: SpectrumListener): () => void {
     this.spectrumListeners.add(fn);
     return () => this.spectrumListeners.delete(fn);
+  }
+
+  public subscribeDsp(fn: DspListener): () => void {
+    this.dspListeners.add(fn);
+    return () => this.dspListeners.delete(fn);
   }
 
   private notifyState(): void {

@@ -68,6 +68,15 @@ export const BUILTIN_PRESETS: EqPresetOption[] = [
   },
 ];
 
+export interface TapStatusInfo {
+  platform: string;
+  mode: string;
+  dsp_active: boolean;
+  spectrum_active: boolean;
+  worker_sink_label?: string | null;
+  detail: string;
+}
+
 interface EqualizerModalProps {
   open: boolean;
   onClose: () => void;
@@ -112,7 +121,35 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
 
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const draggingSliderRef = useRef<number | null>(null);
+  const [activeDragSlider, setActiveDragSlider] = useState<number | null>(null);
+  const suppressClickForSliderRef = useRef<number | null>(null);
+  const dspStateRef = useRef(dspState);
+  dspStateRef.current = dspState;
+  const onUpdateDspRef = useRef(onUpdateDsp);
+  onUpdateDspRef.current = onUpdateDsp;
   const faderTrackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const [tapStatus, setTapStatus] = useState<TapStatusInfo | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const loadTapStatus = () => {
+      fetch('/api/dsp')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => {
+          if (!cancelled && j?.tap_status) {
+            setTapStatus(j.tap_status as TapStatusInfo);
+          }
+        })
+        .catch(() => {});
+    };
+    loadTapStatus();
+    const pollId = window.setInterval(loadTapStatus, 1200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+    };
+  }, [open, dspState.eq_enabled, dspState.vocal_mode]);
 
   // Focus capture & restoration on modal open/close
   useEffect(() => {
@@ -234,7 +271,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
   }, [open, adjustSliderByDelta, updateEngagedSlider]);
 
   const applyPointerYToSlider = useCallback(
-    (sliderIdx: number, clientY: number) => {
+    (sliderIdx: number, clientY: number, forceEmit = false) => {
       const trackEl = faderTrackRefs.current.get(sliderIdx);
       if (!trackEl) return;
       const rect = trackEl.getBoundingClientRect();
@@ -242,31 +279,39 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
       const ratio = 1 - Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
       const rawDb = -12 + ratio * 24;
       const snappedDb = Math.max(-12, Math.min(12, Math.round(rawDb * 2) / 2));
+      const current = dspStateRef.current;
 
       if (sliderIdx === -1) {
-        onUpdateDsp({ eq_enabled: true, preamp_db: snappedDb });
+        if (!forceEmit && current.eq_enabled && current.preamp_db === snappedDb) {
+          return;
+        }
+        onUpdateDspRef.current({ eq_enabled: true, preamp_db: snappedDb });
       } else {
-        const nextBands = [...dspState.bands_db];
+        const nextBands = [...current.bands_db];
         while (nextBands.length < 10) nextBands.push(0);
+        if (!forceEmit && current.eq_enabled && nextBands[sliderIdx] === snappedDb) {
+          return;
+        }
         nextBands[sliderIdx] = snappedDb;
-        onUpdateDsp({
+        onUpdateDspRef.current({
           eq_enabled: true,
           eq_preset: 'custom',
           bands_db: nextBands,
         });
       }
     },
-    [dspState.bands_db, onUpdateDsp]
+    []
   );
 
   useEffect(() => {
     if (!open) return;
     const onPointerMove = (e: PointerEvent) => {
       if (draggingSliderRef.current === null) return;
-      applyPointerYToSlider(draggingSliderRef.current, e.clientY);
+      applyPointerYToSlider(draggingSliderRef.current, e.clientY, false);
     };
     const onPointerUp = () => {
       draggingSliderRef.current = null;
+      setActiveDragSlider(null);
     };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
@@ -274,6 +319,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
     window.addEventListener('blur', onPointerUp);
     return () => {
       draggingSliderRef.current = null;
+      setActiveDragSlider(null);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);
@@ -388,6 +434,46 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             <span>Close (B / Esc)</span>
           </button>
         </div>
+
+        {/* Section 1: Live OS Audio Tap Status (when active) + Vocal Isolation */}
+        {tapStatus && tapStatus.mode && tapStatus.mode !== 'idle' && (
+          <div
+            style={{
+              padding: '7px 12px',
+              borderRadius: 10,
+              background: tapStatus.dsp_active
+                ? 'rgba(16, 185, 129, 0.12)'
+                : 'rgba(245, 158, 11, 0.12)',
+              border: tapStatus.dsp_active
+                ? '1px solid rgba(52, 211, 153, 0.35)'
+                : '1px solid rgba(251, 191, 36, 0.35)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 10,
+              flexWrap: 'wrap',
+              fontSize: 11,
+            }}
+          >
+            <span
+              style={{
+                fontWeight: 800,
+                letterSpacing: '0.04em',
+                color: tapStatus.dsp_active ? '#6ee7b7' : '#fcd34d',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {tapStatus.dsp_active
+                ? 'DSP ACTIVE'
+                : tapStatus.mode === 'windows_virtual_sink_pending'
+                  ? 'ROUTING SINK...'
+                  : tapStatus.mode === 'windows_tap_unavailable'
+                    ? 'TAP NOTICE'
+                    : 'SPECTRUM ONLY'}
+            </span>
+            <span style={{ color: '#cbd5e1', flex: 1, minWidth: 200 }}>{tapStatus.detail}</span>
+          </div>
+        )}
 
         {/* Section 1: Vocal Isolation & 1-Click Karaoke Mode */}
         <div
@@ -693,15 +779,17 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               const isPreamp = sliderIdx === -1;
               const valDb = isPreamp ? dspState.preamp_db : bands[sliderIdx] || 0;
               const isEngaged = engagedSlider === sliderIdx;
+              const isDragging = activeDragSlider === sliderIdx;
               const norm = (Math.max(-12, Math.min(12, valDb)) + 12) / 24; // 0..1
               const label = isPreamp ? 'PRE' : EQ_BAND_LABELS[sliderIdx];
-              const accentColor = isEngaged
-                ? '#34d399'
-                : isPreamp
-                  ? '#f59e0b'
-                  : dspState.eq_enabled
-                    ? '#38bdf8'
-                    : '#64748b';
+              const accentColor =
+                isEngaged || isDragging
+                  ? '#34d399'
+                  : isPreamp
+                    ? '#f59e0b'
+                    : dspState.eq_enabled
+                      ? '#38bdf8'
+                      : '#64748b';
 
               return (
                 <div
@@ -735,24 +823,71 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
 
                   {/* Interactive Vertical Fader Button */}
                   <button
+                    type="button"
                     data-eq-slider-index={sliderIdx}
                     data-eq-slider-engaged={isEngaged ? 'true' : undefined}
+                    onPointerDown={(e) => {
+                      if (e.pointerType === 'mouse' && e.button !== 0) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      markEqualizerFocus(e.currentTarget);
+                      if (engagedSliderRef.current !== null) {
+                        updateEngagedSlider(null);
+                      }
+                      suppressClickForSliderRef.current = sliderIdx;
+                      draggingSliderRef.current = sliderIdx;
+                      setActiveDragSlider(sliderIdx);
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {}
+                      applyPointerYToSlider(sliderIdx, e.clientY, true);
+                    }}
+                    onPointerMove={(e) => {
+                      if (draggingSliderRef.current === sliderIdx) {
+                        e.preventDefault();
+                        applyPointerYToSlider(sliderIdx, e.clientY, false);
+                      }
+                    }}
+                    onPointerUp={(e) => {
+                      try {
+                        if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        }
+                      } catch {}
+                      draggingSliderRef.current = null;
+                      setActiveDragSlider(null);
+                    }}
+                    onPointerCancel={(e) => {
+                      try {
+                        if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        }
+                      } catch {}
+                      draggingSliderRef.current = null;
+                      setActiveDragSlider(null);
+                    }}
                     onClick={(e) => {
+                      if (suppressClickForSliderRef.current === sliderIdx) {
+                        suppressClickForSliderRef.current = null;
+                        return;
+                      }
                       markEqualizerFocus(e.currentTarget);
                       updateEngagedSlider(
                         engagedSliderRef.current === sliderIdx ? null : sliderIdx
                       );
                     }}
                     onDoubleClick={() => {
+                      suppressClickForSliderRef.current = null;
                       if (isPreamp) {
-                        onUpdateDsp({ preamp_db: 0 });
+                        onUpdateDspRef.current({ preamp_db: 0 });
                       } else {
-                        const nextBands = [...bands];
+                        const nextBands = [...dspStateRef.current.bands_db];
+                        while (nextBands.length < 10) nextBands.push(0);
                         nextBands[sliderIdx] = 0;
-                        onUpdateDsp({ eq_preset: 'custom', bands_db: nextBands });
+                        onUpdateDspRef.current({ eq_preset: 'custom', bands_db: nextBands });
                       }
                     }}
-                    title={`${label} Hz (${valDb >= 0 ? '+' : ''}${valDb.toFixed(1)} dB) — Press A/Enter to adjust with Up/Down, or drag`}
+                    title={`${label} Hz (${valDb >= 0 ? '+' : ''}${valDb.toFixed(1)} dB) — Drag with Mouse/Touch, double-click to reset, or press A/Enter`}
                     style={{
                       width: '100%',
                       height: 138,
@@ -760,7 +895,9 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                       borderRadius: 8,
                       background: 'transparent',
                       border: 'none',
-                      cursor: 'ns-resize',
+                      cursor: isDragging ? 'grabbing' : 'ns-resize',
+                      touchAction: 'none',
+                      userSelect: 'none',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -807,12 +944,6 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                       ref={(el) => {
                         if (el) faderTrackRefs.current.set(sliderIdx, el);
                       }}
-                      onPointerDown={(e) => {
-                        e.stopPropagation();
-                        markEqualizerFocus(e.currentTarget.closest('button'));
-                        draggingSliderRef.current = sliderIdx;
-                        applyPointerYToSlider(sliderIdx, e.clientY);
-                      }}
                       style={{
                         width: 10,
                         height: 124,
@@ -820,6 +951,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                         background: '#111827',
                         border: '1px solid rgba(255, 255, 255, 0.14)',
                         position: 'relative',
+                        pointerEvents: 'none',
                       }}
                     >
                       {/* 0 dB center tick */}
@@ -831,6 +963,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                           top: '50%',
                           height: 1,
                           background: 'rgba(148, 163, 184, 0.35)',
+                          pointerEvents: 'none',
                         }}
                       />
 
@@ -845,6 +978,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                           borderRadius: 999,
                           background: accentColor,
                           opacity: 0.75,
+                          pointerEvents: 'none',
                         }}
                       />
 
@@ -855,12 +989,13 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                           left: '50%',
                           top: `${(1 - norm) * 100}%`,
                           transform: 'translate(-50%, -50%)',
-                          width: 22,
-                          height: 11,
+                          width: 24,
+                          height: 12,
                           borderRadius: 4,
-                          background: isEngaged ? '#34d399' : '#f8fafc',
+                          background: isEngaged || isDragging ? '#34d399' : '#f8fafc',
                           border: `2px solid ${accentColor}`,
                           boxShadow: '0 2px 6px rgba(0,0,0,0.65)',
+                          pointerEvents: 'none',
                         }}
                       />
                     </div>

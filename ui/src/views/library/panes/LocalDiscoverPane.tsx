@@ -20,10 +20,10 @@ import {
   type LocalLyricsFilter,
   type LocalSubTab,
   matchesAlphaBucket,
-  normalizeParentFolderPath,
   tileGridStyle,
   useLibraryLyricsStatus,
 } from '../libraryHelpers';
+import { buildLocalFolderDrillData } from '../localFolderTree';
 import {
   CollapsibleSectionHeader,
   FilterTriggerButton,
@@ -390,109 +390,37 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   // Folder / Mount Drill-Down computation
   const mountsList = snap?.mounts || [];
   const effectiveMount =
-    (activeMountRoot ? mountsList.find((m) => m.mount_root === activeMountRoot) : null) ||
-    (mountsList.length === 1 ? mountsList[0] : null);
+    (activeMountRoot
+      ? mountsList.find((m) => m.mount_root === activeMountRoot) || {
+          mount_root: activeMountRoot,
+          label:
+            activeMountRoot.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || activeMountRoot,
+          mount_kind: 'user_custom',
+          is_online: true,
+          track_count: 0,
+          last_scanned_at: 0,
+        }
+      : null) || (mountsList.length === 1 ? mountsList[0] : null);
 
-  const folderDrillData = useMemo(() => {
-    if (!effectiveMount) {
-      return {
-        curPrefix: '',
-        breadcrumbs: [] as string[],
-        subfolders: [] as Array<{
-          name: string;
-          fullRelPath: string;
-          trackCount: number;
-          albumCount: number;
-          artUrls: string[];
-        }>,
-        directTracks: [] as TrackMetadata[],
-        subtreeTracks: [] as TrackMetadata[],
-        albumsHere: [] as AlbumRecord[],
-      };
-    }
-    const sourceTracks =
-      allLocalTracks.length > 0
-        ? allLocalTracks.filter((t) => t.mount_root === effectiveMount.mount_root)
-        : mountTracks;
-    const scopedTracks = sourceTracks.filter(trackMatchesFilters);
-    const curPrefix = normalizeParentFolderPath(localFolderPath);
-    const breadcrumbs = curPrefix ? curPrefix.split('/').filter(Boolean) : [];
-
-    const childMap = new Map<
-      string,
-      {
-        name: string;
-        fullRelPath: string;
-        tracks: number;
-        albumIds: Set<string>;
-        artUrls: string[];
-      }
-    >();
-    const directTracks: TrackMetadata[] = [];
-    const subtreeTracks: TrackMetadata[] = [];
-    const directAlbumIds = new Set<string>();
-
-    for (const t of scopedTracks) {
-      const rel = normalizeParentFolderPath(t.parent_folder);
-      if (rel === curPrefix) {
-        directTracks.push(t);
-        subtreeTracks.push(t);
-        if (t.album_id) directAlbumIds.add(t.album_id);
-        continue;
-      }
-      const isChild = curPrefix === '' ? rel.length > 0 : rel.startsWith(`${curPrefix}/`);
-      if (!isChild) continue;
-      subtreeTracks.push(t);
-      const remainder = curPrefix === '' ? rel : rel.slice(curPrefix.length + 1);
-      const seg = remainder.split('/')[0];
-      if (!seg) continue;
-      const fullRelPath = curPrefix ? `${curPrefix}/${seg}` : seg;
-      let entry = childMap.get(seg);
-      if (!entry) {
-        entry = {
-          name: seg,
-          fullRelPath,
-          tracks: 0,
-          albumIds: new Set<string>(),
-          artUrls: [],
-        };
-        childMap.set(seg, entry);
-      }
-      entry.tracks += 1;
-      if (t.album_id) entry.albumIds.add(t.album_id);
-      if (t.art_url && entry.artUrls.length < 4 && !entry.artUrls.includes(t.art_url)) {
-        entry.artUrls.push(t.art_url);
-      }
-    }
-
-    const subfolders = Array.from(childMap.values())
-      .map((s) => ({
-        name: s.name,
-        fullRelPath: s.fullRelPath,
-        trackCount: s.tracks,
-        albumCount: s.albumIds.size,
-        artUrls: s.artUrls,
-      }))
-      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-
-    const albumsHere = filteredAlbumsList.filter((alb) => directAlbumIds.has(alb.id));
-
-    return {
-      curPrefix,
-      breadcrumbs,
-      subfolders,
-      directTracks,
-      subtreeTracks,
-      albumsHere,
-    };
-  }, [
-    effectiveMount,
-    allLocalTracks,
-    mountTracks,
-    trackMatchesFilters,
-    localFolderPath,
-    filteredAlbumsList,
-  ]);
+  const folderDrillData = useMemo(
+    () =>
+      buildLocalFolderDrillData({
+        mountRoot: effectiveMount?.mount_root,
+        allLocalTracks,
+        mountTracks,
+        localFolderPath,
+        filteredAlbumsList,
+        trackFilter: trackMatchesFilters,
+      }),
+    [
+      effectiveMount?.mount_root,
+      allLocalTracks,
+      mountTracks,
+      trackMatchesFilters,
+      localFolderPath,
+      filteredAlbumsList,
+    ]
+  );
 
   const filterSummaryParts: string[] = [];
   if (localGenreFilter !== 'all') filterSummaryParts.push(localGenreFilter);

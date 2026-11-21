@@ -248,5 +248,10 @@ export interface ClassicSceneRuntimeRefs {
   frameCount: number;
   effectiveComment: SoundCloudComment | null;
   effectiveAvatarImg: HTMLImageElement | null;
-  drawVertigoStyleHologram: (rawText: string, targetAnchorX?: number, targetAnchorY?: number) => void;
+  drawVertigoStyleHologram: (
+    rawText: string,
+    targetAnchorX?: number,
+    targetAnchorY?: number,
+    centerVertically?: boolean,
+  ) => void;
 }

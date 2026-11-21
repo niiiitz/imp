@@ -1,0 +1,898 @@
+pub mod catalog;
+pub mod discover;
+pub mod playback;
+pub mod social;
+
+pub use catalog::*;
+pub use discover::*;
+pub use playback::*;
+pub use social::*;
+
+use crate::sinks::apple::AppleMusicSink;
+use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use imp_protocol::{SimpSettings, TrackMetadata};
+use std::sync::{Mutex, OnceLock};
+
+static CACHED_STOREFRONT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+pub(crate) fn storefront_cache() -> &'static Mutex<Option<String>> {
+    CACHED_STOREFRONT.get_or_init(|| Mutex::new(None))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleCloudPlaylistSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub art_url: Option<String>,
+    pub kind: String, // "library" | "catalog"
+    #[serde(default)]
+    pub last_modified_date: Option<String>,
+    #[serde(default)]
+    pub can_edit: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleCloudAlbumSummary {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub art_url: Option<String>,
+    pub track_count: usize,
+    pub release_year: Option<u32>,
+    pub kind: String, // "catalog" | "library"
+    #[serde(default)]
+    pub date_added: Option<String>,
+    #[serde(default)]
+    pub content_rating: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AppleAssetEncryptionKind {
+    /// Encrypted fMP4 HLS stream (`28:ctrp256` / `28:ctrp64`) requiring a Widevine CDM license.
+    #[default]
+    WidevineCenc,
+    /// Unencrypted fMP4 HLS `.m3u8` stream (e.g., user-uploaded / iTunes Match Cloud Locker track without `#EXT-X-KEY`).
+    ClearHlsFmp4,
+    /// Direct unencrypted audio file URL (`.m4a` / `.mp3` / `plus256` / `itemDownload`) from the user's Cloud Locker.
+    ClearDirectAudio,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleRadioStationSummary {
+    pub id: String,
+    pub name: String,
+    pub subtitle: String,
+    pub art_url: Option<String>,
+    #[serde(default)]
+    pub genre: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleFullAlbumResponse {
+    pub album: AppleCloudAlbumSummary,
+    pub tracks: Vec<TrackMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleRecommendationShelf {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub is_social: bool,
+    #[serde(default)]
+    pub playlists: Vec<AppleCloudPlaylistSummary>,
+    #[serde(default)]
+    pub albums: Vec<AppleCloudAlbumSummary>,
+    #[serde(default)]
+    pub stations: Vec<AppleRadioStationSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleArtistSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub genre: String,
+    pub art_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleArtistProfileResponse {
+    pub artist: AppleArtistSummary,
+    #[serde(default)]
+    pub top_tracks: Vec<TrackMetadata>,
+    #[serde(default)]
+    pub albums: Vec<AppleCloudAlbumSummary>,
+    #[serde(default)]
+    pub singles: Vec<AppleCloudAlbumSummary>,
+    #[serde(default)]
+    pub related_artists: Vec<AppleArtistSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleRadioAndForYouResponse {
+    pub stations: Vec<AppleRadioStationSummary>,
+    #[serde(default)]
+    pub personal_stations: Vec<AppleRadioStationSummary>,
+    #[serde(default)]
+    pub live_stations: Vec<AppleRadioStationSummary>,
+    #[serde(default)]
+    pub genre_stations: Vec<AppleRadioStationSummary>,
+    #[serde(default)]
+    pub artist_shows: Vec<AppleCloudPlaylistSummary>,
+    #[serde(default)]
+    pub club_mixes: Vec<AppleCloudPlaylistSummary>,
+    pub playlists: Vec<AppleCloudPlaylistSummary>,
+    pub albums: Vec<AppleCloudAlbumSummary>,
+    #[serde(default)]
+    pub new_releases: Vec<AppleCloudAlbumSummary>,
+    #[serde(default)]
+    pub shelves: Vec<AppleRecommendationShelf>,
+    #[serde(default)]
+    pub recently_played: Vec<TrackMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleNewFeedResponse {
+    #[serde(default)]
+    pub recent_releases: Vec<AppleCloudAlbumSummary>,
+    pub albums: Vec<AppleCloudAlbumSummary>,
+    pub playlists: Vec<AppleCloudPlaylistSummary>,
+    pub songs: Vec<TrackMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleCatalogSearchResults {
+    pub songs: Vec<TrackMetadata>,
+    pub albums: Vec<AppleCloudAlbumSummary>,
+    pub playlists: Vec<AppleCloudPlaylistSummary>,
+    pub stations: Vec<AppleRadioStationSummary>,
+    #[serde(default)]
+    pub artists: Vec<AppleArtistSummary>,
+}
+
+/// Stage C Browserless Foundation: Metadata returned by Apple's `webPlayback` endpoint
+/// (`https://play.music.apple.com/WebObjects/MZPlay.woa/wa/webPlayback`) for native Rust HLS + Widevine CDM
+/// as well as DRM-free uploaded / iTunes Match Cloud Locker streams.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppleWebPlaybackAsset {
+    pub song_id: String,
+    pub flavor: String,
+    pub hls_playlist_url: String,
+    pub key_server_url: Option<String>,
+    pub key_cert_url: Option<String>,
+    #[serde(default)]
+    pub encryption_kind: AppleAssetEncryptionKind,
+}
+
+pub fn format_apple_art_url(raw_url: Option<&str>, size: u32) -> Option<String> {
+    let raw = raw_url?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(
+        raw.replace("{w}", &size.to_string())
+            .replace("{h}", &size.to_string())
+            .replace("{f}", "jpg"),
+    )
+}
+
+pub(crate) fn extract_apple_content_rating(item: &Value) -> Option<String> {
+    let attrs = item.get("attributes").unwrap_or(item);
+    let raw = attrs
+        .get("contentRating")
+        .or_else(|| item.pointer("/relationships/catalog/data/0/attributes/contentRating"))
+        .or_else(|| item.get("contentRating"))
+        .and_then(|v| v.as_str())?
+        .trim()
+        .to_ascii_lowercase();
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw)
+    }
+}
+
+/// Maps an Apple Music API song/library-song JSON object to SIMP's `TrackMetadata`.
+/// Automatically prioritizes `relationships.catalog.data[0].id` (from `?include=catalog`)
+/// over potentially tombstoned/re-linked `playParams.catalogId`.
+pub fn map_apple_item_to_track(item: &Value) -> Option<TrackMetadata> {
+    let attrs = item.get("attributes").unwrap_or(item);
+    let play_params = attrs
+        .get("playParams")
+        .or_else(|| item.get("playParams"));
+
+    let rel_catalog_id = item
+        .pointer("/relationships/catalog/data/0/id")
+        .and_then(|v| v.as_str());
+    let param_catalog_id = play_params
+        .and_then(|p| p.get("catalogId"))
+        .and_then(|v| v.as_str());
+    let param_id = play_params
+        .and_then(|p| p.get("id"))
+        .and_then(|v| v.as_str());
+    let item_id = item
+        .get("id")
+        .or_else(|| attrs.get("id"))
+        .and_then(|v| v.as_str());
+
+    let track_id = rel_catalog_id
+        .or(param_catalog_id)
+        .or(param_id)
+        .or(item_id)?
+        .trim();
+    if track_id.is_empty() {
+        return None;
+    }
+
+    let rel_catalog_attrs = item.pointer("/relationships/catalog/data/0/attributes");
+    fn non_empty_str(v: Option<&Value>) -> Option<&str> {
+        v.and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+    let title = non_empty_str(attrs.get("name"))
+        .or_else(|| non_empty_str(attrs.get("title")))
+        .or_else(|| non_empty_str(item.get("title")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("name"))))
+        .unwrap_or("Unknown Track")
+        .to_string();
+    let artist_name = non_empty_str(attrs.get("artistName"))
+        .or_else(|| non_empty_str(item.get("artistName")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("artistName"))))
+        .unwrap_or("Unknown Artist")
+        .to_string();
+    let album_name = non_empty_str(attrs.get("albumName"))
+        .or_else(|| non_empty_str(item.get("albumName")))
+        .or_else(|| non_empty_str(rel_catalog_attrs.and_then(|c| c.get("albumName"))))
+        .unwrap_or("Apple Music")
+        .to_string();
+
+    let duration_ms = attrs
+        .get("durationInMillis")
+        .or_else(|| item.get("durationInMillis"))
+        .and_then(|v| v.as_u64())
+        .filter(|&d| d > 0)
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("durationInMillis"))
+                .and_then(|v| v.as_u64())
+                .filter(|&d| d > 0)
+        })
+        .unwrap_or(0) as u32;
+
+    let rel_catalog_art = item
+        .pointer("/relationships/catalog/data/0/attributes/artwork/url")
+        .and_then(|v| v.as_str());
+    let attr_art = attrs
+        .pointer("/artwork/url")
+        .or_else(|| item.pointer("/artwork/url"))
+        .and_then(|v| v.as_str());
+    let raw_art = match (attr_art, rel_catalog_art) {
+        (Some(a), Some(c)) if a.contains("blobstore.apple.com") => Some(c),
+        (Some(a), _) => Some(a),
+        (None, Some(c)) => Some(c),
+        (None, None) => None,
+    };
+    let art_url = format_apple_art_url(raw_art, 400);
+
+    let track_number = attrs
+        .get("trackNumber")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("trackNumber"))
+                .and_then(|v| v.as_u64())
+        })
+        .map(|n| n as u32);
+    let disc_number = attrs
+        .get("discNumber")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("discNumber"))
+                .and_then(|v| v.as_u64())
+        })
+        .map(|n| n as u32)
+        .or(Some(1));
+
+    let content_rating = extract_apple_content_rating(item);
+    let genre = attrs
+        .get("genreNames")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            rel_catalog_attrs
+                .and_then(|c| c.get("genreNames"))
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+    let release_year = attrs
+        .get("releaseDate")
+        .or_else(|| rel_catalog_attrs.and_then(|c| c.get("releaseDate")))
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.get(0..4))
+        .and_then(|y| y.parse::<i32>().ok())
+        .filter(|y| (1900..=2100).contains(y));
+
+    let meta = TrackMetadata {
+        uri: format!("applemusic:song:{track_id}"),
+        title,
+        artists: vec![artist_name],
+        album: album_name,
+        album_id: None,
+        track_number,
+        disc_number,
+        art_url,
+        duration_ms,
+        source: "apple_music".to_string(),
+        mount_root: None,
+        content_rating,
+        genre,
+        release_year,
+        parent_folder: None,
+    };
+    remember_track_metadata_hint(&meta);
+    if let Some(raw_item_id) = item_id {
+        if raw_item_id != track_id {
+            remember_raw_id_metadata_hint(
+                raw_item_id,
+                &meta.title,
+                meta.artists.first().map(|s| s.as_str()).unwrap_or(""),
+                meta.art_url.clone(),
+            );
+        }
+    }
+    Some(meta)
+}
+
+pub(crate) fn resolve_tokens(settings: &SimpSettings) -> Result<(String, String)> {
+    let creds = AppleMusicSink::resolve_credentials(settings);
+    let dev_token = AppleMusicSink::get_or_sign_developer_token(settings)?;
+    let user_token = creds
+        .music_user_token
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| anyhow!("Please authorize with your Apple ID first"))?;
+    Ok((dev_token, user_token))
+}
+
+pub(crate) fn is_transient_apple_http_error(err_msg: &str) -> bool {
+    let lower = err_msg.to_ascii_lowercase();
+    if lower.contains("http 400")
+        || lower.contains("http 401")
+        || lower.contains("http 403")
+        || lower.contains("http 404")
+    {
+        return false;
+    }
+    const TRANSIENT_MARKERS: &[&str] = &[
+        "http 429",
+        "http 500",
+        "http 502",
+        "http 503",
+        "http 504",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "empty reply",
+        "curle_28",
+        "curle_52",
+        "curle_56",
+        "broken pipe",
+        "unexpected eof",
+    ];
+    TRANSIENT_MARKERS.iter().any(|m| lower.contains(m))
+}
+
+/// Executes an authenticated `GET` request against `api.music.apple.com` using the in-process
+/// `http_pool` (`libcurl.so.4` HTTP/2 connection pool, with `curl --config -` fallback)
+/// so TLS/HTTP2 connections are reused across calls and tokens never appear in `/proc/<pid>/cmdline`.
+pub(crate) fn apple_get_json(url: &str, dev_token: &str, user_token: &str) -> Result<Value> {
+    let full_url = if url.starts_with("https://") {
+        url.to_string()
+    } else if url.starts_with('/') {
+        format!("https://api.music.apple.com{url}")
+    } else {
+        format!("https://api.music.apple.com/{url}")
+    };
+
+    let auth_header = format!("Bearer {}", dev_token.trim());
+    let headers = [
+        ("Authorization", auth_header.as_str()),
+        ("Music-User-Token", user_token.trim()),
+        ("X-Apple-Music-User-Token", user_token.trim()),
+        ("Origin", "https://music.apple.com"),
+        ("Referer", "https://music.apple.com/"),
+    ];
+
+    const BACKOFF_MS: &[u64] = &[250, 600];
+    let mut attempt = 0usize;
+    let bytes = loop {
+        match crate::http_pool::http_get_bytes(&full_url, &headers, None, 12)
+            .with_context(|| format!("Apple Music API GET failed ({full_url})"))
+        {
+            Ok(b) => break b,
+            Err(err) => {
+                let err_chain = format!("{err:#}");
+                if attempt < BACKOFF_MS.len() && is_transient_apple_http_error(&err_chain) {
+                    let wait_ms = BACKOFF_MS[attempt];
+                    tracing::warn!(
+                        "Transient Apple Music API error (attempt {}): {} — retrying in {}ms",
+                        attempt + 1,
+                        err_chain,
+                        wait_ms
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+                    attempt += 1;
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    };
+
+    serde_json::from_slice(&bytes).context("Invalid JSON from Apple Music API")
+}
+
+/// Executes an authenticated `POST` request with JSON body against Apple Music endpoints
+/// using the in-process `http_pool` (`libcurl.so.4` HTTP/2 connection pool).
+pub(crate) fn apple_post_json(url: &str, dev_token: &str, user_token: &str, body: &Value) -> Result<Value> {
+    let body_bytes = serde_json::to_vec(body)?;
+    let auth_header = format!("Bearer {}", dev_token.trim());
+    let headers = [
+        ("Authorization", auth_header.as_str()),
+        ("Music-User-Token", user_token.trim()),
+        ("X-Apple-Music-User-Token", user_token.trim()),
+        ("Content-Type", "application/json"),
+        ("Origin", "https://music.apple.com"),
+        ("Referer", "https://music.apple.com/"),
+    ];
+
+    let bytes = crate::http_pool::http_post_bytes(url, &headers, &body_bytes, 15)
+        .with_context(|| format!("Apple Music API POST failed ({url})"))?;
+
+    serde_json::from_slice(&bytes).context("Invalid JSON from Apple Music POST")
+}
+
+pub fn get_storefront(dev_token: &str, user_token: &str) -> String {
+    if let Some(cached) = storefront_cache().lock().unwrap().clone() {
+        return cached;
+    }
+    let sf = apple_get_json("/v1/me/storefront", dev_token, user_token)
+        .ok()
+        .and_then(|j| {
+            j.pointer("/data/0/id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "us".to_string());
+    *storefront_cache().lock().unwrap() = Some(sf.clone());
+    sf
+}
+
+pub fn clear_cached_storefront() {
+    *storefront_cache().lock().unwrap() = None;
+}
+
+/// Pre-warms the Apple Music Developer JWT, User Token, and Storefront ID (`GET /v1/me/storefront`)
+/// so the TLS connection pool and storefront cache are hot before the first track is played.
+pub fn prewarm_apple_auth_and_storefront(settings: &SimpSettings) {
+    if let Ok((dev_token, user_token)) = resolve_tokens(settings) {
+        let _ = get_storefront(&dev_token, &user_token);
+    }
+}
+
+pub(crate) fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 2);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+/// Ensures Apple Music pagination `next` cursor URLs retain `limit=100` (and optionally `include=catalog`),
+/// since Apple's `next` links strip query options on page 2+ and fall back to `limit=25`.
+pub(crate) fn with_limit_and_catalog(url: &str, include_catalog: bool) -> String {
+    let mut out = if url.contains("limit=") {
+        url.to_string()
+    } else if url.contains('?') {
+        format!("{url}&limit=100")
+    } else {
+        format!("{url}?limit=100")
+    };
+    if include_catalog && !out.contains("include=") {
+        if out.contains('?') {
+            out.push_str("&include=catalog");
+        } else {
+            out.push_str("?include=catalog");
+        }
+    }
+    out
+}
+
+/// Ensures Apple Music pagination `next` cursor URLs retain `limit=100` (Apple strips `limit` on page 2+
+/// and falls back to `limit=25`, which previously capped 3-page fetches at `100 + 25 + 25 = 150`).
+pub(crate) fn with_limit_100(url: &str) -> String {
+    with_limit_and_catalog(url, false)
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_map_apple_item_prefers_included_catalog_relationship_id() {
+        let raw_item = serde_json::json!({
+            "id": "i.relinked123",
+            "type": "library-songs",
+            "attributes": {
+                "name": "Broke Your Cover",
+                "artistName": "Dev Lemons",
+                "albumName": "SURFACE TENSION",
+                "durationInMillis": 172000,
+                "trackNumber": 3,
+                "playParams": {
+                    "id": "i.relinked123",
+                    "isLibrary": true,
+                    "catalogId": "1111111111"
+                }
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [
+                        {
+                            "id": "2222222222",
+                            "type": "songs"
+                        }
+                    ]
+                }
+            }
+        });
+
+        let track = map_apple_item_to_track(&raw_item).expect("should map track");
+        assert_eq!(
+            track.uri, "applemusic:song:2222222222",
+            "Must prefer live relationships.catalog.data[0].id over stale playParams.catalogId"
+        );
+        assert_eq!(track.title, "Broke Your Cover");
+        assert_eq!(track.artists, vec!["Dev Lemons".to_string()]);
+        assert_eq!(track.album, "SURFACE TENSION");
+        assert_eq!(track.duration_ms, 172000);
+    }
+
+    #[test]
+    fn test_map_apple_item_heals_expiring_blobstore_artwork_with_catalog_artwork() {
+        let raw_item = serde_json::json!({
+            "id": "i.KNRzN5Qh3b7lQ",
+            "type": "library-songs",
+            "attributes": {
+                "name": "The Grid",
+                "artistName": "Daft Punk",
+                "albumName": "TRON: Legacy",
+                "durationInMillis": 96000,
+                "trackNumber": 2,
+                "artwork": {
+                    "url": "https://store-037.blobstore.apple.com/itms6-assets-massilia-037001/Purple113/v4/1b/1f/dc/image?X-Amz-Expires=86400"
+                }
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [
+                        {
+                            "id": "1440617977",
+                            "type": "songs",
+                            "attributes": {
+                                "artwork": {
+                                    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/38/4b/5c/mzi.cfikjxuv.jpg/{w}x{h}bb.jpg"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+
+        let track = map_apple_item_to_track(&raw_item).expect("should map track");
+        assert_eq!(track.uri, "applemusic:song:1440617977");
+        assert_eq!(
+            track.art_url.as_deref(),
+            Some("https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/38/4b/5c/mzi.cfikjxuv.jpg/400x400bb.jpg"),
+            "Must replace 24-hour expiring blobstore.apple.com URL with permanent mzstatic.com catalog artwork"
+        );
+    }
+
+    #[test]
+    fn test_with_limit_100_preserves_pagination_page_size() {
+        assert_eq!(
+            with_limit_100("/v1/me/library/playlists?offset=100"),
+            "/v1/me/library/playlists?offset=100&limit=100"
+        );
+        assert_eq!(
+            with_limit_100("/v1/me/library/playlists?offset=200&limit=100"),
+            "/v1/me/library/playlists?offset=200&limit=100"
+        );
+        assert_eq!(
+            with_limit_100("/v1/me/library/playlists"),
+            "/v1/me/library/playlists?limit=100"
+        );
+    }
+
+    #[test]
+    fn test_parse_apple_album_summary_handles_personal_cloud_library_album() {
+        let lib_album = serde_json::json!({
+            "id": "l.abc98765",
+            "type": "library-albums",
+            "attributes": {
+                "name": "Sample Uploaded Vinyl Companion",
+                "artistName": "Example Artist",
+                "trackCount": 37,
+                "releaseDate": "2017-12-22",
+                "dateAdded": "2024-05-10T14:20:00Z",
+                "artwork": {
+                    "url": "https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/aa/bb/cc/cover.jpg/{w}x{h}bb.jpg"
+                }
+            }
+        });
+
+        let summary = parse_apple_album_summary(&lib_album, "library").expect("should parse library album");
+        assert_eq!(summary.id, "l.abc98765");
+        assert_eq!(summary.kind, "library");
+        assert_eq!(summary.title, "Sample Uploaded Vinyl Companion");
+        assert_eq!(summary.artist, "Example Artist");
+        assert_eq!(summary.track_count, 37);
+        assert_eq!(summary.release_year, Some(2017));
+        assert_eq!(summary.date_added.as_deref(), Some("2024-05-10T14:20:00Z"));
+
+        let cloud_locker_manifest = serde_json::json!({
+            "songList": [{
+                "songId": "i.uploadedTrack01",
+                "assets": [{
+                    "flavor": "28:plus256",
+                    "URL": "https://audio-ssl.itunes.apple.com/itunes-assets/clear_stream.m3u8"
+                }]
+            }]
+        });
+        assert!(has_playable_cloud_or_widevine_asset(&cloud_locker_manifest));
+    }
+
+    #[test]
+    fn test_apple_content_rating_distinguishes_explicit_and_clean_editions() {
+        let explicit_album = serde_json::json!({
+            "id": "1700000001",
+            "type": "albums",
+            "attributes": {
+                "name": "Sample Double Edition Album",
+                "artistName": "Example Artist",
+                "trackCount": 12,
+                "releaseDate": "2023-09-15",
+                "contentRating": "explicit"
+            }
+        });
+        let clean_album = serde_json::json!({
+            "id": "1700000002",
+            "type": "albums",
+            "attributes": {
+                "name": "Sample Double Edition Album",
+                "artistName": "Example Artist",
+                "trackCount": 12,
+                "releaseDate": "2023-09-15",
+                "contentRating": "clean"
+            }
+        });
+
+        let exp_summary =
+            parse_apple_album_summary(&explicit_album, "catalog").expect("explicit album");
+        let clean_summary =
+            parse_apple_album_summary(&clean_album, "catalog").expect("clean album");
+        assert_eq!(exp_summary.content_rating.as_deref(), Some("explicit"));
+        assert_eq!(clean_summary.content_rating.as_deref(), Some("clean"));
+
+        let explicit_track = serde_json::json!({
+            "id": "i.lib001",
+            "type": "library-songs",
+            "attributes": {
+                "name": "Track 01",
+                "artistName": "Example Artist",
+                "albumName": "Sample Double Edition Album",
+                "durationInMillis": 185000
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [{
+                        "id": "900000111",
+                        "type": "songs",
+                        "attributes": {
+                            "contentRating": "explicit"
+                        }
+                    }]
+                }
+            }
+        });
+        let mapped_track = map_apple_item_to_track(&explicit_track).expect("track with rating");
+        assert_eq!(mapped_track.content_rating.as_deref(), Some("explicit"));
+    }
+
+    #[test]
+    fn test_parse_apple_album_summary_falls_back_to_catalog_track_count_and_date_added() {
+        let lib_album_stub = serde_json::json!({
+            "id": "l.stub001",
+            "type": "library-albums",
+            "attributes": {
+                "name": "Sample Catalog Fallback Album",
+                "artistName": "Example Artist",
+                "trackCount": 0
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [{
+                        "id": "1700000999",
+                        "type": "albums",
+                        "attributes": {
+                            "trackCount": 14,
+                            "releaseDate": "2024-02-14",
+                            "dateAdded": "2026-11-16T22:00:00Z",
+                            "artwork": {
+                                "url": "https://is1-ssl.mzstatic.com/image/thumb/Music/cover.jpg/{w}x{h}bb.jpg"
+                            }
+                        }
+                    }]
+                }
+            }
+        });
+
+        let summary = parse_apple_album_summary(&lib_album_stub, "library")
+            .expect("should parse library stub");
+        assert_eq!(summary.track_count, 14);
+        assert_eq!(summary.release_year, Some(2024));
+        assert_eq!(summary.date_added.as_deref(), Some("2026-11-16T22:00:00Z"));
+    }
+
+    #[test]
+    fn test_parse_apple_playlist_summary_extracts_last_modified_and_can_edit() {
+        let user_pl = serde_json::json!({
+            "id": "p.userPlaylist01",
+            "type": "library-playlists",
+            "attributes": {
+                "name": "Sample Roadtrip Mix",
+                "canEdit": true,
+                "lastModifiedDate": "2026-11-17T10:15:30Z",
+                "artwork": {
+                    "url": "https://is1-ssl.mzstatic.com/image/thumb/pl.jpg/{w}x{h}bb.jpg"
+                }
+            }
+        });
+        let parsed = parse_apple_playlist_summary(&user_pl, "iCloud Music Library Playlist")
+            .expect("should parse user playlist");
+        assert_eq!(parsed.kind, "library");
+        assert!(parsed.can_edit);
+        assert_eq!(
+            parsed.last_modified_date.as_deref(),
+            Some("2026-11-17T10:15:30Z")
+        );
+
+        let catalog_pl = serde_json::json!({
+            "id": "pl.curator01",
+            "type": "playlists",
+            "attributes": {
+                "name": "Sample Editorial Essentials",
+                "curatorName": "Apple Music",
+                "lastModifiedDate": "2026-11-01T00:00:00Z"
+            }
+        });
+        let parsed_cat = parse_apple_playlist_summary(&catalog_pl, "Playlist")
+            .expect("should parse catalog playlist");
+        assert_eq!(parsed_cat.kind, "catalog");
+        assert!(!parsed_cat.can_edit);
+        assert_eq!(
+            parsed_cat.last_modified_date.as_deref(),
+            Some("2026-11-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn test_is_transient_apple_http_error() {
+        assert!(is_transient_apple_http_error(
+            "Apple Music API GET failed: HTTP 429 Too Many Requests"
+        ));
+        assert!(is_transient_apple_http_error("HTTP 503 Service Unavailable"));
+        assert!(is_transient_apple_http_error("CURLE_28 Operation timed out"));
+        assert!(is_transient_apple_http_error("Connection reset by peer"));
+        assert!(!is_transient_apple_http_error("HTTP 401 Unauthorized"));
+        assert!(!is_transient_apple_http_error("HTTP 403 Forbidden"));
+        assert!(!is_transient_apple_http_error("HTTP 404 Not Found"));
+        assert!(!is_transient_apple_http_error("HTTP 400 Bad Request"));
+    }
+
+    #[test]
+    fn test_with_limit_and_catalog_preserves_include_and_limit() {
+        assert_eq!(
+            with_limit_and_catalog("/v1/me/library/playlists?offset=100", true),
+            "/v1/me/library/playlists?offset=100&limit=100&include=catalog"
+        );
+        assert_eq!(
+            with_limit_and_catalog("/v1/catalog/us/albums/1/tracks?offset=100", false),
+            "/v1/catalog/us/albums/1/tracks?offset=100&limit=100"
+        );
+        assert_eq!(
+            with_limit_and_catalog(
+                "/v1/me/library/playlists?offset=200&limit=100&include=catalog",
+                true
+            ),
+            "/v1/me/library/playlists?offset=200&limit=100&include=catalog"
+        );
+    }
+
+    #[test]
+    fn test_map_apple_item_heals_missing_metadata_from_catalog_relationship() {
+        let raw_item = serde_json::json!({
+            "id": "i.healTest01",
+            "type": "library-songs",
+            "attributes": {
+                "name": " ",
+                "artistName": "",
+                "durationInMillis": 0,
+                "artwork": {
+                    "url": "https://blobstore.apple.com/temp/{w}x{h}bb.jpg"
+                },
+                "playParams": {
+                    "id": "i.healTest01",
+                    "isLibrary": true
+                }
+            },
+            "relationships": {
+                "catalog": {
+                    "data": [
+                        {
+                            "id": "99887766",
+                            "type": "songs",
+                            "attributes": {
+                                "name": "Demo Healed Track",
+                                "artistName": "Example Artist",
+                                "albumName": "Sample Album",
+                                "durationInMillis": 205000,
+                                "trackNumber": 4,
+                                "discNumber": 2,
+                                "releaseDate": "2025-05-01",
+                                "genreNames": ["Electronic"],
+                                "artwork": {
+                                    "url": "https://is1-ssl.mzstatic.com/image/thumb/healed/{w}x{h}bb.jpg"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        });
+        let mapped = map_apple_item_to_track(&raw_item).expect("should map and heal track");
+        assert_eq!(mapped.uri, "applemusic:song:99887766");
+        assert_eq!(mapped.title, "Demo Healed Track");
+        assert_eq!(mapped.artists, vec!["Example Artist".to_string()]);
+        assert_eq!(mapped.album, "Sample Album");
+        assert_eq!(mapped.duration_ms, 205000);
+        assert_eq!(mapped.track_number, Some(4));
+        assert_eq!(mapped.disc_number, Some(2));
+        assert_eq!(mapped.release_year, Some(2025));
+        assert_eq!(mapped.genre.as_deref(), Some("Electronic"));
+        assert!(mapped
+            .art_url
+            .as_deref()
+            .unwrap_or("")
+            .contains("mzstatic.com"));
+    }
+}

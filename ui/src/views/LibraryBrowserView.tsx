@@ -135,6 +135,7 @@ export type LibraryContextTarget =
         | 'local_station'
         | 'apple_station'
         | 'mount'
+        | 'cdda'
         | 'artist';
       id: string;
       title: string;
@@ -297,6 +298,7 @@ export interface LibraryBrowserViewProps {
   sourceVisibility: SourceVisibilityPrefs;
   recentlyPlayed: TrackMetadata[];
   showToast: (msg: string) => void;
+  handleRemoveFolder?: (mountRoot: string, label: string) => void;
   forYouShelves?: AppleRecommendationShelf[];
   scMoreOfWhatYouLike?: TrackMetadata[];
   scFreshUploads?: TrackMetadata[];
@@ -451,6 +453,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   sourceVisibility,
   recentlyPlayed,
   showToast,
+  handleRemoveFolder,
   forYouShelves = [],
   scMoreOfWhatYouLike = [],
   scFreshUploads = [],
@@ -559,6 +562,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [activeMountRoot, setActiveMountRoot] = useState<string | null>(null);
   const [localSubTab, setLocalSubTab] = useState<LocalSubTab>('overview');
   const [localFolderPath, setLocalFolderPath] = useState<string>('');
+  const [leftMountDrillOpen, setLeftMountDrillOpen] = useState<boolean>(false);
+  const [previewFolderPath, setPreviewFolderPath] = useState<string | null>(null);
   const [localGenreFilter, setLocalGenreFilter] = useState<string>('all');
   const [localYearFilter, setLocalYearFilter] = useState<string>('all');
   const [localArtworkFilter, setLocalArtworkFilter] = useState<LocalArtworkFilter>('all');
@@ -651,6 +656,22 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     window.addEventListener('simp-track-properties-updated', bump);
     return () => window.removeEventListener('simp-track-properties-updated', bump);
   }, []);
+  const totalMountTracks = useMemo(
+    () => (snap?.mounts || []).reduce((sum, m) => sum + (m.track_count || 0), 0),
+    [snap?.mounts]
+  );
+  useEffect(() => {
+    setPreviewFolderPath(null);
+  }, [localFolderPath, activeMountRoot, browseHubTarget, localSubTab]);
+  useEffect(() => {
+    if (
+      !activeMountRoot ||
+      (browseHubTarget !== 'mount' &&
+        !(browseHubTarget === 'local_discover' && localSubTab === 'folders'))
+    ) {
+      setLeftMountDrillOpen(false);
+    }
+  }, [activeMountRoot, browseHubTarget, localSubTab]);
   useEffect(() => {
     defaultSimpClient
       .query<TrackMetadata[]>('get_tracks', {
@@ -664,7 +685,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (Array.isArray(res)) setAllLocalTracks(res);
       })
       .catch(() => {});
-  }, [albums.length, snap?.mounts?.length, allLocalTracksVersion]);
+  }, [albums.length, snap?.mounts?.length, totalMountTracks, allLocalTracksVersion]);
   const allLocalAlbums = useMemo(
     () => albums.filter((alb) => !alb.id.startsWith('applemusic:album:')),
     [albums]
@@ -1552,7 +1573,34 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     [applyRightPaneTileFocus]
   );
 
-  const pendingDroppedMountPathRef = useRef<string | null>(null);
+  const focusLeftMountDrill = useCallback(
+    (preferSelector?: string) => {
+      if (xmbPreviewTriggerRef.current) return;
+      pendingRightFocusRef.current = null;
+      window.setTimeout(() => {
+        const leftCol = document.querySelector<HTMLElement>('[data-nav-col="left"]');
+        if (!leftCol) return;
+        const target =
+          (preferSelector ? leftCol.querySelector<HTMLElement>(preferSelector) : null) ||
+          leftCol.querySelector<HTMLElement>('[data-left-folder-path]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-folder-up="true"]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-drill-back="true"]:not([disabled])') ||
+          leftCol.querySelector<HTMLElement>('[data-left-context-kind="mount"]:not([disabled])');
+        if (target) {
+          applyFocusMarker(target);
+        } else {
+          focusRightPaneFirstTile();
+        }
+      }, 45);
+    },
+    [applyFocusMarker, focusRightPaneFirstTile]
+  );
+
+  const pendingDroppedMountPathRef = useRef<{
+    path: string;
+    subpath: string;
+    expiresAt: number;
+  } | null>(null);
   const normalizeMountCompare = useCallback((rawPath: string) => {
     let p = rawPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     const winDrive = p.match(/^([a-zA-Z]):\/(.*)$/);
@@ -1565,27 +1613,43 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     return p;
   }, []);
 
+  const ensureLocalSourceEnabled = useCallback(() => {
+    if (!isSourceIncluded('local')) {
+      setSelectedSources((prev) => (prev.includes('local') ? prev : [...prev, 'local']));
+    }
+  }, [isSourceIncluded, setSelectedSources]);
+
   const tryOpenPendingDroppedMount = useCallback(
     (mountsList: SimpStateSnapshot['mounts'] | undefined) => {
       const wanted = pendingDroppedMountPathRef.current;
-      if (!wanted || !mountsList || mountsList.length === 0) return false;
-      const wantedNorm = normalizeMountCompare(wanted);
+      if (!wanted) return false;
+      if (Date.now() > wanted.expiresAt) {
+        pendingDroppedMountPathRef.current = null;
+        return false;
+      }
+      if (!mountsList || mountsList.length === 0) return false;
+      const wantedNorm = normalizeMountCompare(wanted.path);
       const matched = mountsList.find(
         (m) => normalizeMountCompare(m.mount_root) === wantedNorm
       );
       if (!matched) return false;
       pendingDroppedMountPathRef.current = null;
+      ensureLocalSourceEnabled();
       setBrowserSearch('');
       setActiveMountRoot(matched.mount_root);
-      setLocalFolderPath('');
+      setPreviewFolderPath(null);
+      setLocalFolderPath(wanted.subpath || '');
+      setLeftMountDrillOpen(true);
       setLocalSubTab('folders');
       setBrowseHubTarget('mount');
       setRightPaneMode('browse');
-      focusRightPaneFirstTile();
+      setAllLocalTracksVersion((v) => v + 1);
+      focusLeftMountDrill();
       return true;
     },
     [
-      focusRightPaneFirstTile,
+      ensureLocalSourceEnabled,
+      focusLeftMountDrill,
       normalizeMountCompare,
       setBrowseHubTarget,
       setBrowserSearch,
@@ -1594,14 +1658,49 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
 
   useEffect(() => {
     const onOpenLocalMount = (ev: Event) => {
-      const path = (ev as CustomEvent<{ path?: string }>).detail?.path;
-      if (!path) return;
-      pendingDroppedMountPathRef.current = path;
-      tryOpenPendingDroppedMount(snap?.mounts);
+      const detail = (ev as CustomEvent<{ path?: string; subpath?: string }>).detail;
+      const rawPath = detail?.path?.trim();
+      if (!rawPath) return;
+      const cleanPath = rawPath.replace(/[\\/]+$/, '') || rawPath;
+      const subpath = detail?.subpath || '';
+      ensureLocalSourceEnabled();
+
+      const wantedNorm = normalizeMountCompare(cleanPath);
+      const existing = snap?.mounts.find(
+        (m) => normalizeMountCompare(m.mount_root) === wantedNorm
+      );
+      const targetRoot = existing ? existing.mount_root : cleanPath;
+
+      if (!existing) {
+        pendingDroppedMountPathRef.current = {
+          path: cleanPath,
+          subpath,
+          expiresAt: Date.now() + 180_000,
+        };
+      } else {
+        pendingDroppedMountPathRef.current = null;
+      }
+
+      setBrowserSearch('');
+      setActiveMountRoot(targetRoot);
+      setPreviewFolderPath(null);
+      setLocalFolderPath(subpath);
+      setLeftMountDrillOpen(true);
+      setLocalSubTab('folders');
+      setBrowseHubTarget('mount');
+      setRightPaneMode('browse');
+      focusLeftMountDrill();
     };
     window.addEventListener('simp-open-local-mount', onOpenLocalMount);
     return () => window.removeEventListener('simp-open-local-mount', onOpenLocalMount);
-  }, [snap?.mounts, tryOpenPendingDroppedMount]);
+  }, [
+    snap?.mounts,
+    ensureLocalSourceEnabled,
+    normalizeMountCompare,
+    setBrowseHubTarget,
+    setBrowserSearch,
+    focusLeftMountDrill,
+  ]);
 
   useEffect(() => {
     if (pendingDroppedMountPathRef.current && snap?.mounts) {
@@ -1696,7 +1795,6 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const activeMountPlaceObj = activeMountRoot
     ? snap?.mounts.find((m) => m.mount_root === activeMountRoot) || null
     : null;
-  const writablePlaylists = playlists.filter((p) => p.origin === 'simp_local');
 
   const searchLower = browserSearch.trim().toLowerCase();
 
@@ -1975,6 +2073,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     activeMountRoot: string | null;
     localSubTab: LocalSubTab;
     localFolderPath: string;
+    leftMountDrillOpen?: boolean;
     browserSearch: string;
     impFypActive?: boolean;
     activeArtistProfile?: typeof activeArtistProfile;
@@ -2011,6 +2110,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           activeMountRoot,
           localSubTab,
           localFolderPath,
+          leftMountDrillOpen,
           browserSearch,
           impFypActive,
           activeArtistProfile,
@@ -2029,6 +2129,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           last.activeMountRoot === next.activeMountRoot &&
           last.localSubTab === next.localSubTab &&
           last.localFolderPath === next.localFolderPath &&
+          Boolean(last.leftMountDrillOpen) === Boolean(next.leftMountDrillOpen) &&
           last.browserSearch === next.browserSearch &&
           last.impFypActive === next.impFypActive &&
           last.activeArtistProfile?.idOrName === next.activeArtistProfile?.idOrName &&
@@ -2058,6 +2159,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       activeMountRoot,
       localSubTab,
       localFolderPath,
+      leftMountDrillOpen,
       browserSearch,
       impFypActive,
       activeArtistProfile,
@@ -2065,6 +2167,9 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   );
 
   const handleWalkBack = useCallback(() => {
+    const focusedInLeft = Boolean(
+      document.querySelector('[data-nav-col="left"] [data-simp-active-focus="true"]')
+    );
     const exitedTileKey =
       rightPaneMode === 'artist' && activeArtistProfile
         ? `artist:${activeArtistProfile.source}:${activeArtistProfile.idOrName}`
@@ -2085,7 +2190,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           entry.browseHubTarget !== browseHubTarget ||
           entry.activeMountRoot !== activeMountRoot ||
           entry.localSubTab !== localSubTab ||
-          entry.localFolderPath !== localFolderPath;
+          entry.localFolderPath !== localFolderPath ||
+          Boolean(entry.leftMountDrillOpen) !== leftMountDrillOpen;
         if (differs) {
           targetIdx = i;
           break;
@@ -2098,16 +2204,24 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         setAppleSubTab(prev.appleSubTab);
         setSoundCloudSubTab(prev.soundCloudSubTab);
         setIaSubTab(prev.iaSubTab);
+        setPreviewFolderPath(null);
         setActiveMountRoot(prev.activeMountRoot);
         setLocalSubTab(prev.localSubTab);
         setLocalFolderPath(prev.localFolderPath);
+        setLeftMountDrillOpen(Boolean(prev.leftMountDrillOpen));
         setBrowserSearch(prev.browserSearch);
         setBrowseHubTarget(prev.browseHubTarget);
         setBrowserTarget(prev.browserTarget);
         setBrowserTracks(prev.browserTracks);
         setActiveArtistProfile(prev.activeArtistProfile || null);
         setRightPaneMode(prev.rightPaneMode);
-        if (prev.rightPaneMode === 'browse') {
+        if (focusedInLeft && prev.rightPaneMode === 'browse') {
+          focusLeftMountDrill(
+            prev.leftMountDrillOpen
+              ? undefined
+              : '[data-left-context-kind="mount"]'
+          );
+        } else if (prev.rightPaneMode === 'browse') {
           focusRightPaneFirstTile({
             tileKey: prev.returnTileKey || exitedTileKey,
             scrollTop: prev.scrollTop,
@@ -2132,14 +2246,23 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     if ((browseHubTarget === 'local_discover' || browseHubTarget === 'mount') && normFolder) {
       const parts = normFolder.split('/').filter(Boolean);
       parts.pop();
+      setPreviewFolderPath(null);
       setLocalFolderPath(parts.join('/'));
+      if (focusedInLeft && leftMountDrillOpen) {
+        focusLeftMountDrill();
+      }
       return;
     }
     if (activeMountRoot) {
+      setLeftMountDrillOpen(false);
+      setPreviewFolderPath(null);
       setActiveMountRoot(null);
       setLocalFolderPath('');
       setBrowseHubTarget('local_discover');
       setLocalSubTab('folders');
+      if (focusedInLeft) {
+        focusLeftMountDrill('[data-left-context-kind="mount"]');
+      }
       return;
     }
     if (browseHubTarget !== 'imp_fyp' && browseHubTarget !== 'imp_library') {
@@ -2155,6 +2278,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     activeMountRoot,
     localSubTab,
     localFolderPath,
+    leftMountDrillOpen,
     browseHubTarget,
     setBrowseHubTarget,
     setBrowserSourceFilter,
@@ -2166,6 +2290,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     setBrowserTarget,
     setBrowserTracks,
     setRightPaneMode,
+    focusLeftMountDrill,
     focusRightPaneFirstTile,
     focusRightPaneFirstTrack,
   ]);
@@ -2605,7 +2730,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${item.title}" (${tracksToPin.length} ${
             tracksToPin.length === 1 ? 'item' : 'items'
-          }) to SIMP`
+          }) to IMP`
         );
       } catch {
         showToast('Could not pin Internet Archive item');
@@ -2674,7 +2799,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           playlist: record,
           tracks: tracksToPin,
         });
-        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to SIMP`);
+        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to IMP`);
       } catch {
         showToast('Could not pin Internet Archive collection');
       } finally {
@@ -2757,20 +2882,6 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     : appleSubTab === 'radio'
     ? 'Radio'
     : 'Imp Library';
-
-  const cycleTargetHybridPlaylist = useCallback(() => {
-    if (writablePlaylists.length >= 2) {
-      const activeIdx = Math.max(
-        0,
-        writablePlaylists.findIndex((wp) => wp.id === activePlaylistId)
-      );
-      const nextWp = writablePlaylists[(activeIdx + 1) % writablePlaylists.length];
-      setActivePlaylistId(nextWp.id);
-    } else {
-      setPlaylistsOpen(true);
-      setCreatingPlaylist(true);
-    }
-  }, [writablePlaylists, activePlaylistId, setActivePlaylistId, setCreatingPlaylist]);
 
   const handleAddSimpPlaylistToHybrid = useCallback(
     async (pl: PlaylistRecord) => {
@@ -2855,10 +2966,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${cleanTitle}" (${items.length} ${
             items.length === 1 ? 'track' : 'tracks'
-          }) to SIMP Library`
+          }) to IMP Library`
         );
       } catch {
-        showToast('Could not pin local album to SIMP Library');
+        showToast('Could not pin local album to IMP Library');
       }
     },
     [playlists, handleDeletePlaylist, showToast]
@@ -3103,10 +3214,205 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           offset: 0,
         });
       }
+      if (target.kind === 'cdda') {
+        const disc = target.rawItem as OpticalDiscStatus | null;
+        return disc?.is_audio_cd && Array.isArray(disc.tracks) ? disc.tracks : [];
+      }
       return [];
     },
     [resolveDaemonUrl]
   );
+
+  const openOpticalDiscCollection = useCallback(() => {
+    if (opticalDisc?.is_audio_cd) {
+      selectLocalCollection({
+        kind: 'cdda',
+        id: opticalDisc.disc_id || opticalDisc.device_path || '/dev/sr0',
+        title: `💿 ${opticalDisc.album_title || 'Audio CD'}`,
+        subtitle: `${opticalDisc.artist_name || 'Unknown Artist'}${
+          opticalDisc.release_year ? ` • ${opticalDisc.release_year}` : ''
+        }${opticalDisc.disc_id ? ` • DiscID ${opticalDisc.disc_id.slice(0, 8)}…` : ''}`,
+        art_url: opticalDisc.art_url,
+      });
+      setBrowserTracks(opticalDisc.tracks);
+    } else if (opticalDisc?.is_dvd_video) {
+      selectLocalCollection({
+        kind: 'cdda',
+        id: opticalDisc.disc_id || opticalDisc.device_path || '/dev/sr0',
+        title: `📀 ${opticalDisc.album_title || 'DVD Video'}`,
+        subtitle: `${opticalDisc.artist_name || 'DVD-Video'}${
+          opticalDisc.release_year ? ` • ${opticalDisc.release_year}` : ''
+        }`,
+        art_url: opticalDisc.art_url,
+      });
+      setBrowserTracks([]);
+    }
+  }, [opticalDisc, selectLocalCollection, setBrowserTracks]);
+
+  const openLeftItemContextMenu = useCallback(
+    (kind: 'simp_album' | 'simp_playlist' | 'mount' | 'cdda', id?: string): boolean => {
+      if (kind === 'simp_album' && id) {
+        const alb = albums.find((a) => a.id === id) || mountAlbums.find((a) => a.id === id);
+        if (!alb) return false;
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'simp_album',
+          id: alb.id,
+          title: cleanCollectionTitle(alb.title),
+          subtitle: `${alb.album_artist} • ${alb.track_count} tracks`,
+          art_url: alb.art_url,
+          artistName: alb.album_artist,
+          source: alb.id.startsWith('applemusic:album:') ? 'apple_music' : 'local',
+          rawItem: alb,
+        });
+        return true;
+      }
+      if (kind === 'simp_playlist' && id) {
+        const pl = playlists.find((p) => p.id === id);
+        if (!pl) return false;
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'simp_playlist',
+          id: pl.id,
+          title: cleanCollectionTitle(pl.name),
+          subtitle: `${pl.track_count} tracks`,
+          art_url: pl.cover_art_url,
+          source:
+            pl.origin === 'apple_remote'
+              ? 'apple_music'
+              : pl.origin === 'soundcloud_remote'
+                ? 'soundcloud'
+                : pl.origin === 'archive_remote'
+                  ? 'internet_archive'
+                  : 'local',
+          rawItem: pl,
+        });
+        return true;
+      }
+      if (kind === 'mount' && id) {
+        const m = snap?.mounts.find((mnt) => mnt.mount_root === id);
+        if (!m) return false;
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'mount',
+          id: m.mount_root,
+          title: m.label,
+          subtitle: `${m.track_count} tracks`,
+          source: 'local',
+          rawItem: m,
+        });
+        return true;
+      }
+      if (kind === 'cdda') {
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'cdda',
+          id: opticalDisc?.disc_id || opticalDisc?.device_path || 'optical',
+          title: opticalDisc?.is_audio_cd
+            ? opticalDisc.album_title || 'Audio CD'
+            : opticalDisc?.is_dvd_video
+              ? opticalDisc.album_title || 'DVD Video'
+              : 'Optical Disc Drive',
+          subtitle: opticalDisc?.drive_present
+            ? opticalDisc.artist_name || 'Optical Drive'
+            : 'No disc detected',
+          art_url: opticalDisc?.art_url || null,
+          source: 'local',
+          rawItem: opticalDisc,
+        });
+        return true;
+      }
+      return false;
+    },
+    [albums, mountAlbums, playlists, snap?.mounts, opticalDisc, openLibraryContextMenu]
+  );
+
+  const openTracklistHeaderContextMenu = useCallback((): boolean => {
+    if (!browserTarget) return false;
+    if (browserTarget.kind === 'album') {
+      return openLeftItemContextMenu('simp_album', selectedAlbumObj?.id || browserTarget.id);
+    }
+    if (browserTarget.kind === 'playlist') {
+      return openLeftItemContextMenu('simp_playlist', selectedPlaylistObj?.id || browserTarget.id);
+    }
+    if (browserTarget.kind === 'mount') {
+      return openLeftItemContextMenu('mount', selectedMountObj?.mount_root || browserTarget.id);
+    }
+    if (browserTarget.kind === 'cdda') {
+      return openLeftItemContextMenu('cdda', browserTarget.id);
+    }
+    if (browserTarget.kind === 'cloud_playlist' && activeCloudPlaylist) {
+      openLibraryContextMenu({
+        type: 'collection',
+        kind: 'cloud_playlist',
+        id: activeCloudPlaylist.id,
+        title: activeCloudPlaylist.name,
+        subtitle: activeCloudPlaylist.description || 'Apple Music Playlist',
+        art_url: activeCloudPlaylist.art_url,
+        source: 'apple_music',
+        rawItem: activeCloudPlaylist,
+      });
+      return true;
+    }
+    if (browserTarget.kind === 'cloud_album' && activeCloudAlbum) {
+      openLibraryContextMenu({
+        type: 'collection',
+        kind: 'cloud_album',
+        id: activeCloudAlbum.id,
+        title: activeCloudAlbum.title,
+        subtitle: `${activeCloudAlbum.artist}${
+          activeCloudAlbum.release_year ? ` • ${activeCloudAlbum.release_year}` : ''
+        }`,
+        art_url: activeCloudAlbum.art_url,
+        artistName: activeCloudAlbum.artist,
+        source: 'apple_music',
+        rawItem: activeCloudAlbum,
+      });
+      return true;
+    }
+    if (browserTarget.kind === 'soundcloud_playlist' && activeScPlaylist) {
+      openLibraryContextMenu({
+        type: 'collection',
+        kind: 'sc_playlist',
+        id: activeScPlaylist.id,
+        title: activeScPlaylist.name,
+        subtitle: `${activeScPlaylist.track_count ? `${activeScPlaylist.track_count} tracks • ` : ''}${
+          activeScPlaylist.description || 'SoundCloud Set'
+        }`,
+        art_url: activeScPlaylist.art_url,
+        source: 'soundcloud',
+        rawItem: activeScPlaylist,
+      });
+      return true;
+    }
+    if (browserTarget.kind === 'ia_item' && activeIaDetail) {
+      const item = activeIaDetail.summary;
+      openLibraryContextMenu({
+        type: 'collection',
+        kind: 'ia_item',
+        id: item.identifier,
+        title: item.title,
+        subtitle: `${item.creator}${item.year ? ` • ${item.year}` : ''}`,
+        art_url: item.art_url,
+        artistName: item.creator,
+        source: 'internet_archive',
+        rawItem: item,
+      });
+      return true;
+    }
+    return false;
+  }, [
+    browserTarget,
+    openLeftItemContextMenu,
+    selectedAlbumObj,
+    selectedPlaylistObj,
+    selectedMountObj,
+    activeCloudPlaylist,
+    activeCloudAlbum,
+    activeScPlaylist,
+    activeIaDetail,
+    openLibraryContextMenu,
+  ]);
 
   // Listen for `SELECT` (Contextual Action Menu), `Y` (`filter`), and `X` (`toggle_collapse`) gamepad/keyboard actions
   useEffect(() => {
@@ -3184,11 +3490,26 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           closeLibraryContextMenu();
           return;
         }
-        // 1. Focused on (or inside) a single track row -> trigger contextmenu (or fallback to `[data-track-select="true"]`)
+        // 1a. Focused on (or inside) a single track row -> trigger contextmenu (or fallback to `[data-track-select="true"]`)
         let trackRow = focused?.closest<HTMLElement>(
           '[data-right-track="true"], [data-single-song-row="true"]'
         );
-        if (!trackRow && rightPaneMode === 'tracks' && !focused?.dataset.leftContextKind) {
+        // 1b. Tracklist Header / Context Legend Bar controls (`rightPaneMode === 'tracks'` and not on a row)
+        //     -> open Collection Actions for the viewed album, playlist, mount, or disc instead of Track #1.
+        if (
+          !trackRow &&
+          rightPaneMode === 'tracks' &&
+          focused?.closest('[data-nav-col="right"]') &&
+          openTracklistHeaderContextMenu()
+        ) {
+          return;
+        }
+        if (
+          !trackRow &&
+          rightPaneMode === 'tracks' &&
+          !focused?.dataset.leftContextKind &&
+          !focused?.closest('[data-nav-col="left"]')
+        ) {
           const fallbackRow =
             document.querySelector<HTMLElement>(
               '[data-nav-col="right"] [data-right-track="true"][data-track-playing="true"]'
@@ -3251,60 +3572,16 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           }
         }
 
-        // 3. Focused on a Left-Column album, playlist, or storage mount -> open contextual menu
-        const leftCtxKind = focused?.dataset.leftContextKind;
+        // 3. Focused on a Left-Column album, playlist, storage mount, or optical disc -> open contextual menu
+        const leftCtxKind = focused?.dataset.leftContextKind as
+          | 'simp_album'
+          | 'simp_playlist'
+          | 'mount'
+          | 'cdda'
+          | undefined;
         const leftCtxId = focused?.dataset.leftContextId;
-        if (leftCtxKind === 'simp_album' && leftCtxId) {
-          const alb = albums.find((a) => a.id === leftCtxId);
-          if (alb) {
-            openLibraryContextMenu({
-              type: 'collection',
-              kind: 'simp_album',
-              id: alb.id,
-              title: cleanCollectionTitle(alb.title),
-              subtitle: `${alb.album_artist} • ${alb.track_count} tracks`,
-              art_url: alb.art_url,
-              source: alb.id.startsWith('applemusic:album:') ? 'apple_music' : 'local',
-              rawItem: alb,
-            });
-            return;
-          }
-        } else if (leftCtxKind === 'simp_playlist' && leftCtxId) {
-          const pl = playlists.find((p) => p.id === leftCtxId);
-          if (pl) {
-            openLibraryContextMenu({
-              type: 'collection',
-              kind: 'simp_playlist',
-              id: pl.id,
-              title: cleanCollectionTitle(pl.name),
-              subtitle: `${pl.track_count} tracks`,
-              art_url: pl.cover_art_url,
-              source:
-                pl.origin === 'apple_remote'
-                  ? 'apple_music'
-                  : pl.origin === 'soundcloud_remote'
-                    ? 'soundcloud'
-                    : pl.origin === 'archive_remote'
-                      ? 'internet_archive'
-                      : 'local',
-              rawItem: pl,
-            });
-            return;
-          }
-        } else if (leftCtxKind === 'mount' && leftCtxId) {
-          const m = snap?.mounts.find((mnt) => mnt.mount_root === leftCtxId);
-          if (m) {
-            openLibraryContextMenu({
-              type: 'collection',
-              kind: 'mount',
-              id: m.mount_root,
-              title: m.label,
-              subtitle: `${m.track_count} tracks`,
-              source: 'local',
-              rawItem: m,
-            });
-            return;
-          }
+        if (leftCtxKind && openLeftItemContextMenu(leftCtxKind, leftCtxId)) {
+          return;
         }
 
         // 3b. Focused in the Right Pane (Section header/FYP button or top-level filter/hub controls) -> open Imp FYP / Collection Actions modal
@@ -3349,8 +3626,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           }
         }
 
-        // 5. Fallback: cycle active ★ SIMP Hybrid Playlist target
-        cycleTargetHybridPlaylist();
+        // 5. Fallback on non-collection controls (Search, filter pills, PLACES hubs): toggle PlayerSelectModal
+        window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
       }
     };
     window.addEventListener('simp-browser-gamepad-op', handler);
@@ -3363,7 +3640,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     snap?.mounts,
     applyFocusMarker,
     focusDefaultFilterOption,
-    cycleTargetHybridPlaylist,
+    openLeftItemContextMenu,
+    openTracklistHeaderContextMenu,
     rightPaneMode,
     libraryContextTarget,
     collectShelfActionsFromDom,
@@ -3707,7 +3985,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
                 ? 'Search SoundCloud Tracks, Sets & DJ Mixes...'
                 : browserSourceFilter === 'internet_archive'
                 ? 'Search Internet Archive Films, TV & Audio...'
-                : 'Search SIMP Library, Apple Music, SoundCloud & Archive...'
+                : 'Search IMP Library, Apple Music, SoundCloud & Archive...'
             }
             value={browserSearch}
             onChange={(e) => {
@@ -3861,7 +4139,6 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         cdScanning={cdScanning}
         browserTarget={browserTarget}
         selectLocalCollection={selectLocalCollection}
-        setBrowserTracks={setBrowserTracks}
         handleScanOpticalDisc={handleScanOpticalDisc}
         handleEjectOpticalDisc={handleEjectOpticalDisc}
         setSourceModalOpen={setSourceModalOpen}
@@ -3877,6 +4154,15 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         setImpFypActive={setImpFypActive}
         localSmartStations={localDiscover.smart_stations}
         onPlayLocalSmartStation={handlePlayLocalSmartStation}
+        openLeftItemContextMenu={openLeftItemContextMenu}
+        onOpenOpticalDisc={openOpticalDiscCollection}
+        localFolderPath={localFolderPath}
+        setPreviewFolderPath={setPreviewFolderPath}
+        leftMountDrillOpen={leftMountDrillOpen}
+        setLeftMountDrillOpen={setLeftMountDrillOpen}
+        allLocalTracks={allLocalTracks}
+        mountTracks={mountTracks}
+        focusLeftMountDrill={focusLeftMountDrill}
       />
 
       {/* =====================================================================
@@ -3990,8 +4276,11 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             setActiveMountRoot={setActiveMountRoot}
             localSubTab={localSubTab}
             setLocalSubTab={setLocalSubTab}
-            localFolderPath={localFolderPath}
-            setLocalFolderPath={setLocalFolderPath}
+            localFolderPath={previewFolderPath ?? localFolderPath}
+            setLocalFolderPath={(next) => {
+              setPreviewFolderPath(null);
+              setLocalFolderPath(next);
+            }}
             allLocalAlbums={allLocalAlbums}
             allLocalTracks={allLocalTracks}
             facetsSummary={localFacetsSummary}
@@ -4248,10 +4537,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           target={libraryContextTarget}
           onClose={closeLibraryContextMenu}
           favoritedUris={favoritedUris}
-          writablePlaylists={writablePlaylists}
-          activePlaylistId={activePlaylistId}
           cleanCollectionTitle={cleanCollectionTitle}
-          cycleTargetHybridPlaylist={cycleTargetHybridPlaylist}
           handlePlayTracksNext={handlePlayTracksNext}
           handleAddTracksToPlaylist={handleAddTracksToPlaylist}
           handleFavoriteTrack={handleFavoriteTrack}
@@ -4278,6 +4564,36 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           handleDeleteAlbum={handleDeleteAlbum}
           onPlayLocalSmartStation={handlePlayLocalSmartStation}
           handleStartAppleStation={handleStartAppleStation}
+          onOpenMount={(mountRoot) => {
+            setPreviewFolderPath(null);
+            setActiveMountRoot(mountRoot);
+            setLocalFolderPath('');
+            setLeftMountDrillOpen(true);
+            setLocalSubTab('folders');
+            setBrowseHubTarget('mount');
+            setRightPaneMode('browse');
+            focusLeftMountDrill();
+          }}
+          onRescanMount={(mountRoot, label) => {
+            defaultSimpClient.addLibraryPath(mountRoot);
+            showToast(`Rescanning folder: ${label}`);
+          }}
+          onRemoveMount={(mountRoot, label) => {
+            if (activeMountRoot === mountRoot) {
+              setLeftMountDrillOpen(false);
+              setPreviewFolderPath(null);
+              setActiveMountRoot(null);
+            }
+            if (handleRemoveFolder) {
+              handleRemoveFolder(mountRoot, label);
+            } else {
+              defaultSimpClient.removeLibraryPath(mountRoot);
+              showToast(`Removed mount: ${label}`);
+            }
+          }}
+          onOpenOpticalDisc={openOpticalDiscCollection}
+          onScanOpticalDisc={() => handleScanOpticalDisc(true, false)}
+          onEjectOpticalDisc={() => handleEjectOpticalDisc()}
         />
       )}
 

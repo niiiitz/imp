@@ -12,11 +12,14 @@ import {
 } from '@simp/client';
 import {
   loadEnabledVisualizerScenes,
+  loadVisualizerFpsCap,
   PlayerBackgroundVisualizer,
   saveEnabledVisualizerScenes,
+  saveVisualizerFpsCap,
   VISUALIZER_MODES,
   VISUALIZER_ENGINES,
   type VisualizerEngine,
+  type VisualizerFpsCap,
   type VisualizerMode,
 } from '../components/PlayerBackgroundVisualizer';
 import {
@@ -35,6 +38,11 @@ import {
   SoundCloudMixChapter,
 } from '../drivers/SoundCloudDriver';
 import { fetchTrackLyrics, type TrackLyricsResponse } from '../drivers/appleApi';
+import {
+  isAppFullscreenActive,
+  setAppFullscreen,
+  toggleAppFullscreen,
+} from '../api/servicesCacheApi';
 import { getSourceThemeForTrack, getSourceThemeCssVars } from '../theme/sourceTheme';
 import { PlayerUpNextStrip } from './player/PlayerUpNextStrip';
 import { PlayerSelectModal } from './player/PlayerSelectModal';
@@ -192,6 +200,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [enabledVizScenes, setEnabledVizScenes] = useState<VisualizerEngine[]>(() =>
     loadEnabledVisualizerScenes(),
   );
+  const [vizFpsCap, setVizFpsCap] = useState<VisualizerFpsCap>(() => loadVisualizerFpsCap());
+  const handleToggleVizFpsCap = useCallback(() => {
+    setVizFpsCap((prev) => {
+      const next: VisualizerFpsCap = prev === 60 ? 30 : 60;
+      saveVisualizerFpsCap(next);
+      return next;
+    });
+  }, []);
   const [activeVizEngine, setActiveVizEngine] = useState<VisualizerEngine>('glyph');
   const [vizDrawerOpen, setVizDrawerOpen] = useState<boolean>(false);
   const [equalizerOpen, setEqualizerOpen] = useState<boolean>(false);
@@ -398,21 +414,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     if (isVideoTrack) {
       setVideoTheatreExpanded((prev) => {
         const next = !prev;
-        if (next) {
-          if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen?.().catch(() => {});
-          }
-        } else if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
-        }
+        setAppFullscreen(next);
         return next;
       });
     } else {
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-      } else {
-        document.documentElement.requestFullscreen?.().catch(() => {});
-      }
+      toggleAppFullscreen();
     }
   }, [isVideoTrack]);
 
@@ -428,7 +434,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       togglePlayerFullscreen();
     };
     const onFullscreenChange = () => {
-      if (!document.fullscreenElement) {
+      if (!isAppFullscreenActive()) {
         setVideoTheatreExpanded(false);
       }
     };
@@ -442,12 +448,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     window.addEventListener('simp-equalizer-toggle', onToggleEqualizer);
     window.addEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
     window.addEventListener('simp-select-category-focus', onSelectCategoryFocus);
+    window.addEventListener('simp-fullscreen-change', onFullscreenChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       window.removeEventListener('simp-player-actions-toggle', onToggleActions);
       window.removeEventListener('simp-equalizer-toggle', onToggleEqualizer);
       window.removeEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
       window.removeEventListener('simp-select-category-focus', onSelectCategoryFocus);
+      window.removeEventListener('simp-fullscreen-change', onFullscreenChange);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
     };
   }, [togglePlayerFullscreen]);
@@ -514,8 +522,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         e.preventDefault();
         e.stopPropagation();
         setVideoTheatreExpanded(false);
-        if (document.fullscreenElement) {
-          document.exitFullscreen().catch(() => {});
+        if (isAppFullscreenActive()) {
+          setAppFullscreen(false);
         }
       }
     };
@@ -755,8 +763,8 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const toggleTheatreFullscreen = useCallback(() => {
     setVideoTheatreExpanded((prev) => {
       const next = !prev;
-      if (!next && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      if (!next && isAppFullscreenActive()) {
+        setAppFullscreen(false);
       }
       return next;
     });
@@ -1693,6 +1701,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
           <PlayerBackgroundVisualizer
             mode={effectiveVizMode}
             enabledScenes={enabledVizScenes}
+            fpsCap={vizFpsCap}
             preferredScene={
               (trackPropsState.preferred_viz_mode as VisualizerEngine | null | undefined) || null
             }
@@ -1963,8 +1972,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         vizMode={vizMode}
         activeEngine={activeVizEngine}
         enabledScenes={enabledVizScenes}
+        fpsCap={vizFpsCap}
         onSelectMode={handleSelectVizMode}
         onToggleSceneInRotation={handleToggleSceneInRotation}
+        onToggleFpsCap={handleToggleVizFpsCap}
         onSetAllScenesInRotation={handleSetAllScenesInRotation}
       />
 

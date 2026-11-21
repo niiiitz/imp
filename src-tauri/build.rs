@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    println!("cargo::rustc-check-cfg=cfg(has_embedded_webview2_loader)");
     println!("cargo:rerun-if-changed=../packaging/windows/simp.ico");
     println!("cargo:rerun-if-changed=../packaging/windows/simp.rc");
     println!("cargo:rerun-if-changed=../packaging/windows/simp.res");
@@ -94,6 +95,77 @@ fn main() {
 
         if let Some(artifact) = linked_artifact {
             println!("cargo:rustc-link-arg-bins={}", artifact.display());
+        }
+
+        // Locate WebView2Loader.dll from webview2-com-sys build output or Cargo registry cache
+        // and copy it into OUT_DIR for optional runtime embedding (without hard-linking the DLL
+        // into the PE import table).
+        let target_arch_dir = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+            Ok("x86_64") => Some("x64"),
+            Ok("aarch64") => Some("arm64"),
+            Ok("x86") => Some("x86"),
+            _ => None,
+        };
+        if let Some(arch_dir) = target_arch_dir {
+            let mut found_loader: Option<PathBuf> = None;
+
+            // Candidate 1: sibling Cargo build dirs `<out_dir>/../../webview2-com-sys-*/out/<arch>/WebView2Loader.dll`
+            if let Some(build_root) = out_dir.parent().and_then(|p| p.parent()) {
+                if let Ok(entries) = std::fs::read_dir(build_root) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name();
+                        if name.to_string_lossy().starts_with("webview2-com-sys-") {
+                            let cand = entry
+                                .path()
+                                .join("out")
+                                .join(arch_dir)
+                                .join("WebView2Loader.dll");
+                            if cand.is_file() {
+                                found_loader = Some(cand);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Candidate 2: `${CARGO_HOME:-$HOME/.cargo}/registry/src/*/webview2-com-sys-*/<arch>/WebView2Loader.dll`
+            if found_loader.is_none() {
+                let cargo_home = std::env::var_os("CARGO_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo"))
+                    });
+                if let Some(registry_src) = cargo_home.map(|c| c.join("registry").join("src")) {
+                    if let Ok(indices) = std::fs::read_dir(&registry_src) {
+                        'outer: for idx_entry in indices.flatten() {
+                            if let Ok(crates) = std::fs::read_dir(idx_entry.path()) {
+                                for crate_entry in crates.flatten() {
+                                    let cname = crate_entry.file_name();
+                                    if cname.to_string_lossy().starts_with("webview2-com-sys-") {
+                                        let cand = crate_entry
+                                            .path()
+                                            .join(arch_dir)
+                                            .join("WebView2Loader.dll");
+                                        if cand.is_file() {
+                                            found_loader = Some(cand);
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(src_dll) = found_loader {
+                let dest_dll = out_dir.join("WebView2Loader.dll");
+                if std::fs::copy(&src_dll, &dest_dll).is_ok() {
+                    println!("cargo:rerun-if-changed={}", src_dll.display());
+                    println!("cargo:rustc-cfg=has_embedded_webview2_loader");
+                }
+            }
         }
     }
 }

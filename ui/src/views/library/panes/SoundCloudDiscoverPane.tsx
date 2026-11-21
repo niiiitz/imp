@@ -400,7 +400,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                       recentlyPlayed.some((t) => t.source === 'soundcloud') && (
                         <>
                           <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🕒 LISTENING HISTORY IN SIMP (
+                            🕒 LISTENING HISTORY IN IMP (
                             {recentlyPlayed.filter((t) => t.source === 'soundcloud').length})
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

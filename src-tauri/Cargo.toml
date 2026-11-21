@@ -1,21 +1,21 @@
 [package]
-name = "simp"
+name = "imp"
 version.workspace = true
 edition.workspace = true
-default-run = "simp"
+default-run = "imp"
 
 [lib]
-name = "simp_ui_lib"
+name = "imp_ui_lib"
 path = "src/lib.rs"
 
 [[bin]]
-name = "simp"
+name = "imp"
 path = "src/main.rs"
 
 [dependencies]
-simp-protocol = { path = "../crates/simp-protocol" }
-simp-core = { path = "../crates/simp-core" }
-simp-daemon = { path = "../crates/simp-daemon" }
+imp-protocol = { path = "../crates/imp-protocol" }
+imp-core = { path = "../crates/imp-core" }
+imp-daemon = { path = "../crates/imp-daemon" }
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -30,5 +30,19 @@ core-foundation.workspace = true
 core-graphics.workspace = true
 block.workspace = true
 dispatch.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.29.0"
+windows = { version = "0.54.0", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_HiDpi",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 

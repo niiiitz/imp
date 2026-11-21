@@ -1,7 +1,7 @@
 "AppBuild"
 {
 	"AppID" "0" // Replace with assigned Steamworks AppID in production Partner portal
-	"Desc" "IMP — Interactive Media Player (SIMP) Multi-Platform Release"
+	"Desc" "IMP — Interactive Media Player Multi-Platform Release"
 	"BuildOutput" "../../dist/steampipe_output"
 	"ContentRoot" "../../dist"
 	"SetLive" "default"

@@ -1,0 +1,58 @@
+[package]
+name = "imp-core"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["experimental-dvd"]
+experimental-dvd = []
+
+[dependencies]
+imp-protocol = { path = "../imp-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+dirs.workspace = true
+keyvalues-parser.workspace = true
+keyvalues-serde.workspace = true
+rusqlite.workspace = true
+walkdir.workspace = true
+lofty.workspace = true
+blake3.workspace = true
+rusty-chromaprint.workspace = true
+rodio.workspace = true
+symphonia.workspace = true
+souvlaki.workspace = true
+moka.workspace = true
+base64.workspace = true
+libc.workspace = true
+sha1.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus.workspace = true
+dbus-crossroads.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc.workspace = true
+cocoa.workspace = true
+core-foundation.workspace = true
+core-graphics.workspace = true
+block.workspace = true
+dispatch.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.54.0", default-features = false, features = [
+  "Win32_Foundation",
+  "Win32_Media_Audio",
+  "Win32_System_Com",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+  "Win32_UI_Shell_PropertiesSystem",
+  "Win32_Devices_FunctionDiscovery",
+] }
+
+

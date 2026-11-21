@@ -2,12 +2,14 @@
 set -euo pipefail
 
 # ==============================================================================
-# SIMP — Reliable GitHub Release Publisher (IPv4 + HTTP/1.1 Sequential Uploader)
+# IMP — Reliable GitHub Release Publisher (IPv4 + HTTP/1.1 Sequential Uploader)
 # Avoids `gh release upload` Go HTTP/2 + IPv6 `HTTP 408` upload stalls and
-# ensures every release is published as `Latest` (`prerelease: false`).
+# splits GitHub flags cleanly by tag:
+#   - Stable tags (e.g., v0.8.2, v0.9.0)          -> prerelease=false, make_latest="true"
+#   - Alpha/beta/rc tags (e.g., v0.9.0-alpha.1)   -> prerelease=true,  make_latest="false"
 #
 # Usage:
-#   ./packaging/scripts/publish-github-release.sh v0.1.0-alpha.41 [notes_file]
+#   ./packaging/scripts/publish-github-release.sh v0.9.0-alpha.1 [notes_file]
 # ==============================================================================
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,34 +20,67 @@ TAG="${1:-}"
 NOTES_FILE="${2:-}"
 
 if [[ -z "${TAG}" ]]; then
-  echo "Usage: $0 <vX.Y.Z-alpha.N> [notes_file]" >&2
+  echo "Usage: $0 <vX.Y.Z[-alpha.N]> [notes_file]" >&2
   exit 1
 fi
 
 TAG="v${TAG#v}"
 VERSION="${TAG#v}"
 
-if [[ "${SIMP_SKIP_BUILD:-0}" != "1" ]]; then
-  SIMP_TARGET_ARCH=x86_64 ./packaging/scripts/package-release.sh "${VERSION}"
-  SIMP_TARGET_ARCH=aarch64 SIMP_SKIP_UI_BUILD=1 SIMP_SKIP_DECKY_BUILD=1 ./packaging/scripts/package-release.sh "${VERSION}"
-  # Keep the generic `simp-steamos-userland.tar.gz` pointed at the x86_64 archive
-  cp -f "dist/simp-steamos-userland-x86_64.tar.gz" "dist/simp-steamos-userland.tar.gz"
-  SIMP_SKIP_UI_BUILD=1 ./packaging/scripts/package-windows.sh "${VERSION}"
+SKIP_BUILD_FLAG="${IMP_SKIP_BUILD:-${SIMP_SKIP_BUILD:-0}}"
+if [[ "${SKIP_BUILD_FLAG}" != "1" ]]; then
+  IMP_TARGET_ARCH=x86_64 ./packaging/scripts/package-release.sh "${VERSION}"
+  IMP_TARGET_ARCH=aarch64 IMP_SKIP_UI_BUILD=1 IMP_SKIP_DECKY_BUILD=1 ./packaging/scripts/package-release.sh "${VERSION}"
+  # Keep the generic `imp-steamos-userland.tar.gz` pointed at the x86_64 archive
+  cp -f "dist/imp-steamos-userland-x86_64.tar.gz" "dist/imp-steamos-userland.tar.gz"
+  IMP_SKIP_UI_BUILD=1 ./packaging/scripts/package-windows.sh "${VERSION}"
   if [[ "$(uname -s)" == "Darwin" ]]; then
     ./packaging/scripts/package-macos.sh "${VERSION}"
   fi
 fi
 
+# Generate legacy `simp-*` transition bridge archives so v0.8.x installs on the alpha
+# channel can self-update cleanly to v0.9.0-alpha.1+ (`simp.exe` / `bin/simp`).
+if [[ -d "dist/imp-windows-portable" && -f "dist/imp-windows-portable/Imp.exe" ]]; then
+  rm -rf "dist/simp-windows-portable" "dist/simp-windows-portable-x86_64.zip"
+  cp -a "dist/imp-windows-portable" "dist/simp-windows-portable"
+  mv -f "dist/simp-windows-portable/Imp.exe" "dist/simp-windows-portable/simp.exe"
+  (cd "dist" && python3 -m zipfile -c "${REPO_ROOT}/dist/simp-windows-portable-x86_64.zip" simp-windows-portable)
+  rm -rf "dist/simp-windows-portable"
+fi
+
+for ARCH_BRIDGE in x86_64 aarch64; do
+  IMP_TAR="dist/imp-steamos-userland-${ARCH_BRIDGE}.tar.gz"
+  SIMP_TAR="dist/simp-steamos-userland-${ARCH_BRIDGE}.tar.gz"
+  if [[ -f "${IMP_TAR}" ]]; then
+    BRIDGE_TMP="$(mktemp -d)"
+    tar -xzf "${IMP_TAR}" -C "${BRIDGE_TMP}"
+    if [[ -d "${BRIDGE_TMP}/imp-steamos-userland" ]]; then
+      mv "${BRIDGE_TMP}/imp-steamos-userland" "${BRIDGE_TMP}/simp-steamos-userland"
+      if [[ -f "${BRIDGE_TMP}/simp-steamos-userland/bin/imp" ]]; then
+        cp -f "${BRIDGE_TMP}/simp-steamos-userland/bin/imp" "${BRIDGE_TMP}/simp-steamos-userland/bin/simp"
+        chmod +x "${BRIDGE_TMP}/simp-steamos-userland/bin/simp"
+      fi
+      if [[ -d "${BRIDGE_TMP}/simp-steamos-userland/imp-decky" ]]; then
+        mv "${BRIDGE_TMP}/simp-steamos-userland/imp-decky" "${BRIDGE_TMP}/simp-steamos-userland/simp-decky"
+      fi
+      tar --no-xattrs -C "${BRIDGE_TMP}" -czf "${SIMP_TAR}" "simp-steamos-userland"
+    fi
+    rm -rf "${BRIDGE_TMP}"
+  fi
+done
+
 python3 - "${TAG}" "${NOTES_FILE}" <<'PY'
 import json
 import os
+import re
 import subprocess
 import sys
 
 tag = sys.argv[1]
 notes_file = sys.argv[2] if len(sys.argv) > 2 else ""
 
-notes = f"SIMP {tag}"
+notes = f"IMP {tag}"
 if notes_file and os.path.isfile(notes_file):
     with open(notes_file, "r", encoding="utf-8") as f:
         notes = f.read()
@@ -76,7 +111,7 @@ if not token:
     print("❌ ERROR: Could not resolve GitHub token from gh auth token or .env", file=sys.stderr)
     sys.exit(1)
 
-repo = "niiiitz/simp"
+repo = "niiiitz/imp"
 
 def api_call(method, url, payload=None):
     cmd = [
@@ -111,30 +146,35 @@ try:
     ).strip()
 except Exception:
     cur_branch = ""
-target_commitish = os.environ.get("SIMP_TARGET_COMMITISH", "").strip() or (
+target_commitish = os.environ.get("IMP_TARGET_COMMITISH", os.environ.get("SIMP_TARGET_COMMITISH", "")).strip() or (
     cur_branch if cur_branch and cur_branch != "HEAD" else "main"
 )
+
+is_prerelease = bool(re.search(r"-(?:alpha|beta|rc)\b", tag, re.IGNORECASE))
+force_latest = os.environ.get("IMP_FORCE_LATEST", os.environ.get("SIMP_FORCE_LATEST", "0")) == "1"
+make_latest_val = "true" if (force_latest or not is_prerelease) else "false"
+channel_desc = "Pre-release (Alpha channel)" if is_prerelease else "Latest Stable"
 
 rel_payload = {
     "tag_name": tag,
     "target_commitish": target_commitish,
-    "name": f"SIMP {tag}",
+    "name": f"IMP {tag}",
     "body": rel_body,
     "draft": False,
-    "prerelease": False,
-    "make_latest": "true",
+    "prerelease": is_prerelease,
+    "make_latest": make_latest_val,
 }
 
 if "id" in rel:
     rel_id = rel["id"]
-    print(f"Updating existing release {tag} (ID {rel_id}, Latest)...")
+    print(f"Updating existing release {tag} (ID {rel_id}, {channel_desc})...")
     rel = api_call(
         "PATCH",
         f"https://api.github.com/repos/{repo}/releases/{rel_id}",
         rel_payload,
     )
 else:
-    print(f"Creating release {tag} (Latest)...")
+    print(f"Creating release {tag} ({channel_desc})...")
     rel = api_call(
         "POST",
         f"https://api.github.com/repos/{repo}/releases",
@@ -145,13 +185,16 @@ else:
 existing_assets = {a["name"]: a["id"] for a in rel.get("assets", [])}
 
 assets = [
+    ("dist/imp-steamos-userland-aarch64.tar.gz", "application/gzip"),
+    ("dist/imp-steamos-userland-x86_64.tar.gz", "application/gzip"),
+    ("dist/imp-steamos-userland.tar.gz", "application/gzip"),
+    ("dist/imp-decky.zip", "application/zip"),
+    ("dist/imp-windows-portable-x86_64.zip", "application/zip"),
     ("dist/simp-steamos-userland-aarch64.tar.gz", "application/gzip"),
     ("dist/simp-steamos-userland-x86_64.tar.gz", "application/gzip"),
-    ("dist/simp-steamos-userland.tar.gz", "application/gzip"),
-    ("dist/simp-decky.zip", "application/zip"),
     ("dist/simp-windows-portable-x86_64.zip", "application/zip"),
-    ("dist/SIMP-macos-arm64.zip", "application/zip"),
-    ("dist/SIMP-macos-x86_64.zip", "application/zip"),
+    ("dist/IMP-macos-arm64.zip", "application/zip"),
+    ("dist/IMP-macos-x86_64.zip", "application/zip"),
 ]
 
 for path, ctype in assets:

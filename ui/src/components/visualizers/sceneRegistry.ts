@@ -14,6 +14,8 @@ export type VisualizerEngine =
 
 export type VisualizerMode = VisualizerEngine | 'cycle' | 'shuffle' | 'off';
 
+export type VisualizerFpsCap = 60 | 30;
+
 export type VisualizerCohort = 'original' | 'wave2';
 
 export type SafeAnchorPosition =
@@ -167,13 +169,13 @@ export const VISUALIZER_SCENES: VisualizerSceneDescriptor[] = [
     id: 'sanctum_odyssey',
     label: '16-Bit Dark Fantasy',
     shortLabel: 'SANCTUM 3D',
-    subtitle: 'Clockwork stained glass, 3D coffin & skiff',
-    eraBadge: 'PS1 • SANCTUM',
+    subtitle: 'Cathedral boss duel, 3D coffin, pipe organ & sub-weapons',
+    eraBadge: '16-BIT • 720P',
     transitionLabel: '16-Bit RPG Battle Swirl',
     cohort: 'wave2',
     safeZones: {
       lyricAnchor: 'bottom-center',
-      commentAnchor: 'top-right',
+      commentAnchor: 'top-left',
       factoidAnchor: 'top-left',
       chyronAnchor: 'bottom-left',
       allowsTickerText: false,
@@ -269,6 +271,26 @@ export const VISUALIZER_MODES: { id: VisualizerMode; label: string; shortLabel: 
 ];
 
 const ENABLED_SCENES_STORAGE_KEY = 'simp_viz_enabled_scenes_v4';
+const VIZ_FPS_CAP_STORAGE_KEY = 'imp_viz_fps_cap_v1';
+
+export function loadVisualizerFpsCap(): VisualizerFpsCap {
+  try {
+    const raw = window.localStorage.getItem(VIZ_FPS_CAP_STORAGE_KEY);
+    if (raw === '30') return 30;
+    if (raw === '60') return 60;
+  } catch {
+    // ignore storage errors
+  }
+  return 60;
+}
+
+export function saveVisualizerFpsCap(fpsCap: VisualizerFpsCap): void {
+  try {
+    window.localStorage.setItem(VIZ_FPS_CAP_STORAGE_KEY, String(fpsCap));
+  } catch {
+    // ignore storage errors
+  }
+}
 
 export function loadEnabledVisualizerScenes(): VisualizerEngine[] {
   try {

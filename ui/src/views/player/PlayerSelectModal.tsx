@@ -15,6 +15,9 @@ import { type FactoidBubbleItem } from '../../components/visualizers/VisualizerO
 import { type DspConfigState } from '../../components/EqualizerModal';
 import {
   likeSoundCloudTrack,
+  matchTrackOnSoundCloud,
+  openSoundCloudPermalink,
+  type SoundCloudTrackMatch,
   toggleFollowSoundCloudUser,
 } from '../../drivers/SoundCloudDriver';
 import { type TrackLyricsResponse } from '../../drivers/appleApi';
@@ -193,6 +196,16 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
   activeSubtitle,
   videoSubtitles,
 }) => {
+  const [scCrossMatch, setScCrossMatch] = React.useState<SoundCloudTrackMatch | null>(null);
+  const [scCrossMatchLoading, setScCrossMatchLoading] = React.useState(false);
+  const [scCrossMatchCheckedUri, setScCrossMatchCheckedUri] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setScCrossMatch(null);
+    setScCrossMatchLoading(false);
+    setScCrossMatchCheckedUri(null);
+  }, [track?.uri]);
+
   return (
     <>
       {playerActionsOpen && (
@@ -547,7 +560,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                 ★ + Hybrid Playlist
                               </span>
                               <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
-                                Add track to SIMP Hybrid or Online Playlist
+                                Add track to IMP Hybrid or Online Playlist
                               </span>
                             </div>
                             <span
@@ -727,6 +740,85 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               }}
                             >
                               {scCreatorFollowed ? 'FOLLOWING' : '+ FOLLOW'}
+                            </span>
+                          </button>
+                        )}
+
+                        {/* 6b. Opt-In Cross-Source SoundCloud Community Attribution */}
+                        {!isSoundCloudTrack && !isVideoTrack && Boolean(track?.title) && (
+                          <button
+                            type="button"
+                            disabled={scCrossMatchLoading}
+                            onClick={() => {
+                              if (!track) return;
+                              if (scCrossMatch && scCrossMatchCheckedUri === track.uri) {
+                                openSoundCloudPermalink({
+                                  permalinkUrl: scCrossMatch.permalink_url,
+                                  kind: 'track',
+                                  id: scCrossMatch.id,
+                                });
+                                return;
+                              }
+                              setScCrossMatchLoading(true);
+                              matchTrackOnSoundCloud(
+                                track.title,
+                                primaryArtist,
+                                track.duration_ms
+                              )
+                                .then((matched) => {
+                                  setScCrossMatchCheckedUri(track.uri);
+                                  setScCrossMatch(matched);
+                                  if (matched) {
+                                    showToast?.('Opening timed comments on SoundCloud...');
+                                    openSoundCloudPermalink({
+                                      permalinkUrl: matched.permalink_url,
+                                      kind: 'track',
+                                      id: matched.id,
+                                    });
+                                  } else {
+                                    showToast?.('No confident SoundCloud match found for this track');
+                                  }
+                                })
+                                .catch((err: any) => {
+                                  showToast?.(
+                                    err?.message || 'Unable to look up track on SoundCloud'
+                                  );
+                                })
+                                .finally(() => {
+                                  setScCrossMatchLoading(false);
+                                });
+                            }}
+                            style={{
+                              ...actionRowBtnStyle,
+                              minHeight: 46,
+                              padding: '8px 12px',
+                              background: scCrossMatch ? '#1f120b' : '#101018',
+                              border: scCrossMatch
+                                ? '1px solid #ea580c'
+                                : '1px solid #222230',
+                              opacity: scCrossMatchLoading ? 0.72 : 1,
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                              <span style={{ fontSize: 12.5, fontWeight: 800, color: '#fdba74' }}>
+                                {scCrossMatchLoading
+                                  ? '🔍 Searching SoundCloud...'
+                                  : scCrossMatch && scCrossMatchCheckedUri === track?.uri
+                                    ? '💬 View Timed Comments on SoundCloud ↗'
+                                    : '💬 Find Timed Comments on SoundCloud'}
+                              </span>
+                              <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
+                                {scCrossMatch && scCrossMatchCheckedUri === track?.uri
+                                  ? `${scCrossMatch.comment_count} comments • @${scCrossMatch.artist}`
+                                  : scCrossMatchCheckedUri === track?.uri
+                                    ? 'No confident match found — tap to retry'
+                                    : 'Opt-in lookup via official SoundCloud API'}
+                              </span>
+                            </div>
+                            <span
+                              style={{ fontFamily: 'monospace', fontSize: 11, color: '#fdba74' }}
+                            >
+                              {scCrossMatch && scCrossMatchCheckedUri === track?.uri ? '↗' : '→'}
                             </span>
                           </button>
                         )}
@@ -948,6 +1040,19 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       boxSizing: 'border-box',
                     }}
                   >
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 800,
+                        fontFamily: 'monospace',
+                        letterSpacing: 1,
+                        textTransform: 'uppercase',
+                        color: '#64748b',
+                        padding: '2px 4px 0',
+                      }}
+                    >
+                      Stage &amp; Display
+                    </div>
                     {/* 1. Desktop Mode & Idle Visualizer Screensaver (Hidden inside Decky plugin iframe) */}
                     {!isDeckyEmbedded && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1120,6 +1225,21 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
 
                     {/* 2a. 10-Band Audio Equalizer & Vocal Stage Drawer */}
                     {!isVideoTrack && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1,
+                          textTransform: 'uppercase',
+                          color: '#64748b',
+                          padding: '6px 4px 0',
+                        }}
+                      >
+                        Audio &amp; Karaoke
+                      </div>
+                    )}
+                    {!isVideoTrack && (
                       <button
                         type="button"
                         data-equalizer-trigger="true"
@@ -1244,6 +1364,21 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     )}
 
                     {/* 2b. Karaoke / Foreground Synced Lyrics Overlay (LRCLIB v1/v2 + Local .lrc) */}
+                    {!isVideoTrack && (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          fontFamily: 'monospace',
+                          letterSpacing: 1,
+                          textTransform: 'uppercase',
+                          color: '#64748b',
+                          padding: '6px 4px 0',
+                        }}
+                      >
+                        Overlays &amp; HUD
+                      </div>
+                    )}
                     {!isVideoTrack && (
                       <button
                         type="button"
