@@ -2,7 +2,12 @@ import React from 'react';
 import { AlbumRecord, PlaylistRecord } from '@simp/client';
 import { BrowserTarget } from '../../PlayerView';
 import { LibraryContextTarget } from '../../LibraryBrowserView';
-import { cleanCollectionTitle, formatPlaylistSourceBadge } from '../libraryHelpers';
+import {
+  cleanCollectionTitle,
+  extractAlbumFormatBadge,
+  formatPlaylistSourceBadge,
+  stripAlbumFormatSuffix,
+} from '../libraryHelpers';
 import { ContentRatingBadge } from '../ContentRatingBadge';
 import { ResilientTileArtwork } from '../ResilientTileArtwork';
 import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
@@ -326,9 +331,7 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
           title: cleanTitle,
           subtitle: `${alb.album_artist} • ${alb.track_count} tracks`,
           art_url: alb.art_url,
-          artistName: alb.album_artist
-            .replace(/\s*•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i, '')
-            .trim(),
+          artistName: stripAlbumFormatSuffix(alb.album_artist),
           source: isAppleAlbum ? 'apple_music' : 'local',
           rawItem: alb,
         });
@@ -397,10 +400,8 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
               <AppleMusicLogo size={12} />
             ) : (
               (() => {
-                const fmtMatch = alb.album_artist.match(
-                  /•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i
-                );
-                return fmtMatch ? `💾 ${fmtMatch[1].toUpperCase()}` : '💾';
+                const badge = extractAlbumFormatBadge(alb.album_artist);
+                return badge ? `💾 ${badge}` : '💾';
               })()
             )}
           </span>

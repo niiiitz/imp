@@ -107,6 +107,34 @@ pub async fn run_daemon() -> anyhow::Result<()> {
         let _ = cmd_tx.send(AudioCommand::RescanStorage);
     }
 
+    // Drain any offline path refreshes queued by external curating tools (`imp-librarian`)
+    {
+        let drain_db = db.clone();
+        let drain_bcast = broadcast_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            let queue_path = imp_core::library::indexer::pending_refresh_queue_path();
+            match imp_core::library::indexer::drain_pending_refresh_queue(&drain_db, &queue_path) {
+                Ok(refreshed) if refreshed > 0 => {
+                    tracing::info!(
+                        "Drained {} pending local path update(s) from {}",
+                        refreshed,
+                        queue_path.display()
+                    );
+                    if let Ok((total_albums, total_tracks)) = drain_db.get_library_counts() {
+                        let _ = drain_bcast.send(PlaybackEvent::LibraryUpdated {
+                            total_albums,
+                            total_tracks,
+                        });
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("Failed to drain {}: {e}", queue_path.display());
+                }
+            }
+        });
+    }
+
     // 3. Run the local loopback WebSocket + Artwork HTTP server on 127.0.0.1:18888
     let ipc_state = DaemonIpcState {
         db,

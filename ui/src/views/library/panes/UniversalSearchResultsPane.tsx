@@ -19,6 +19,7 @@ import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { isUiVideoTrack } from "../../PlayerView";
 import {
+  stripAlbumFormatSuffix,
   tileGridStyle,
 } from "../libraryHelpers";
 
@@ -151,9 +152,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                       if (mediaTypeFilter !== 'video') {
                         for (const alb of filteredAlbums) {
                           if (alb.id.startsWith('applemusic:album:')) continue;
-                          const cleanArtName = alb.album_artist
-                            .replace(/\s*•\s*(FLAC(?:\s*\+\s*MP3)?|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i, '')
-                            .trim();
+                          const cleanArtName = stripAlbumFormatSuffix(alb.album_artist);
                           if (
                             cleanArtName &&
                             cleanArtName.toLowerCase().includes(searchLower)

@@ -402,7 +402,7 @@ fi
 codesign --verify --deep --strict "${APP_BUNDLE}"
 ditto -c -k --keepParent "${APP_BUNDLE}" "${ZIP_ARCHIVE}"
 
-if [[ -n "${APPLE_NOTARIZE_PROFILE:-}" && "${SIGN_IDENTITY}" != "-" ]]; then
+if [[ "${MACOS_SKIP_NOTARIZE:-0}" != "1" && -n "${APPLE_NOTARIZE_PROFILE:-}" && "${SIGN_IDENTITY}" != "-" ]]; then
   echo "   • Submitting ${ZIP_ARCHIVE} to Apple Notary Service (profile: ${APPLE_NOTARIZE_PROFILE})..."
   xcrun notarytool submit "${ZIP_ARCHIVE}" \
     --keychain-profile "${APPLE_NOTARIZE_PROFILE}" \
@@ -413,6 +413,8 @@ if [[ -n "${APPLE_NOTARIZE_PROFILE:-}" && "${SIGN_IDENTITY}" != "-" ]]; then
   rm -f "${ZIP_ARCHIVE}"
   ditto -c -k --keepParent "${APP_BUNDLE}" "${ZIP_ARCHIVE}"
   echo "   • Repacked notarized + stapled ${ZIP_ARCHIVE}"
+elif [[ "${MACOS_SKIP_NOTARIZE:-0}" == "1" ]]; then
+  echo "   • Skipping Apple Notary Service submission (MACOS_SKIP_NOTARIZE=1)"
 fi
 
 echo "============================================================"

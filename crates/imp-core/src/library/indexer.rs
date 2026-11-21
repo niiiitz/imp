@@ -8,7 +8,7 @@ use crate::library::mounts::discover_removable_mounts;
 use crate::library::vdf::{discover_steam_music_directories, normalize_platform_path};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
-use lofty::tag::Accessor;
+use lofty::tag::{Accessor, ItemKey, Tag};
 use imp_protocol::{SimpSettings, TrackMetadata};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -319,6 +319,34 @@ fn clean_tag_genre(raw: Option<&str>) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Extracts a 4-digit release year `(1000..=2100)` from `tag.year()` or fallback ISO date strings
+/// such as MP4 `©day` / ID3 `TDRC` (`"2012-06-12T07:00:00Z"`).
+pub fn extract_tag_year(tag: &Tag) -> Option<u32> {
+    if let Some(y) = tag.year().filter(|y| (1000..=2100).contains(y)) {
+        return Some(y);
+    }
+    for key in [
+        ItemKey::RecordingDate,
+        ItemKey::ReleaseDate,
+        ItemKey::OriginalReleaseDate,
+        ItemKey::Year,
+    ] {
+        if let Some(raw) = tag.get_string(&key) {
+            let trimmed = raw.trim();
+            if let Some(prefix) = trimmed.get(..4) {
+                if prefix.bytes().all(|b| b.is_ascii_digit()) {
+                    if let Ok(parsed) = prefix.parse::<u32>() {
+                        if (1000..=2100).contains(&parsed) {
+                            return Some(parsed);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn probe_audio_genre_and_year(path: &Path) -> (Option<String>, Option<i32>) {
     let parse_opts = lofty::config::ParseOptions::new()
         .read_properties(false)
@@ -331,10 +359,7 @@ fn probe_audio_genre_and_year(path: &Path) -> (Option<String>, Option<i32>) {
     };
     if let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) {
         let genre = tag.genre().as_deref().and_then(|g| clean_tag_genre(Some(g)));
-        let year = tag
-            .year()
-            .map(|y| y as i32)
-            .filter(|y| (1000..=2100).contains(y));
+        let year = extract_tag_year(tag).map(|y| y as i32);
         return (genre, year);
     }
     (None, None)
@@ -740,10 +765,7 @@ fn parse_audio_file_detached(
                     track_number = tag.track();
                 }
                 disc_number = tag.disk().or(Some(1));
-                year = tag
-                    .year()
-                    .map(|y| y as i32)
-                    .filter(|y| (1000..=2100).contains(y));
+                year = extract_tag_year(tag).map(|y| y as i32);
                 genre = tag.genre().as_deref().and_then(|g| clean_tag_genre(Some(g)));
                 if let Some(adv) = tag.get_string(&lofty::tag::ItemKey::ParentalAdvisory) {
                     let norm = adv.trim().to_ascii_lowercase();
@@ -853,9 +875,246 @@ pub fn parse_stem_metadata(stem: &str) -> (Option<u32>, Option<String>, String) 
     (None, None, stem.to_string())
 }
 
+/// Incrementally refreshes moved, renamed, or re-tagged local audio paths in `library.db`
+/// and prunes any empty local album rows without rescanning an entire network mount.
+pub fn refresh_local_paths_in_db(
+    db: &LibraryDatabase,
+    old_paths: &[PathBuf],
+    new_paths: &[PathBuf],
+    fallback_root: &Path,
+) -> anyhow::Result<usize> {
+    let active_new_set: HashSet<String> = new_paths
+        .iter()
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
+
+    let mut removed_uris: Vec<String> = Vec::new();
+    let mut seen_removed: HashSet<String> = HashSet::new();
+    for old_p in old_paths {
+        let old_str = old_p.to_string_lossy().to_string();
+        if !active_new_set.contains(&old_str) || !old_p.is_file() {
+            let uri = format!("file://{old_str}");
+            if seen_removed.insert(uri.clone()) {
+                removed_uris.push(uri);
+            }
+        }
+    }
+    if !removed_uris.is_empty() {
+        let _ = db.remove_tracks_by_uris_and_prune_empty_albums(&removed_uris)?;
+    }
+
+    let mounts = db.get_mounts().unwrap_or_default();
+    let fallback_root_str = normalize_platform_path(&fallback_root.to_string_lossy())
+        .to_string_lossy()
+        .to_string();
+
+    let mut unique_new_paths: Vec<PathBuf> = Vec::new();
+    let mut seen_new: HashSet<PathBuf> = HashSet::new();
+    let mut folder_images: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+
+    for p in new_paths {
+        if !p.is_file() || !seen_new.insert(p.clone()) {
+            continue;
+        }
+        if let Some(parent) = p.parent() {
+            if !folder_images.contains_key(parent) {
+                let mut imgs = Vec::new();
+                if let Ok(rd) = std::fs::read_dir(parent) {
+                    for ent in rd.flatten() {
+                        let ep = ent.path();
+                        if !ep.is_file() {
+                            continue;
+                        }
+                        if let Some(ext) = ep.extension().and_then(|e| e.to_str()) {
+                            if matches!(
+                                ext.to_ascii_lowercase().as_str(),
+                                "png" | "jpg" | "jpeg" | "webp"
+                            ) {
+                                imgs.push(ep);
+                            }
+                        }
+                    }
+                }
+                folder_images.insert(parent.to_path_buf(), imgs);
+            }
+        }
+        unique_new_paths.push(p.clone());
+    }
+
+    let folder_art_cache: Mutex<HashMap<PathBuf, Option<String>>> = Mutex::new(HashMap::new());
+    let mut batch: Vec<IndexedTrackBatchItem> = Vec::with_capacity(unique_new_paths.len());
+
+    for path in unique_new_paths {
+        let path_str = path.to_string_lossy().to_string();
+        let uri = format!("file://{path_str}");
+        let Ok(fs_meta) = std::fs::metadata(&path) else {
+            continue;
+        };
+        let file_size = fs_meta.len() as i64;
+        let file_mtime = fs_meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let has_local_lrc = path.with_extension("lrc").is_file();
+
+        let matched_mount = mounts
+            .iter()
+            .filter(|m| {
+                let mp = Path::new(&m.mount_root);
+                path.starts_with(mp)
+            })
+            .max_by_key(|m| m.mount_root.len())
+            .map(|m| m.mount_root.as_str())
+            .unwrap_or(fallback_root_str.as_str());
+
+        if let Some(item) = parse_audio_file_detached(
+            &path,
+            &uri,
+            matched_mount,
+            "local",
+            file_mtime,
+            file_size,
+            has_local_lrc,
+            &folder_images,
+            &folder_art_cache,
+        ) {
+            batch.push(item);
+        }
+    }
+
+    let updated = batch.len();
+    for chunk in batch.chunks(250) {
+        db.upsert_indexed_batch(chunk)?;
+    }
+    let _ = db.remove_tracks_by_uris_and_prune_empty_albums(&[])?;
+    Ok(updated)
+}
+
+/// Payload queued by external tools (such as `imp-librarian`) for targeted re-indexing
+/// without rescanning entire library storage mounts.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PendingRefreshEntry {
+    #[serde(default)]
+    pub old_paths: Vec<String>,
+    #[serde(default)]
+    pub new_paths: Vec<String>,
+    #[serde(default)]
+    pub fallback_root: Option<String>,
+}
+
+/// Canonical path to the offline refresh queue file drained when IMP starts.
+pub fn pending_refresh_queue_path() -> PathBuf {
+    crate::simp_data_dir().join("pending_refresh.json")
+}
+
+/// Atomically claims and processes any pending path refreshes written while IMP was offline.
+pub fn drain_pending_refresh_queue(
+    db: &LibraryDatabase,
+    queue_path: &Path,
+) -> anyhow::Result<usize> {
+    if !queue_path.is_file() {
+        return Ok(0);
+    }
+
+    let processing_path = queue_path.with_extension("processing.json");
+    match std::fs::rename(queue_path, &processing_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    }
+
+    let raw = match std::fs::read_to_string(&processing_path) {
+        Ok(content) => content,
+        Err(e) => {
+            let _ = std::fs::remove_file(&processing_path);
+            return Err(e.into());
+        }
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        let _ = std::fs::remove_file(&processing_path);
+        return Ok(0);
+    }
+
+    let entries: Vec<PendingRefreshEntry> = match serde_json::from_str::<Vec<PendingRefreshEntry>>(trimmed)
+        .or_else(|_| serde_json::from_str::<PendingRefreshEntry>(trimmed).map(|single| vec![single]))
+    {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            let _ = std::fs::remove_file(&processing_path);
+            return Err(e.into());
+        }
+    };
+
+    let mut seen_old: HashSet<String> = HashSet::new();
+    let mut old_paths: Vec<PathBuf> = Vec::new();
+    let mut seen_new: HashSet<String> = HashSet::new();
+    let mut new_paths: Vec<PathBuf> = Vec::new();
+    let mut fallback_root: Option<String> = None;
+
+    for entry in entries {
+        if fallback_root.is_none() {
+            fallback_root = entry
+                .fallback_root
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+        }
+        for p in entry.old_paths {
+            let clean = p.trim();
+            if !clean.is_empty() && seen_old.insert(clean.to_string()) {
+                old_paths.push(PathBuf::from(clean));
+            }
+        }
+        for p in entry.new_paths {
+            let clean = p.trim();
+            if !clean.is_empty() && seen_new.insert(clean.to_string()) {
+                new_paths.push(PathBuf::from(clean));
+            }
+        }
+    }
+
+    if old_paths.is_empty() && new_paths.is_empty() {
+        let _ = std::fs::remove_file(&processing_path);
+        return Ok(0);
+    }
+
+    let fallback_pb = PathBuf::from(fallback_root.as_deref().unwrap_or("/"));
+    let res = refresh_local_paths_in_db(db, &old_paths, &new_paths, &fallback_pb);
+    let _ = std::fs::remove_file(&processing_path);
+    res
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_extract_tag_year_handles_iso_dates_and_rejects_invalid() {
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.insert_text(ItemKey::RecordingDate, "2012-06-12T07:00:00Z".to_string());
+        assert_eq!(extract_tag_year(&tag), Some(2012));
+
+        let mut tag_mp4 = Tag::new(lofty::tag::TagType::Mp4Ilst);
+        tag_mp4.insert_text(ItemKey::RecordingDate, "1996-03-04T08:00:00Z".to_string());
+        assert_eq!(extract_tag_year(&tag_mp4), Some(1996));
+
+        let mut tag_set = Tag::new(lofty::tag::TagType::Mp4Ilst);
+        tag_set.set_year(1998);
+        assert_eq!(extract_tag_year(&tag_set), Some(1998));
+
+        let mut tag_invalid = Tag::new(lofty::tag::TagType::Id3v2);
+        tag_invalid.insert_text(ItemKey::RecordingDate, "abcd-ef".to_string());
+        assert_eq!(extract_tag_year(&tag_invalid), None);
+
+        let mut tag_oob = Tag::new(lofty::tag::TagType::Id3v2);
+        tag_oob.insert_text(ItemKey::RecordingDate, "0000-01-01".to_string());
+        assert_eq!(extract_tag_year(&tag_oob), None);
+    }
 
     #[test]
     fn test_parse_steam_ost_filename_stem() {
@@ -885,5 +1144,68 @@ mod tests {
             ),
             "Synth/Album"
         );
+    }
+
+    #[test]
+    fn test_drain_pending_refresh_queue_updates_db_and_removes_file() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("simp_pending_refresh_{nanos}"));
+        let old_dir = root.join("Sample Artist").join("Scattered Album");
+        let new_dir = root.join("Sample Artist").join("Sample Album");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::create_dir_all(&new_dir).unwrap();
+
+        let old_file = old_dir.join("01 - Track 01.wav");
+        let new_file = new_dir.join("01 - Track 01.wav");
+
+        // Minimal 44-byte PCM WAV header
+        let mut wav = Vec::with_capacity(44);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&36u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&44100u32.to_le_bytes());
+        wav.extend_from_slice(&88200u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&0u32.to_le_bytes());
+        std::fs::write(&old_file, &wav).unwrap();
+
+        let db = LibraryDatabase::open(&root.join("library.db")).unwrap();
+        let root_str = root.to_string_lossy().to_string();
+        db.upsert_mount(&root_str, "Music", "user_custom", true)
+            .unwrap();
+        scan_mount_directory(&db, &root, &root_str, "local");
+        assert_eq!(db.list_local_track_index_snapshot(None).unwrap().len(), 1);
+
+        // Simulate external move performed while IMP was offline
+        std::fs::rename(&old_file, &new_file).unwrap();
+
+        let queue_path = root.join("pending_refresh.json");
+        let payload = vec![PendingRefreshEntry {
+            old_paths: vec![old_file.to_string_lossy().to_string()],
+            new_paths: vec![new_file.to_string_lossy().to_string()],
+            fallback_root: Some(root_str.clone()),
+        }];
+        std::fs::write(&queue_path, serde_json::to_string(&payload).unwrap()).unwrap();
+
+        let refreshed = drain_pending_refresh_queue(&db, &queue_path).unwrap();
+        assert_eq!(refreshed, 1);
+        assert!(!queue_path.exists());
+        assert!(!queue_path.with_extension("processing.json").exists());
+
+        let snapshot = db.list_local_track_index_snapshot(None).unwrap();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].path, new_file.to_string_lossy().to_string());
+        assert_eq!(snapshot[0].album_title, "Sample Album");
+        assert_eq!(db.get_albums(Some("local"), None, 20, 0).unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

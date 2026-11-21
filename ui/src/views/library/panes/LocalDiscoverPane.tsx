@@ -20,6 +20,7 @@ import {
   type LocalLyricsFilter,
   type LocalSubTab,
   matchesAlphaBucket,
+  stripAlbumFormatSuffix,
   tileGridStyle,
   useLibraryLyricsStatus,
 } from '../libraryHelpers';
@@ -39,9 +40,7 @@ export interface LocalFacetsSummary {
 }
 
 export function cleanAlbumArtistDisplay(raw: string): string {
-  return raw
-    .replace(/\s*•\s*(FLAC(?:\s*\+\s*(?:MP3|WAV|AAC|M4A|ALAC|OGG|OPUS|AIFF))*|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)$/i, '')
-    .trim();
+  return stripAlbumFormatSuffix(raw);
 }
 
 export function computeLocalFacetsSummary(

@@ -66,6 +66,26 @@ pub struct TrackPropertiesPatch {
     pub preferred_viz_mode: Option<String>,
 }
 
+/// Read-only local track snapshot row exposed to external curating tools such as `imp-librarian`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocalTrackIndexEntry {
+    pub uri: String,
+    pub path: String,
+    pub mount_root: Option<String>,
+    pub album_id: Option<String>,
+    pub title: String,
+    pub artists_json: String,
+    pub album_title: String,
+    pub album_artist: Option<String>,
+    pub release_year: Option<i32>,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub duration_ms: u64,
+    pub art_url: Option<String>,
+    pub file_mtime: Option<i64>,
+    pub file_size: Option<i64>,
+}
+
 /// Batched payload for committing indexed album, track, and capability rows inside one SQLite transaction.
 #[derive(Debug, Clone)]
 pub struct IndexedTrackBatchItem {
@@ -773,6 +793,11 @@ impl LibraryDatabase {
                 "INSERT INTO albums (id, title, album_artist, release_year, steam_app_id, art_cache_path, genre, parent_folder, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, strftime('%s', 'now'))
                  ON CONFLICT(id) DO UPDATE SET
+                   title = COALESCE(NULLIF(TRIM(excluded.title), ''), albums.title),
+                   album_artist = CASE
+                     WHEN TRIM(excluded.album_artist) != '' AND LOWER(TRIM(excluded.album_artist)) != 'unknown artist' THEN excluded.album_artist
+                     ELSE albums.album_artist
+                   END,
                    release_year = COALESCE(excluded.release_year, albums.release_year),
                    art_cache_path = CASE
                      WHEN excluded.art_cache_path IS NOT NULL THEN excluded.art_cache_path
@@ -1003,6 +1028,7 @@ impl LibraryDatabase {
                         }
                     }
                     if !exts.is_empty() {
+                        exts.sort_unstable();
                         let fmt_badge = exts.join(" + ");
                         if !album_artist.contains(&fmt_badge) {
                             album_artist = format!("{album_artist} • {fmt_badge}");
@@ -1348,11 +1374,93 @@ impl LibraryDatabase {
         Ok(())
     }
 
+    pub fn remove_tracks_by_uris_and_prune_empty_albums(&self, uris: &[String]) -> Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut removed = 0usize;
+        {
+            let mut del_track = tx.prepare("DELETE FROM tracks WHERE uri = ?1")?;
+            let mut del_props = tx.prepare("DELETE FROM track_properties WHERE uri = ?1")?;
+            for uri in uris {
+                let trimmed = uri.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                removed += del_track.execute(params![trimmed])?;
+                let _ = del_props.execute(params![trimmed]);
+            }
+        }
+        tx.execute(
+            "DELETE FROM albums
+             WHERE id NOT LIKE 'applemusic:%'
+               AND id NOT LIKE 'soundcloud:%'
+               AND id NOT LIKE 'archive:%'
+               AND id NOT IN (
+                   SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL
+               )",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub fn get_library_counts(&self) -> Result<(usize, usize)> {
         let conn = self.conn.lock().unwrap();
         let albums: i64 = conn.query_row("SELECT COUNT(*) FROM albums", [], |r| r.get(0))?;
         let tracks: i64 = conn.query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))?;
         Ok((albums as usize, tracks as usize))
+    }
+
+    /// Returns a snapshot of all indexed local tracks (optionally filtered to one `mount_root`)
+    /// so external tools can inspect the current index without walking storage mounts.
+    pub fn list_local_track_index_snapshot(
+        &self,
+        mount_root: Option<&str>,
+    ) -> Result<Vec<LocalTrackIndexEntry>> {
+        let conn = self.conn.lock().unwrap();
+        let mount_filter = mount_root
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let mut stmt = conn.prepare(
+            "SELECT t.uri, t.mount_root, t.album_id, t.title, t.artists_json,
+                    t.album_title, a.album_artist, a.release_year,
+                    t.track_number, t.disc_number, t.duration_ms,
+                    t.art_url, t.file_mtime, t.file_size
+             FROM tracks t
+             LEFT JOIN albums a ON a.id = t.album_id
+             WHERE t.source = 'local'
+               AND (?1 IS NULL OR t.mount_root = ?1)
+             ORDER BY t.album_title COLLATE NOCASE ASC, t.disc_number ASC, t.track_number ASC, t.uri ASC",
+        )?;
+        let rows = stmt.query_map(params![mount_filter], |row| {
+            let uri: String = row.get(0)?;
+            let path = uri.strip_prefix("file://").unwrap_or(&uri).to_string();
+            let track_number: Option<i64> = row.get(8)?;
+            let disc_number: Option<i64> = row.get(9)?;
+            let duration_ms: i64 = row.get(10)?;
+            Ok(LocalTrackIndexEntry {
+                uri,
+                path,
+                mount_root: row.get(1)?,
+                album_id: row.get(2)?,
+                title: row.get(3)?,
+                artists_json: row.get(4)?,
+                album_title: row.get(5)?,
+                album_artist: row.get(6)?,
+                release_year: row.get(7)?,
+                track_number: track_number.and_then(|v| u32::try_from(v).ok()),
+                disc_number: disc_number.and_then(|v| u32::try_from(v).ok()),
+                duration_ms: u64::try_from(duration_ms.max(0)).unwrap_or(0),
+                art_url: row.get(11)?,
+                file_mtime: row.get(12)?,
+                file_size: row.get(13)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// Imports a batch of streaming tracks (and optional album / playlist container) from
@@ -3367,6 +3475,167 @@ mod tests {
         .unwrap();
         let props2 = db.get_track_properties("file:///tmp/music/02.flac").unwrap();
         assert!(props2.has_synced_lyrics);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_albums_sorts_compound_codec_badge_and_prune_empty_albums() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("imp_db_badge_prune_{nanos}"));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let db = LibraryDatabase::open(&temp_dir.join("library.db")).unwrap();
+
+        let mount_root = temp_dir.to_string_lossy().to_string();
+        db.upsert_mount(&mount_root, "Test Mount", "user_custom", true)
+            .unwrap();
+
+        let mk_item = |uri: &str, alb_id: &str, trk: u32| IndexedTrackBatchItem {
+            album_id: alb_id.to_string(),
+            album_title: format!("Album {alb_id}"),
+            album_artist: "Example Artist".to_string(),
+            steam_app_id: None,
+            release_year: Some(2021),
+            art_cache_path: None,
+            genre: Some("Electronic".to_string()),
+            parent_folder: Some("Example Artist/Album".to_string()),
+            track: TrackMetadata {
+                uri: uri.to_string(),
+                title: format!("Track {trk:02}"),
+                artists: vec!["Example Artist".to_string()],
+                album: format!("Album {alb_id}"),
+                album_id: Some(alb_id.to_string()),
+                track_number: Some(trk),
+                disc_number: Some(1),
+                art_url: None,
+                duration_ms: 180_000,
+                source: "local".to_string(),
+                mount_root: Some(mount_root.clone()),
+                content_rating: None,
+                genre: Some("Electronic".to_string()),
+                release_year: Some(2021),
+                parent_folder: Some("Example Artist/Album".to_string()),
+            },
+            file_mtime: Some(1700000000),
+            file_size: Some(1000),
+            has_art: false,
+            has_local_lrc: false,
+        };
+
+        db.upsert_indexed_batch(&[
+            mk_item("file:///tmp/m/01.mp3", "alb_mixed", 1),
+            mk_item("file:///tmp/m/02.m4a", "alb_mixed", 2),
+            mk_item("file:///tmp/m/03.flac", "alb_single", 1),
+        ])
+        .unwrap();
+
+        let albums = db.get_albums(Some("local"), None, 20, 0).unwrap();
+        let mixed = albums.iter().find(|a| a.id == "alb_mixed").unwrap();
+        assert_eq!(mixed.album_artist, "Example Artist • M4A + MP3");
+
+        let removed = db
+            .remove_tracks_by_uris_and_prune_empty_albums(&["file:///tmp/m/03.flac".to_string()])
+            .unwrap();
+        assert_eq!(removed, 1);
+
+        let after = db.get_albums(Some("local"), None, 20, 0).unwrap();
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].id, "alb_mixed");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_list_local_track_index_snapshot_filters_mount_root() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("simp_snapshot_test_{nanos}"));
+        let db = LibraryDatabase::open(&temp_dir.join("library.db")).unwrap();
+
+        db.upsert_mount("/mnt/share_a", "Share A", "user_custom", true)
+            .unwrap();
+        db.upsert_mount("/mnt/share_b", "Share B", "user_custom", true)
+            .unwrap();
+
+        let mk = |uri: &str, mount: &str, album_id: &str, title: &str, track_no: u32| {
+            IndexedTrackBatchItem {
+                album_id: album_id.to_string(),
+                album_title: "Sample Album".to_string(),
+                album_artist: "Example Artist".to_string(),
+                steam_app_id: None,
+                release_year: Some(2020),
+                art_cache_path: None,
+                genre: Some("Rock".to_string()),
+                parent_folder: Some("Example Artist/Sample Album".to_string()),
+                track: TrackMetadata {
+                    uri: uri.to_string(),
+                    title: title.to_string(),
+                    artists: vec!["Example Artist".to_string()],
+                    album: "Sample Album".to_string(),
+                    album_id: Some(album_id.to_string()),
+                    track_number: Some(track_no),
+                    disc_number: Some(1),
+                    duration_ms: 185_000,
+                    art_url: Some("simp_art_emb_abc123.jpg".to_string()),
+                    source: "local".to_string(),
+                    mount_root: Some(mount.to_string()),
+                    genre: Some("Rock".to_string()),
+                    release_year: Some(2020),
+                    content_rating: None,
+                    parent_folder: Some("Example Artist/Sample Album".to_string()),
+                },
+                file_mtime: Some(1700000100),
+                file_size: Some(4096),
+                has_art: true,
+                has_local_lrc: false,
+            }
+        };
+
+        db.upsert_indexed_batch(&[
+            mk(
+                "file:///mnt/share_a/Example Artist/Sample Album/01 - Track 01.flac",
+                "/mnt/share_a",
+                "alb_a",
+                "Track 01",
+                1,
+            ),
+            mk(
+                "file:///mnt/share_b/Example Artist/Sample Album/02 - Track 02.flac",
+                "/mnt/share_b",
+                "alb_b",
+                "Track 02",
+                2,
+            ),
+        ])
+        .unwrap();
+
+        let all = db.list_local_track_index_snapshot(None).unwrap();
+        assert_eq!(all.len(), 2);
+        let first = all
+            .iter()
+            .find(|t| t.title == "Track 01")
+            .expect("Track 01 present");
+        assert_eq!(
+            first.path,
+            "/mnt/share_a/Example Artist/Sample Album/01 - Track 01.flac"
+        );
+        assert_eq!(first.album_artist.as_deref(), Some("Example Artist"));
+        assert_eq!(first.release_year, Some(2020));
+        assert_eq!(first.track_number, Some(1));
+
+        let only_b = db
+            .list_local_track_index_snapshot(Some("/mnt/share_b"))
+            .unwrap();
+        assert_eq!(only_b.len(), 1);
+        assert_eq!(only_b[0].title, "Track 02");
+        assert_eq!(only_b[0].mount_root.as_deref(), Some("/mnt/share_b"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

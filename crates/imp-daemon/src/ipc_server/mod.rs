@@ -1,12 +1,10 @@
 mod apple_routes;
-mod liberation_routes;
 mod library_routes;
 mod media_routes;
 mod soundcloud_routes;
 mod ws_routes;
 
 use apple_routes::*;
-use liberation_routes::*;
 use library_routes::*;
 use media_routes::*;
 use soundcloud_routes::*;
@@ -199,29 +197,6 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/apple/web-playback", get(apple_web_playback_handler))
         .route("/api/apple/native-probe", get(apple_native_probe_handler))
         .route("/api/apple/open", get(apple_open_handler))
-        .route("/api/liberation/census/start", post(liberation_census_start_handler))
-        .route("/api/liberation/census/pause", post(liberation_census_pause_handler))
-        .route("/api/liberation/census/reset", post(liberation_census_reset_handler))
-        .route("/api/liberation/census/status", get(liberation_census_status_handler))
-        .route("/api/liberation/tracks", get(liberation_tracks_handler))
-        .route("/api/liberation/diagnostics", get(liberation_diagnostics_handler))
-        .route("/api/liberation/download/preflight", post(liberation_download_preflight_handler))
-        .route("/api/liberation/download/start", post(liberation_download_start_handler))
-        .route("/api/liberation/download/pause", post(liberation_download_pause_handler))
-        .route("/api/liberation/download/status", get(liberation_download_status_handler))
-        .route("/api/liberation/audit/start", post(liberation_audit_start_handler))
-        .route("/api/liberation/audit/pause", post(liberation_audit_pause_handler))
-        .route("/api/liberation/audit/status", get(liberation_audit_status_handler))
-        .route("/api/liberation/audit/results", get(liberation_audit_results_handler))
-        .route("/api/liberation/reunion/plan", post(liberation_reunion_plan_handler))
-        .route("/api/liberation/reunion/start", post(liberation_reunion_start_handler))
-        .route("/api/liberation/reunion/pause", post(liberation_reunion_pause_handler))
-        .route("/api/liberation/reunion/status", get(liberation_reunion_status_handler))
-        .route("/api/liberation/reunion/apply", post(liberation_reunion_apply_handler))
-        .route("/api/liberation/reunion/undo", post(liberation_reunion_undo_handler))
-        .route("/api/liberation/fingerprint/start", post(liberation_fingerprint_start_handler))
-        .route("/api/liberation/fingerprint/pause", post(liberation_fingerprint_pause_handler))
-        .route("/api/liberation/fingerprint/status", get(liberation_fingerprint_status_handler))
         .route("/api/lyrics", get(lyrics_handler))
         .route("/api/lyrics/refetch", post(lyrics_refetch_handler))
         .route("/api/factoids", get(factoids_handler))
@@ -243,6 +218,14 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         )
         .route("/api/library/purge-source", post(purge_source_handler))
         .route("/api/library/local-discover", get(local_discover_handler))
+        .route(
+            "/api/library/refresh-paths",
+            post(library_refresh_paths_handler),
+        )
+        .route(
+            "/api/library/index-snapshot",
+            get(library_index_snapshot_handler),
+        )
         .route(
             "/api/cache/shelves",
             get(cache_shelves_get_handler).post(cache_shelves_post_handler),

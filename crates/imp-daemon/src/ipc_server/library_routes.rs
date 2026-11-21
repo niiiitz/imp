@@ -858,3 +858,85 @@ pub(super) async fn auth_probe_handler(State(state): State<DaemonIpcState>) -> i
     }
 }
 
+pub(super) async fn library_refresh_paths_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<imp_core::library::indexer::PendingRefreshEntry>,
+) -> impl IntoResponse {
+    let db = state.db.clone();
+    let bcast = state.broadcast_tx.clone();
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<(usize, usize, usize)> {
+        let old_paths: Vec<std::path::PathBuf> = body
+            .old_paths
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+            .collect();
+        let new_paths: Vec<std::path::PathBuf> = body
+            .new_paths
+            .into_iter()
+            .filter(|s| !s.trim().is_empty())
+            .map(std::path::PathBuf::from)
+            .collect();
+        let fallback_root = body
+            .fallback_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("/"));
+
+        let refreshed = imp_core::library::indexer::refresh_local_paths_in_db(
+            &db,
+            &old_paths,
+            &new_paths,
+            &fallback_root,
+        )?;
+        let (total_albums, total_tracks) = db.get_library_counts().unwrap_or((0, 0));
+        let _ = bcast.send(imp_protocol::PlaybackEvent::LibraryUpdated {
+            total_albums,
+            total_tracks,
+        });
+        Ok((refreshed, total_albums, total_tracks))
+    })
+    .await;
+
+    match res {
+        Ok(Ok((refreshed, total_albums, total_tracks))) => Json(serde_json::json!({
+            "ok": true,
+            "refreshed": refreshed,
+            "total_albums": total_albums,
+            "total_tracks": total_tracks,
+        })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn library_index_snapshot_handler(
+    State(state): State<DaemonIpcState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let mount_root = params
+        .get("mount_root")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let db = state.db.clone();
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let mounts = db.get_mounts()?;
+        let tracks = db.list_local_track_index_snapshot(mount_root.as_deref())?;
+        Ok(serde_json::json!({
+            "ok": true,
+            "schema_version": 1,
+            "mounts": mounts,
+            "tracks": tracks,
+        }))
+    })
+    .await;
+
+    match res {
+        Ok(Ok(payload)) => Json(payload),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+

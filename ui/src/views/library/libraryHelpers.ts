@@ -98,6 +98,21 @@ export function extractAudioFormat(uri?: string | null): string | null {
   return null;
 }
 
+const CODEC_TOKEN = '(?:FLAC|MP3|WAV|OGG|OPUS|M4A|AAC|ALAC|AIFF)';
+const ALBUM_FORMAT_SUFFIX_RE = new RegExp(
+  `\\s*•\\s*(${CODEC_TOKEN}(?:\\s*\\+\\s*${CODEC_TOKEN})*)$`,
+  'i'
+);
+
+export function stripAlbumFormatSuffix(raw: string): string {
+  return raw.replace(ALBUM_FORMAT_SUFFIX_RE, '').trim();
+}
+
+export function extractAlbumFormatBadge(raw: string): string | null {
+  const m = raw.match(ALBUM_FORMAT_SUFFIX_RE);
+  return m ? m[1].toUpperCase() : null;
+}
+
 export function cleanCollectionTitle(raw: string): string {
   return raw.replace(/^[\s📌💾🍎☁️🏛️🎵💿]+/u, '').trim() || raw;
 }
