@@ -689,7 +689,8 @@ export function renderArcadeCrossfireScene(s: SceneRenderContext): void {
   const invTopY = wallTop + 20;
 
   const siloXs = [wallLeft + 96, cx, wallRight - 96];
-  const siloGroundY = wallBottom - 6;
+  // Leave breathing room above the bottom lyric banner when HUD is visible
+  const siloGroundY = wallBottom - 26;
 
   // Track which formation slots are currently detached on a dive run
   const divingSlotSet = new Set<number>();

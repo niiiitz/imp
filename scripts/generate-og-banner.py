@@ -14,16 +14,16 @@ import math
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IMP_CROP_SOURCE = (
+IMP_ART_SOURCE = (
     ROOT
     / "reference_documentation"
     / "artwork_archive"
     / "imp_layers"
-    / "refined_pose_b_chin_up_chest_out.jpg"
+    / "imp_icon_max_fill_pose_d_macos_squircle.png"
 )
 ICON_PATH = (
-    IMP_CROP_SOURCE
-    if IMP_CROP_SOURCE.exists()
+    IMP_ART_SOURCE
+    if IMP_ART_SOURCE.exists()
     else (ROOT / "ui" / "public" / "simp-icon-dark.png")
 )
 OUT_SVG = ROOT / "docs" / "open-graph-banner.svg"
@@ -192,15 +192,11 @@ def generate_svg() -> str:
       <stop offset="100%" stop-color="#3b82f6"/>
     </linearGradient>
 
-    <!-- Main Left Cover Art Square Clip (x=104, y=224, 268x268, rx=22) -->
-    <clipPath id="albumArtClip">
-      <rect x="104" y="224" width="268" height="268" rx="22"/>
-    </clipPath>
-
-    <!-- Top-Left Mini Cover Art Clip (x=118, y=71, 24x24, rx=6) -->
-    <clipPath id="miniArtClip">
-      <rect x="118" y="71" width="24" height="24" rx="6"/>
-    </clipPath>
+    <radialGradient id="impHeroGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#facc15" stop-opacity="0.30"/>
+      <stop offset="52%" stop-color="#22c55e" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
 
     <!-- Main Console Viewport Clip -->
     <clipPath id="consoleClip">
@@ -253,11 +249,9 @@ def generate_svg() -> str:
       <circle cx="0" cy="0" r="4.5"/>
       <path d="M 0 -7.5 L 0 -5.5 M 0 5.5 L 0 7.5 M -7.5 0 L -5.5 0 M 5.5 0 L 7.5 0 M -5.3 -5.3 L -3.9 -3.9 M 3.9 3.9 L 5.3 5.3 M -5.3 5.3 L -3.9 3.9 M 3.9 -3.9 L 5.3 -5.3"/>
     </g>
-    <!-- Mini Cropped Art inside Top-Left Pill -->
-    <g clip-path="url(#miniArtClip)">
-      <image x="110" y="68" width="40" height="40" preserveAspectRatio="xMidYMin slice"
-             xlink:href="data:{mime};base64,{icon_b64}"/>
-    </g>
+    <!-- Mini IMP Squircle Badge inside Top-Left Pill -->
+    <image x="115" y="68" width="30" height="30" preserveAspectRatio="xMidYMid meet"
+           xlink:href="data:{mime};base64,{icon_b64}"/>
     <!-- Cloud/Bolt Badge + Title -->
     <path d="M 152 86 C 149 86, 147 84, 147 81.5 C 147 79.2, 148.8 77.4, 151 77.2 C 151.8 74.8, 154 73, 156.8 73 C 160.2 73, 163 75.8, 163 79.2 C 164.8 79.6, 166 81.2, 166 83 C 166 84.7, 164.7 86, 163 86 Z"
           fill="#e4e4ec"/>
@@ -312,14 +306,14 @@ def generate_svg() -> str:
     </g>
 
     <!-- ===================================================================
-         LEFT COLUMN: TRACK/HERO HEADER + TIGHT CROPPED IMP ARTWORK CARD
+         LEFT COLUMN: TRACK/HERO HEADER + IMP MASCOT SQUIRCLE ICON
          =================================================================== -->
     <text x="104" y="168" fill="#ffffff"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="31" font-weight="900" letter-spacing="-0.4">IMP</text>
-    <text x="176" y="167" fill="#9ca3af"
+          font-size="34" font-weight="900" letter-spacing="-0.4">IMP</text>
+    <text x="180" y="167" fill="#cbd5e1"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="19" font-weight="700">— Interactive Media Player (IMP)</text>
+          font-size="20" font-weight="700">— Interactive Media Player</text>
 
     <text x="104" y="198" fill="#d4d4dc"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
@@ -339,17 +333,10 @@ def generate_svg() -> str:
           font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
           font-size="25" font-weight="900" letter-spacing="2">INTERACTIVE MEDIA</text>
 
-    <!-- Left Cover Art Card (x=104, y=224, 268x268, rx=22)
-         Cropped tightly on Pose B's chest-up, broccoli crown, earbud + cord, and golden lightning bolt -->
-    <rect x="102" y="222" width="272" height="272" rx="24" fill="#050508"/>
-    <g clip-path="url(#albumArtClip)">
-      <rect x="104" y="224" width="268" height="268" fill="#000000"/>
-      <!-- Tight zoom & crop matching user's reference screenshot -->
-      <image x="-74" y="184" width="628" height="628"
-             xlink:href="data:{mime};base64,{icon_b64}"/>
-    </g>
-    <rect x="104" y="224" width="268" height="268" rx="22"
-          fill="none" stroke="#1e1e2a" stroke-width="2"/>
+    <!-- Left Hero Art: Max-Fill Pose D IMP Squircle with Golden Bolt + Soft Back-Glow -->
+    <circle cx="238" cy="364" r="168" fill="url(#impHeroGlow)"/>
+    <image x="90" y="216" width="296" height="296" preserveAspectRatio="xMidYMid meet"
+           xlink:href="data:{mime};base64,{icon_b64}"/>
 
     <!-- ===================================================================
          RIGHT AREA: FLOATING COMMENT BUBBLE + AMBER WAVEFORM CAPSULE + 7-BTN TRANSPORT

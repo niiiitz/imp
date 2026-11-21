@@ -9,9 +9,12 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -278,8 +281,6 @@ fn is_reunion_stray_file(file: &ScannedAudioFile) -> bool {
         || lower.ends_with(" - ep")
         || lower.contains("(single)")
         || lower.contains("[single]")
-        || lower.contains("greatest hits")
-        || lower.contains("best of")
     {
         return true;
     }
@@ -490,12 +491,13 @@ pub fn match_strays_against_canonical_tracks(
             };
 
             if let Some(matched) = isrc_match.or(title_match) {
+                let final_track_total = matched.track_total.max(album.expected_track_count);
                 let (confidence, match_reason) = if isrc_match.is_some() {
                     (
                         "exact_isrc".to_string(),
                         format!(
                             "ISRC match with catalog slot #{}/{}",
-                            matched.track_number, matched.track_total
+                            matched.track_number, final_track_total
                         ),
                     )
                 } else {
@@ -503,7 +505,7 @@ pub fn match_strays_against_canonical_tracks(
                         "catalog_title_duration".to_string(),
                         format!(
                             "Matched canonical album track #{}/{} '{}'",
-                            matched.track_number, matched.track_total, matched.title
+                            matched.track_number, final_track_total, matched.title
                         ),
                     )
                 };
@@ -532,7 +534,7 @@ pub fn match_strays_against_canonical_tracks(
                     proposed_album: album.album.clone(),
                     proposed_album_artist: album.artist.clone(),
                     proposed_track_number: Some(matched.track_number),
-                    proposed_track_total: Some(matched.track_total.max(album.expected_track_count)),
+                    proposed_track_total: Some(final_track_total),
                     proposed_disc_number: Some(matched.disc_number),
                     proposed_year: matched.year.or(album.year),
                     confidence,
@@ -596,18 +598,9 @@ pub fn match_strays_against_canonical_tracks(
     items
 }
 
-/// Scans a local folder, identifies incomplete multi-track albums and stray single/EP files,
-/// verifies candidates against Apple Music Catalog (when enabled), and caches a dry-run reunion plan.
-pub fn build_album_reunion_plan(
-    settings: Option<&SimpSettings>,
-    root_dir: &Path,
-    use_apple_catalog: bool,
-) -> Result<ReunionPlanReport> {
-    if !root_dir.is_dir() {
-        return Err(anyhow!("Folder does not exist: {}", root_dir.display()));
-    }
-
-    let mut scanned = Vec::new();
+fn discover_reunion_audio_paths(root_dir: &Path, folder_filter: &str) -> Vec<PathBuf> {
+    let filter_lower = folder_filter.trim().to_ascii_lowercase();
+    let mut paths = Vec::new();
     for entry in WalkDir::new(root_dir)
         .follow_links(false)
         .into_iter()
@@ -620,13 +613,78 @@ pub fn build_album_reunion_plan(
         if name.starts_with("._") || name.ends_with(".imp.part") {
             continue;
         }
-        if is_supported_audio_file(entry.path()) {
-            if let Some(meta) = scan_reunion_audio_file(entry.path()) {
-                scanned.push(meta);
-            }
+        let path = entry.path();
+        if !is_supported_audio_file(path) {
+            continue;
         }
+        if !filter_lower.is_empty()
+            && !path
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .contains(&filter_lower)
+        {
+            continue;
+        }
+        paths.push(path.to_path_buf());
     }
+    paths.sort();
+    paths
+}
 
+fn scan_reunion_paths_parallel<F>(
+    paths: Vec<PathBuf>,
+    pause_flag: Option<&AtomicBool>,
+    on_progress: F,
+) -> Vec<ScannedAudioFile>
+where
+    F: Fn(usize, &str) + Sync,
+{
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    let worker_count = paths.len().min(8);
+    let queue = Mutex::new(VecDeque::from(paths));
+    let scanned_out: Mutex<Vec<ScannedAudioFile>> = Mutex::new(Vec::new());
+    let done_counter = std::sync::atomic::AtomicUsize::new(0);
+
+    std::thread::scope(|s| {
+        for _ in 0..worker_count {
+            s.spawn(|| loop {
+                if let Some(flag) = pause_flag {
+                    if flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+                }
+                let next_path = { queue.lock().unwrap().pop_front() };
+                let Some(path) = next_path else {
+                    break;
+                };
+                if let Some(meta) = scan_reunion_audio_file(&path) {
+                    scanned_out.lock().unwrap().push(meta);
+                }
+                let done = done_counter.fetch_add(1, Ordering::SeqCst) + 1;
+                if done % 16 == 0 || done <= 4 {
+                    let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    on_progress(done, fname);
+                }
+            });
+        }
+    });
+
+    scanned_out.into_inner().unwrap()
+}
+
+fn build_reunion_plan_from_scanned<F>(
+    settings: Option<&SimpSettings>,
+    root_dir: &Path,
+    scanned: Vec<ScannedAudioFile>,
+    use_apple_catalog: bool,
+    pause_flag: Option<&AtomicBool>,
+    on_lookup_progress: F,
+) -> ReunionPlanReport
+where
+    F: Fn(usize, usize, usize, &str),
+{
     let scanned_files = scanned.len();
     let mut album_groups: HashMap<(String, String), Vec<&ScannedAudioFile>> = HashMap::new();
     let mut stray_by_artist: HashMap<String, Vec<&ScannedAudioFile>> = HashMap::new();
@@ -657,9 +715,18 @@ pub fn build_album_reunion_plan(
 
     let mut incomplete_families: Vec<IncompleteAlbumFamily> = Vec::new();
     for ((norm_artist, norm_album), group) in album_groups {
+        // Lone 1-track album folders (e.g. a single song split off by cloud matching onto a
+        // compilation or alternate edition) are treated as stray candidates rather than
+        // destination albums, while any >= 2 track owned album (studio OR compilation CD you own)
+        // stays intact and can receive missing strays.
         if group.len() < 2 {
+            stray_by_artist
+                .entry(norm_artist)
+                .or_default()
+                .extend(group);
             continue;
         }
+        let first = group[0];
         let max_track_num = group
             .iter()
             .filter(|f| f.disc_number.unwrap_or(1) <= 1)
@@ -703,7 +770,6 @@ pub fn build_album_reunion_plan(
         }
 
         if present_count < expected_track_count as usize || !missing_disc1_slots.is_empty() {
-            let first = group[0];
             let display_artist = if !first.album_artist.is_empty() {
                 first.album_artist.clone()
             } else {
@@ -741,6 +807,11 @@ pub fn build_album_reunion_plan(
     let mut next_id = 0usize;
 
     for family in &incomplete_families {
+        if let Some(flag) = pause_flag {
+            if flag.load(Ordering::SeqCst) {
+                break;
+            }
+        }
         let Some(strays) = stray_by_artist.get(&family.norm_artist) else {
             continue;
         };
@@ -754,8 +825,14 @@ pub fn build_album_reunion_plan(
         }
 
         let cat_tracks = if let Some((ref dev_t, ref usr_t, ref sf)) = apple_tokens {
-            if catalog_lookups_performed < 40 {
+            if catalog_lookups_performed < 60 {
                 catalog_lookups_performed += 1;
+                on_lookup_progress(
+                    incomplete_albums_found,
+                    catalog_lookups_performed,
+                    proposed_items.len(),
+                    &format!("{} — {}", family.artist, family.album),
+                );
                 fetch_canonical_album_tracks(dev_t, usr_t, sf, &family.artist, &family.album)
             } else {
                 None
@@ -771,7 +848,6 @@ pub fn build_album_reunion_plan(
             &mut consumed_paths,
             &mut next_id,
         );
-        // If catalog lookup failed to match any item, still check exact offline normalized album match
         if matched.is_empty() && cat_tracks.is_some() {
             matched = match_strays_against_canonical_tracks(
                 family,
@@ -795,7 +871,255 @@ pub fn build_album_reunion_plan(
         created_at: now,
     };
     store_cached_reunion_plan(&report);
-    Ok(report)
+    report
+}
+
+/// Scans a local folder in parallel, identifies incomplete multi-track studio albums and stray
+/// single/EP files, verifies candidates against Apple Music Catalog (when enabled), and caches
+/// a dry-run reunion plan.
+pub fn build_album_reunion_plan(
+    settings: Option<&SimpSettings>,
+    root_dir: &Path,
+    use_apple_catalog: bool,
+) -> Result<ReunionPlanReport> {
+    if !root_dir.is_dir() {
+        return Err(anyhow!("Folder does not exist: {}", root_dir.display()));
+    }
+    let paths = discover_reunion_audio_paths(root_dir, "");
+    let scanned = scan_reunion_paths_parallel(paths, None, |_, _| {});
+    Ok(build_reunion_plan_from_scanned(
+        settings,
+        root_dir,
+        scanned,
+        use_apple_catalog,
+        None,
+        |_, _, _, _| {},
+    ))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogReunionRuntimeStatus {
+    pub phase: String,
+    pub running: bool,
+    pub pause_requested: bool,
+    pub root_dir: String,
+    pub folder_filter: String,
+    pub use_apple_catalog: bool,
+    pub total_files: usize,
+    pub scanned_files: usize,
+    pub incomplete_albums_found: usize,
+    pub catalog_lookups_performed: usize,
+    pub proposed_matches: usize,
+    pub current_item: String,
+    pub last_message: String,
+    pub started_at: Option<i64>,
+    pub updated_at: i64,
+}
+
+impl Default for CatalogReunionRuntimeStatus {
+    fn default() -> Self {
+        Self {
+            phase: "idle".to_string(),
+            running: false,
+            pause_requested: false,
+            root_dir: String::new(),
+            folder_filter: String::new(),
+            use_apple_catalog: true,
+            total_files: 0,
+            scanned_files: 0,
+            incomplete_albums_found: 0,
+            catalog_lookups_performed: 0,
+            proposed_matches: 0,
+            current_item: String::new(),
+            last_message: "Pick a folder and click Scan & Preview Plan (Dry-Run) to inspect album reunion matches.".to_string(),
+            started_at: None,
+            updated_at: current_unix_sec(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogReunionStatusResponse {
+    pub runtime: CatalogReunionRuntimeStatus,
+    pub plan: Option<ReunionPlanReport>,
+}
+
+pub struct CatalogReunionController {
+    runtime: Mutex<CatalogReunionRuntimeStatus>,
+    last_plan: Mutex<Option<ReunionPlanReport>>,
+    pause_flag: Arc<AtomicBool>,
+}
+
+impl Default for CatalogReunionController {
+    fn default() -> Self {
+        Self {
+            runtime: Mutex::new(CatalogReunionRuntimeStatus::default()),
+            last_plan: Mutex::new(None),
+            pause_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+pub fn global_catalog_reunion_controller() -> &'static Arc<CatalogReunionController> {
+    static CTRL: OnceLock<Arc<CatalogReunionController>> = OnceLock::new();
+    CTRL.get_or_init(|| Arc::new(CatalogReunionController::default()))
+}
+
+impl CatalogReunionController {
+    pub fn status(&self) -> CatalogReunionStatusResponse {
+        CatalogReunionStatusResponse {
+            runtime: self.runtime.lock().unwrap().clone(),
+            plan: self.last_plan.lock().unwrap().clone(),
+        }
+    }
+
+    pub fn pause(&self) -> Result<()> {
+        self.pause_flag.store(true, Ordering::SeqCst);
+        let mut rt = self.runtime.lock().unwrap();
+        if rt.running {
+            rt.pause_requested = true;
+            rt.last_message = "Pause requested — wrapping up in-flight tag reads...".to_string();
+            rt.updated_at = current_unix_sec();
+        }
+        Ok(())
+    }
+
+    pub fn start(
+        self: &Arc<Self>,
+        settings: SimpSettings,
+        root_dir: PathBuf,
+        use_apple_catalog: bool,
+        folder_filter: Option<String>,
+    ) -> Result<CatalogReunionStatusResponse> {
+        if self.runtime.lock().unwrap().running {
+            return Ok(self.status());
+        }
+        if !root_dir.is_dir() {
+            return Err(anyhow!("Folder does not exist: {}", root_dir.display()));
+        }
+        let clean_filter = folder_filter
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .to_string();
+
+        self.pause_flag.store(false, Ordering::SeqCst);
+        let now = current_unix_sec();
+        {
+            let mut rt = self.runtime.lock().unwrap();
+            *rt = CatalogReunionRuntimeStatus {
+                phase: "discovering".to_string(),
+                running: true,
+                pause_requested: false,
+                root_dir: root_dir.to_string_lossy().to_string(),
+                folder_filter: clean_filter.clone(),
+                use_apple_catalog,
+                total_files: 0,
+                scanned_files: 0,
+                incomplete_albums_found: 0,
+                catalog_lookups_performed: 0,
+                proposed_matches: 0,
+                current_item: String::new(),
+                last_message: "Discovering local audio files...".to_string(),
+                started_at: Some(now),
+                updated_at: now,
+            };
+        }
+        *self.last_plan.lock().unwrap() = None;
+
+        let ctrl = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("imp-liberation-reunion".to_string())
+            .spawn(move || {
+                ctrl.run_worker(settings, root_dir, use_apple_catalog, clean_filter);
+            })?;
+
+        Ok(self.status())
+    }
+
+    fn run_worker(
+        &self,
+        settings: SimpSettings,
+        root_dir: PathBuf,
+        use_apple_catalog: bool,
+        folder_filter: String,
+    ) {
+        let paths = discover_reunion_audio_paths(&root_dir, &folder_filter);
+        let total_files = paths.len();
+        {
+            let mut rt = self.runtime.lock().unwrap();
+            rt.phase = "scanning_tags".to_string();
+            rt.total_files = total_files;
+            rt.last_message =
+                format!("Reading tags in parallel across {total_files} audio files...");
+            rt.updated_at = current_unix_sec();
+        }
+
+        let scanned = scan_reunion_paths_parallel(paths, Some(&self.pause_flag), |done, fname| {
+            if let Ok(mut rt) = self.runtime.try_lock() {
+                rt.scanned_files = done;
+                rt.current_item = fname.to_string();
+                rt.updated_at = current_unix_sec();
+            }
+        });
+
+        {
+            let mut rt = self.runtime.lock().unwrap();
+            rt.scanned_files = scanned.len();
+            rt.phase = "matching_catalog".to_string();
+            rt.last_message = format!(
+                "Grouping {} scanned files and matching incomplete studio albums...",
+                scanned.len()
+            );
+            rt.updated_at = current_unix_sec();
+        }
+
+        let report = build_reunion_plan_from_scanned(
+            Some(&settings),
+            &root_dir,
+            scanned,
+            use_apple_catalog,
+            Some(&self.pause_flag),
+            |incomplete, lookups, matched, cur_label| {
+                let mut rt = self.runtime.lock().unwrap();
+                rt.incomplete_albums_found = incomplete;
+                rt.catalog_lookups_performed = lookups;
+                rt.proposed_matches = matched;
+                rt.current_item = cur_label.to_string();
+                rt.last_message = format!(
+                    "Checking Apple Music Catalog ({lookups} lookups, {matched} matches proposed)..."
+                );
+                rt.updated_at = current_unix_sec();
+            },
+        );
+
+        let paused = self.pause_flag.load(Ordering::SeqCst);
+        let matches_len = report.proposed_items.len();
+        let incomplete_len = report.incomplete_albums_found;
+        let lookups_len = report.catalog_lookups_performed;
+        let scanned_len = report.scanned_files;
+        *self.last_plan.lock().unwrap() = Some(report);
+
+        let mut rt = self.runtime.lock().unwrap();
+        rt.running = false;
+        rt.pause_requested = false;
+        rt.phase = if paused { "paused" } else { "done" }.to_string();
+        rt.scanned_files = scanned_len;
+        rt.incomplete_albums_found = incomplete_len;
+        rt.catalog_lookups_performed = lookups_len;
+        rt.proposed_matches = matches_len;
+        rt.current_item.clear();
+        rt.last_message = if paused {
+            format!(
+                "Paused at {scanned_len}/{total_files} files ({incomplete_len} incomplete albums, {matches_len} matches proposed)."
+            )
+        } else {
+            format!(
+                "Scan complete: {scanned_len} files, {incomplete_len} incomplete studio albums, {lookups_len} catalog lookups, {matches_len} matches proposed."
+            )
+        };
+        rt.updated_at = current_unix_sec();
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1335,6 +1659,60 @@ mod tests {
         assert_eq!(reverted.artist, "Unknown Artist");
         assert_eq!(reverted.album, "Unknown Album");
         assert_eq!(reverted.track_number, Some(1));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_reunion_preserves_owned_multi_track_albums_and_reunites_lone_orphans() {
+        let dir = temp_dir("owned_album_and_lone_orphan");
+        let comp_dir = dir.join("Sample Artist").join("Greatest Hits");
+        let studio_dir = dir.join("Sample Artist").join("Studio LP");
+        let orphan_dir = dir.join("Sample Artist").join("Greatest Hits - Single");
+        std::fs::create_dir_all(&comp_dir).unwrap();
+        std::fs::create_dir_all(&studio_dir).unwrap();
+        std::fs::create_dir_all(&orphan_dir).unwrap();
+
+        // Owned multi-track Greatest Hits album (tracks 1 & 2 of 3)
+        for n in [1u32, 2] {
+            tag_wav(
+                &comp_dir.join(format!("{n:02} Hit {n}.wav")),
+                &format!("Hit {n}"),
+                "Sample Artist",
+                "Greatest Hits",
+                n,
+                3,
+                None,
+            );
+        }
+        // Owned multi-track Studio LP (tracks 1 & 2 of 2 — complete, should never be treated as stray)
+        for n in [1u32, 2] {
+            tag_wav(
+                &studio_dir.join(format!("{n:02} Album Cut {n}.wav")),
+                &format!("Album Cut {n}"),
+                "Sample Artist",
+                "Studio LP",
+                n,
+                2,
+                None,
+            );
+        }
+        // Lone stray track matching missing slot #3 of the owned Greatest Hits album
+        tag_wav(
+            &orphan_dir.join("01 Hit 3.wav"),
+            "Hit 3",
+            "Sample Artist",
+            "Greatest Hits - Single",
+            1,
+            1,
+            None,
+        );
+
+        let plan = build_album_reunion_plan(None, &dir, false).expect("plan builds");
+        assert_eq!(plan.incomplete_albums_found, 1);
+        assert_eq!(plan.proposed_items.len(), 1);
+        assert_eq!(plan.proposed_items[0].proposed_album, "Greatest Hits");
+        assert_eq!(plan.proposed_items[0].proposed_track_number, Some(3));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

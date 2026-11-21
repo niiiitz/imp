@@ -111,6 +111,8 @@ pub struct AcousticMendRuntimeStatus {
     pub has_api_key: bool,
     pub total_files: usize,
     pub processed_files: usize,
+    #[serde(default)]
+    pub clean_skipped: usize,
     pub fingerprinted_fresh: usize,
     pub fingerprinted_cached: usize,
     pub acoustid_queried: usize,
@@ -138,6 +140,7 @@ impl Default for AcousticMendRuntimeStatus {
             has_api_key: resolve_acoustid_api_key(None).is_some(),
             total_files: 0,
             processed_files: 0,
+            clean_skipped: 0,
             fingerprinted_fresh: 0,
             fingerprinted_cached: 0,
             acoustid_queried: 0,
@@ -528,16 +531,117 @@ fn extract_year_from_release(rel: &serde_json::Value) -> Option<u32> {
         .filter(|&y| (1900..=2100).contains(&y))
 }
 
+/// Normalizes typography/punctuation (straight vs curly quotes, dashes, extra spaces)
+/// so purely cosmetic punctuation differences don't generate noisy metadata diffs.
+pub fn normalize_typography_for_diff(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_space = true;
+    for ch in raw.trim().chars() {
+        let mapped = match ch {
+            '\u{2018}' | '\u{2019}' | '\u{02BC}' | '`' => '\'',
+            '\u{201C}' | '\u{201D}' => '"',
+            '\u{2013}' | '\u{2014}' => '-',
+            '\u{00A0}' => ' ',
+            other => other,
+        };
+        if mapped.is_whitespace() {
+            if !prev_space {
+                out.push(' ');
+                prev_space = true;
+            }
+        } else {
+            for lc in mapped.to_lowercase() {
+                out.push(lc);
+            }
+            prev_space = false;
+        }
+    }
+    out.trim().to_string()
+}
+
+fn contains_word_ci(haystack_lower: &str, needle: &str) -> bool {
+    haystack_lower
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|tok| tok == needle)
+}
+
+fn is_generic_or_mojibake_title(raw: &str) -> bool {
+    let t = raw.trim();
+    if t.is_empty() {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    if matches!(lower.as_str(), "unknown" | "untitled") {
+        return true;
+    }
+    if lower.starts_with("track")
+        && lower
+            .trim_start_matches("track")
+            .trim_matches(|c: char| c.is_ascii_whitespace() || c == '-' || c == '_' || c == '#')
+            .chars()
+            .all(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    if lower.starts_with("audiotrack")
+        && lower
+            .trim_start_matches("audiotrack")
+            .trim_matches(|c: char| c.is_ascii_whitespace() || c == '-' || c == '_')
+            .chars()
+            .all(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    // Detect classic Shift-JIS/Latin-1 mojibake markers (e.g. ¥, ©, ¤, Ã, â)
+    let mojibake_hits = t
+        .chars()
+        .filter(|&c| matches!(c, '¥' | '©' | '¤' | 'Ã' | 'Â' | '¢' | '£' | '¦' | 'ª' | 'º' | '¿' | 'À'..='Å' | 'Õ' | 'Ø' | 'Þ'))
+        .count();
+    mojibake_hits >= 2
+}
+
+fn token_overlap_count(a: &str, b: &str) -> usize {
+    let tok_a: HashSet<String> = normalize_typography_for_diff(a)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 2 && !matches!(*w, "the" | "and" | "for" | "feat" | "ft"))
+        .map(|s| s.to_string())
+        .collect();
+    if tok_a.is_empty() {
+        return 0;
+    }
+    normalize_typography_for_diff(b)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 2)
+        .filter(|w| tok_a.contains(*w))
+        .count()
+}
+
 /// Evaluates an AcoustID `/v2/lookup` JSON payload with strict confidence & duration guardrails,
 /// strongly preferring canonical Studio Albums over Compilations / Greatest Hits / Various Artists.
 pub fn select_best_acoustid_match(
     json: &serde_json::Value,
     local_duration_sec: u32,
 ) -> Option<AcoustIdResolvedMatch> {
+    select_best_acoustid_match_with_hint(json, local_duration_sec, None)
+}
+
+/// Variant of `select_best_acoustid_match` that uses the local file's existing (non-generic)
+/// tags as a tie-breaker to prevent `(instrumental)`/`(karaoke)`/`(live)` variant mislabeling
+/// and wrong-track soundtrack swaps.
+pub fn select_best_acoustid_match_with_hint(
+    json: &serde_json::Value,
+    local_duration_sec: u32,
+    hint: Option<&ScannedAudioFile>,
+) -> Option<AcoustIdResolvedMatch> {
     if json.get("status").and_then(|v| v.as_str()) != Some("ok") {
         return None;
     }
     let results = json.get("results").and_then(|v| v.as_array())?;
+
+    let hint_title_raw = hint.map(|h| h.title.trim()).unwrap_or("");
+    let hint_title_lower = hint_title_raw.to_ascii_lowercase();
+    let hint_artist_raw = hint.map(|h| h.artist.trim()).unwrap_or("");
+    let hint_has_clean_title = !is_generic_or_mojibake_title(hint_title_raw);
 
     let mut best: Option<(i64, AcoustIdResolvedMatch)> = None;
 
@@ -582,6 +686,33 @@ pub fn select_best_acoustid_match(
                 continue;
             }
 
+            // Penalize unwanted alternate-version suffixes unless the local title already names that variant
+            let rec_title_lower = title.to_ascii_lowercase();
+            let mut recording_bias: i64 = 0;
+            for variant_kw in ["instrumental", "karaoke", "acapella", "a cappella", "demo"] {
+                let rec_has = rec_title_lower.contains(variant_kw);
+                let local_has = hint_title_lower.contains(variant_kw);
+                if rec_has && !local_has {
+                    recording_bias -= 115;
+                } else if rec_has && local_has {
+                    recording_bias += 30;
+                }
+            }
+            if contains_word_ci(&rec_title_lower, "live")
+                && !contains_word_ci(&hint_title_lower, "live")
+            {
+                recording_bias -= 45;
+            }
+            if hint_has_clean_title {
+                let title_overlap = token_overlap_count(hint_title_raw, &title);
+                if title_overlap > 0 {
+                    recording_bias += 45 + (title_overlap.min(4) as i64) * 8;
+                }
+                if !hint_artist_raw.is_empty() && token_overlap_count(hint_artist_raw, &rec_artist) > 0 {
+                    recording_bias += 25;
+                }
+            }
+
             let rgs = rec
                 .get("releasegroups")
                 .and_then(|v| v.as_array())
@@ -589,7 +720,7 @@ pub fn select_best_acoustid_match(
                 .unwrap_or_default();
 
             if rgs.is_empty() {
-                let rank = (score * 100.0).round() as i64;
+                let rank = (score * 100.0).round() as i64 + recording_bias;
                 let cand = AcoustIdResolvedMatch {
                     score,
                     title: title.clone(),
@@ -635,7 +766,7 @@ pub fn select_best_acoustid_match(
                     .unwrap_or_default();
                 let rg_artist = join_acoustid_artists(rg.get("artists").and_then(|v| v.as_array()));
 
-                let mut base_rank = (score * 100.0).round() as i64;
+                let mut base_rank = (score * 100.0).round() as i64 + recording_bias;
                 let type_lower = rg_type.to_ascii_lowercase();
                 let is_compilation = rg_secondary.iter().any(|s| {
                     matches!(
@@ -1028,16 +1159,17 @@ fn build_acoustic_mend_item(
     let cur_artist = meta.artist.trim();
     let cur_album = meta.album.trim();
 
-    let proposed_title = if !matched.title.trim().is_empty()
-        && !cur_title.eq_ignore_ascii_case(matched.title.trim())
-    {
+    let cur_title_norm = normalize_typography_for_diff(cur_title);
+    let mat_title_norm = normalize_typography_for_diff(&matched.title);
+    let proposed_title = if !matched.title.trim().is_empty() && cur_title_norm != mat_title_norm {
         Some(matched.title.trim().to_string())
     } else {
         None
     };
 
-    let proposed_artist = if !matched.artist.trim().is_empty()
-        && !cur_artist.eq_ignore_ascii_case(matched.artist.trim())
+    let cur_artist_norm = normalize_typography_for_diff(cur_artist);
+    let mat_artist_norm = normalize_typography_for_diff(&matched.artist);
+    let proposed_artist = if !matched.artist.trim().is_empty() && cur_artist_norm != mat_artist_norm
     {
         Some(matched.artist.trim().to_string())
     } else {
@@ -1060,16 +1192,18 @@ fn build_acoustic_mend_item(
         "Unknown Artist".to_string()
     };
 
-    let album_changed = !cur_album.eq_ignore_ascii_case(&final_album);
+    let album_changed =
+        normalize_typography_for_diff(cur_album) != normalize_typography_for_diff(&final_album);
     let track_changed = matched.track_number.is_some() && meta.track_number != matched.track_number;
-    let year_changed = matched.year.is_some() && meta.year != matched.year;
+    // Only fill a MISSING year; don't churn existing years with reissue pressings
+    let year_filled = meta.year.is_none() && matched.year.is_some();
 
     // Only propose a mend when at least one meaningful metadata field actually improves
     if proposed_title.is_none()
         && proposed_artist.is_none()
         && !album_changed
         && !track_changed
-        && !year_changed
+        && !year_filled
     {
         return None;
     }
@@ -1092,8 +1226,18 @@ fn build_acoustic_mend_item(
         matched.track_number.or(meta.track_number),
     );
 
+    // Flag suspicious full-rewrite swaps where a clean readable title+artist is replaced with zero overlap
+    let local_had_clean_title = !is_generic_or_mojibake_title(cur_title);
+    let suspicious_rewrite = local_had_clean_title
+        && proposed_title.is_some()
+        && proposed_artist.is_some()
+        && token_overlap_count(cur_title, &matched.title) == 0
+        && token_overlap_count(cur_artist, &matched.artist) == 0;
+
     let score_pct = (matched.score * 100.0).round() as u32;
-    let confidence = if matched.score >= 0.93 {
+    let confidence = if suspicious_rewrite {
+        "review"
+    } else if matched.score >= 0.93 {
         "high"
     } else {
         "medium"
@@ -1114,6 +1258,14 @@ fn build_acoustic_mend_item(
         if let Some(tn) = matched.track_number {
             diff_notes.push(format!("Track #{tn}"));
         }
+    }
+    if year_filled {
+        if let Some(y) = matched.year {
+            diff_notes.push(format!("Year -> {y}"));
+        }
+    }
+    if diff_notes.is_empty() {
+        return None;
     }
 
     Some(ReunionMoveItem {
@@ -1143,7 +1295,7 @@ fn build_acoustic_mend_item(
         proposed_track_number: matched.track_number.or(meta.track_number),
         proposed_track_total: matched.track_total.or(meta.track_total),
         proposed_disc_number: matched.disc_number.or(meta.disc_number),
-        proposed_year: matched.year.or(meta.year),
+        proposed_year: meta.year.or(matched.year),
         confidence,
         match_reason: format!(
             "AcoustID {score_pct}% ({}) · {}",
@@ -1152,6 +1304,89 @@ fn build_acoustic_mend_item(
         ),
         catalog_album_id: matched.mb_release_id.clone(),
     })
+}
+
+/// Prevents splitting a single ripped album folder across two different release names
+/// (e.g. 28 tracks resolving to the main OST and 4 tracks resolving to a bonus sampler).
+pub fn apply_folder_album_consensus(root_dir: &Path, items: &mut [ReunionMoveItem]) {
+    let mut by_dir: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+    for (idx, it) in items.iter().enumerate() {
+        if let Some(parent) = Path::new(&it.source_path).parent() {
+            by_dir.entry(parent.to_path_buf()).or_default().push(idx);
+        }
+    }
+
+    for (_dir, idxs) in by_dir {
+        if idxs.len() < 4 {
+            continue;
+        }
+        let mut counts: HashMap<String, (usize, String, String, Option<u32>, Option<u32>)> =
+            HashMap::new();
+        for &i in &idxs {
+            let key = normalize_typography_for_diff(&items[i].proposed_album);
+            let entry = counts.entry(key).or_insert_with(|| {
+                (
+                    0,
+                    items[i].proposed_album.clone(),
+                    items[i].proposed_album_artist.clone(),
+                    items[i].proposed_track_total,
+                    items[i].proposed_year,
+                )
+            });
+            entry.0 += 1;
+            if let Some(tt) = items[i].proposed_track_total {
+                entry.3 = Some(entry.3.unwrap_or(0).max(tt));
+            }
+        }
+        let Some((dom_key, (dom_cnt, dom_album, dom_artist, dom_total, dom_year))) =
+            counts.into_iter().max_by_key(|(_, v)| v.0)
+        else {
+            continue;
+        };
+        if dom_cnt < 3 || dom_cnt * 100 < idxs.len() * 60 {
+            continue;
+        }
+        for &i in &idxs {
+            if normalize_typography_for_diff(&items[i].proposed_album) == dom_key {
+                continue;
+            }
+            // Only unify minority items that came from untagged/generic rips or smaller bonus editions
+            let is_untagged_rip = is_generic_or_mojibake_title(&items[i].title)
+                || items[i].current_album == "(Missing Album)";
+            let smaller_bonus_edition = match (items[i].proposed_track_total, dom_total) {
+                (Some(a), Some(b)) => a < b,
+                _ => false,
+            };
+            if is_untagged_rip || smaller_bonus_edition {
+                items[i].proposed_album = dom_album.clone();
+                items[i].proposed_album_artist = dom_artist.clone();
+                if dom_total.is_some() {
+                    items[i].proposed_track_total = dom_total;
+                }
+                if items[i].proposed_year.is_none() {
+                    items[i].proposed_year = dom_year;
+                }
+                let safe_artist = sanitize_path_component(&dom_artist);
+                let safe_album = sanitize_path_component(&dom_album);
+                let target_album_dir = root_dir.join(safe_artist).join(safe_album);
+                let final_title = items[i]
+                    .proposed_title
+                    .as_deref()
+                    .unwrap_or(&items[i].title);
+                items[i].target_path = compute_target_path(
+                    &target_album_dir,
+                    Path::new(&items[i].source_path),
+                    final_title,
+                    items[i].proposed_disc_number,
+                    items[i].proposed_track_number,
+                );
+                items[i].match_reason = format!(
+                    "{} · Unified to folder consensus album",
+                    items[i].match_reason
+                );
+            }
+        }
+    }
 }
 
 pub struct AcousticMendController {
@@ -1255,6 +1490,7 @@ impl AcousticMendController {
                 has_api_key: resolved_key.is_some(),
                 total_files: 0,
                 processed_files: 0,
+                clean_skipped: 0,
                 fingerprinted_fresh: 0,
                 fingerprinted_cached: 0,
                 acoustid_queried: 0,
@@ -1457,6 +1693,11 @@ impl AcousticMendController {
             let should_lookup = enable_acoustid_lookup
                 && (target_mode == "all" || is_drifted_or_unknown_audio_file(&fallback_meta));
 
+            if enable_acoustid_lookup && !should_lookup {
+                let mut rt = self.runtime.lock().unwrap();
+                rt.clean_skipped += 1;
+            }
+
             if should_lookup {
                 if let Some(ref key) = api_key {
                     let resolved_opt: Option<AcoustIdResolvedMatch> =
@@ -1504,9 +1745,10 @@ impl AcousticMendController {
                                 &record.fingerprint_b64,
                             ) {
                                 Ok(json) => {
-                                    if let Some(m) = select_best_acoustid_match(
+                                    if let Some(m) = select_best_acoustid_match_with_hint(
                                         &json,
                                         record.decoded_duration_sec,
+                                        Some(&fallback_meta),
                                     ) {
                                         record.acoustid_score = Some(m.score);
                                         record.mb_recording_id = Some(m.mb_recording_id.clone());
@@ -1563,6 +1805,9 @@ impl AcousticMendController {
             rt.processed_files += 1;
             rt.updated_at = current_unix_sec();
         }
+
+        // Unify minority album splits within the same ripped folder (e.g. OST + bonus sampler)
+        apply_folder_album_consensus(&root_dir, &mut proposed_items);
 
         // Run offline acoustic deduplication over all fingerprinted files collected so far
         {
@@ -1856,5 +2101,115 @@ mod tests {
         let mut missing_num = clean;
         missing_num.track_number = None;
         assert!(is_drifted_or_unknown_audio_file(&missing_num));
+    }
+
+    #[test]
+    fn test_typography_normalization_instrumental_penalty_and_folder_consensus() {
+        // 1. Straight vs curly apostrophe + existing year must produce NO noisy mend
+        let local = ScannedAudioFile {
+            path: PathBuf::from("/tmp/Artist/Album/01 What's Up.mp3"),
+            dir_path: PathBuf::from("/tmp/Artist/Album"),
+            title: "What's Up".to_string(),
+            artist: "Sample Band".to_string(),
+            album_artist: "Sample Band".to_string(),
+            album: "Sample Album".to_string(),
+            track_number: Some(1),
+            track_total: Some(10),
+            disc_number: Some(1),
+            year: Some(1993),
+            isrc: None,
+            duration_ms: 290_000,
+        };
+        let curly_match = AcoustIdResolvedMatch {
+            score: 0.98,
+            title: "What\u{2019}s Up".to_string(),
+            artist: "Sample Band".to_string(),
+            album: "Sample Album".to_string(),
+            album_artist: "Sample Band".to_string(),
+            track_number: Some(1),
+            track_total: Some(10),
+            disc_number: Some(1),
+            year: Some(2005), // reissue year should NOT churn existing 1993 year
+            isrc: None,
+            mb_recording_id: "rec-1".to_string(),
+            mb_release_id: Some("rel-1".to_string()),
+            release_kind: "Studio Album".to_string(),
+        };
+        assert!(build_acoustic_mend_item(Path::new("/tmp"), &local, &curly_match, 0).is_none());
+
+        // 2. Instrumental variant must be penalized when local title is standard
+        let inst_payload = serde_json::json!({
+            "status": "ok",
+            "results": [{
+                "id": "aid-inst",
+                "score": 0.97,
+                "recordings": [
+                    {
+                        "id": "rec-inst",
+                        "title": "Anthem Track (instrumental)",
+                        "duration": 193,
+                        "artists": [{ "name": "Sample Artist" }],
+                        "releasegroups": [{
+                            "id": "rg-1",
+                            "title": "Debut LP",
+                            "type": "Album",
+                            "releases": [{ "id": "r1", "title": "Debut LP", "date": { "year": 2003 } }]
+                        }]
+                    },
+                    {
+                        "id": "rec-main",
+                        "title": "Anthem Track",
+                        "duration": 193,
+                        "artists": [{ "name": "Sample Artist" }],
+                        "releasegroups": [{
+                            "id": "rg-1",
+                            "title": "Debut LP",
+                            "type": "Album",
+                            "releases": [{ "id": "r1", "title": "Debut LP", "date": { "year": 2003 } }]
+                        }]
+                    }
+                ]
+            }]
+        });
+        let local_std = ScannedAudioFile {
+            title: "Anthem Track".to_string(),
+            artist: "Sample Artist".to_string(),
+            ..local.clone()
+        };
+        let picked =
+            select_best_acoustid_match_with_hint(&inst_payload, 193, Some(&local_std)).unwrap();
+        assert_eq!(picked.title, "Anthem Track");
+
+        // 3. Folder consensus unifies minority bonus-sampler hits into the dominant OST album
+        let mut items: Vec<ReunionMoveItem> = (1..=5u32)
+            .map(|n| ReunionMoveItem {
+                item_id: format!("mend-{n:04}"),
+                source_path: format!("/tmp/OST/AudioTrack {n:02}.mp3"),
+                target_path: format!("/tmp/Composer/Main OST/{n:02} Track {n}.mp3"),
+                title: format!("AudioTrack {n:02}"),
+                artist: "Composer".to_string(),
+                proposed_title: Some(format!("Real Theme {n}")),
+                proposed_artist: None,
+                proposed_isrc: None,
+                current_album: "OST".to_string(),
+                proposed_album: if n == 5 {
+                    "Bonus Sampler Book".to_string()
+                } else {
+                    "Main Game OST".to_string()
+                },
+                proposed_album_artist: "Composer".to_string(),
+                proposed_track_number: Some(n),
+                proposed_track_total: Some(if n == 5 { 8 } else { 17 }),
+                proposed_disc_number: Some(1),
+                proposed_year: Some(2012),
+                confidence: "high".to_string(),
+                match_reason: "AcoustID 97% (Studio Album)".to_string(),
+                catalog_album_id: None,
+            })
+            .collect();
+        apply_folder_album_consensus(Path::new("/tmp"), &mut items);
+        assert_eq!(items[4].proposed_album, "Main Game OST");
+        assert_eq!(items[4].proposed_track_total, Some(17));
+        assert!(items[4].target_path.contains("Main Game OST"));
     }
 }

@@ -6,9 +6,9 @@ use axum::{
 };
 use imp_core::liberation::{
     apply_album_reunion_plan, build_album_reunion_plan, compute_album_fragmentation_diagnostics,
-    get_cached_reunion_plan, global_acoustic_mend_controller, global_liberation_controller,
-    global_liberation_downloader, global_local_audit_controller, preflight_download_filtered,
-    undo_reunion_journal,
+    get_cached_reunion_plan, global_acoustic_mend_controller, global_catalog_reunion_controller,
+    global_liberation_controller, global_liberation_downloader, global_local_audit_controller,
+    preflight_download_filtered, undo_reunion_journal,
 };
 use imp_core::library::services_cache::DownloadFilter;
 use serde::Deserialize;
@@ -409,6 +409,8 @@ pub(super) struct ReunionPlanBody {
     root_dir: String,
     #[serde(default = "default_true")]
     use_apple_catalog: bool,
+    #[serde(default)]
+    folder_filter: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -429,6 +431,47 @@ pub(super) async fn liberation_reunion_plan_handler(
     match res {
         Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn liberation_reunion_start_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<ReunionPlanBody>,
+) -> impl IntoResponse {
+    let cfg = snapshot_apple_settings(&state);
+    let root_dir = PathBuf::from(body.root_dir.trim());
+    let use_apple_catalog = body.use_apple_catalog;
+    let folder_filter = body.folder_filter;
+    let res = tokio::task::spawn_blocking(move || {
+        global_catalog_reunion_controller().start(cfg, root_dir, use_apple_catalog, folder_filter)
+    })
+    .await;
+    match res {
+        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn liberation_reunion_pause_handler() -> impl IntoResponse {
+    let res = tokio::task::spawn_blocking(|| {
+        let ctrl = global_catalog_reunion_controller();
+        ctrl.pause()?;
+        Ok::<_, anyhow::Error>(ctrl.status())
+    })
+    .await;
+    match res {
+        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn liberation_reunion_status_handler() -> impl IntoResponse {
+    let res = tokio::task::spawn_blocking(|| global_catalog_reunion_controller().status()).await;
+    match res {
+        Ok(data) => Json(serde_json::json!({ "ok": true, "data": data })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }

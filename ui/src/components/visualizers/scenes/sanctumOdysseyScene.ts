@@ -2297,22 +2297,25 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
 
   if (isHeroSpeaker) {
     // Lower-Left Dialogue Box aligned directly beneath/beside the Barbarian Hero
-    boxW = Math.min(338, Math.max(224, Math.round(longestLine * 7.0 + 36)));
-    boxX = Math.max(vLeft + 16, Math.min(cx - 42, platX - 6));
+    const maxHeroW = Math.max(180, Math.min(338, Math.round(vRight - vLeft - 32)));
+    boxW = Math.min(maxHeroW, Math.max(210, Math.round(longestLine * 7.0 + 36)));
+    boxX = Math.max(vLeft + 14, Math.min(vRight - boxW - 14, Math.min(cx - 42, platX - 6)));
     boxY = Math.min(CANVAS_H - boxH - 10, cropBottomY - boxH - 8);
     tailBaseX = Math.max(boxX + 26, Math.min(boxX + boxW - 26, heroX + 6));
     tailTipX = heroX + 2;
     tailTipY = boxY - 12;
   } else {
-    // Upper-Right Dialogue Box aligned directly beneath the Monster Boss Portrait (clear of 3D Coffin!)
-    boxW = Math.min(276, Math.max(204, Math.round(longestLine * 6.9 + 34)));
-    boxX = Math.max(cx + 34, Math.min(vRight - boxW - 14, bossCx + bossHalf + 10 - boxW));
+    // Upper-Right Dialogue Box aligned directly beneath the Monster Boss Portrait (clamped inside viewport)
+    const maxMonsterW = Math.max(180, Math.min(276, Math.round(vRight - vLeft - 32)));
+    boxW = Math.min(maxMonsterW, Math.max(204, Math.round(longestLine * 6.9 + 34)));
+    const preferredX = Math.max(cx + 22, bossCx + bossHalf + 10 - boxW);
+    boxX = Math.max(vLeft + 14, Math.min(vRight - boxW - 14, preferredX));
     boxY = Math.min(
       Math.max(bossCy + bossHalf + 30, 152),
       cropBottomY - boxH - 14,
     );
     tailBaseX = Math.max(boxX + 26, Math.min(boxX + boxW - 26, bossCx));
-    tailTipX = bossCx;
+    tailTipX = Math.max(boxX + 18, Math.min(boxX + boxW - 18, bossCx));
     tailTipY = boxY - 11;
   }
 
