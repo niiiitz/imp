@@ -101,6 +101,57 @@ interface SwarmBatEntity {
   speedZ: number;
 }
 
+interface RoostBatEntity {
+  mode: 'perched' | 'swooping';
+  perchU: number;
+  targetU: number;
+  flightT: number;
+  flightDur: number;
+  dipDepth: number;
+  waitTimer: number;
+  wingPhase: number;
+  scale: number;
+}
+
+/**
+ * Evaluates a perch coordinate `(x, y)` along the upper pointed cathedral vault arches
+ * (left arch `u ∈ [0, 0.5]`, right arch `u ∈ [0.5, 1.0]`).
+ */
+function getArchPerchPoint(u: number): [number, number] {
+  const cx = CANVAS_W * 0.5;
+  const clamped = Math.max(0.06, Math.min(0.94, u));
+  if (clamped < 0.5) {
+    const t = clamped * 2;
+    const inv = 1 - t;
+    const x = inv * inv * 54 + 2 * inv * t * (cx * 0.55) + t * t * cx;
+    const y = inv * inv * 88 + 2 * inv * t * 6 + t * t * 14;
+    return [x, y];
+  } else {
+    const t = (clamped - 0.5) * 2;
+    const inv = 1 - t;
+    const x = inv * inv * cx + 2 * inv * t * (CANVAS_W - cx * 0.55) + t * t * (CANVAS_W - 54);
+    const y = inv * inv * 14 + 2 * inv * t * 6 + t * t * 88;
+    return [x, y];
+  }
+}
+
+// Perch slots along the top gothic arches (avoiding the upper-right Boss Portrait bay)
+const ARCH_PERCH_SLOTS = [0.10, 0.16, 0.23, 0.30, 0.37, 0.43, 0.56, 0.62, 0.68, 0.74];
+
+function createInitialRoostBats(): RoostBatEntity[] {
+  return ARCH_PERCH_SLOTS.map((u, idx) => ({
+    mode: 'perched',
+    perchU: u,
+    targetU: u,
+    flightT: 0,
+    flightDur: 1.5,
+    dipDepth: 72 + (idx % 3) * 18,
+    waitTimer: 1.2 + (idx * 1.15) % 6.5,
+    wingPhase: idx * 1.7,
+    scale: 0.64 + (idx % 3) * 0.1,
+  }));
+}
+
 const sanctumState = {
   initialized: false,
   lastTimeSec: -1,
@@ -115,6 +166,10 @@ const sanctumState = {
   banterTurnTimer: 0,
   exchangeCount: 0,
   lastLyricSeen: '',
+  linesSpokenInTurn: 0,
+  turnLines: [] as string[],
+  lastLyricChangeAt: -1,
+  lyricGapSec: 0,
   lineReveal: 1,
   throwAnimT: 0,
   holyFlameTimer: 0,
@@ -123,6 +178,8 @@ const sanctumState = {
     { active: false, x: 0, baseY: 140, dir: -1 as 1 | -1, speed: 78, phase: 0, amp: 28 },
     { active: false, x: 0, baseY: 175, dir: 1 as 1 | -1, speed: 70, phase: 2.2, amp: 24 },
   ] as MedusaHeadEntity[],
+  roostBats: createInitialRoostBats(),
+  roostSeed: 1,
   swarmActiveUntil: -10,
   lastSwarmAt: -18,
   swarmBats: [] as SwarmBatEntity[],
@@ -141,11 +198,17 @@ function resetSanctumState(trackKey: string): void {
   sanctumState.banterTurnTimer = 0;
   sanctumState.exchangeCount = 0;
   sanctumState.lastLyricSeen = '';
+  sanctumState.linesSpokenInTurn = 0;
+  sanctumState.turnLines = [];
+  sanctumState.lastLyricChangeAt = -1;
+  sanctumState.lyricGapSec = 0;
   sanctumState.lineReveal = 0.2;
   sanctumState.throwAnimT = 0;
   sanctumState.holyFlameTimer = 0;
   sanctumState.medusaCooldown = 5.5;
   for (const m of sanctumState.medusas) m.active = false;
+  sanctumState.roostBats = createInitialRoostBats();
+  sanctumState.roostSeed = 1;
   sanctumState.swarmActiveUntil = -10;
   sanctumState.lastSwarmAt = -14;
   sanctumState.swarmBats = [];
@@ -153,24 +216,36 @@ function resetSanctumState(trackKey: string): void {
 
 function triggerBatCameraSwarm(timeSec: number): void {
   sanctumState.lastSwarmAt = timeSec;
-  sanctumState.swarmActiveUntil = timeSec + 2.75;
+  sanctumState.swarmActiveUntil = timeSec + 3.1;
   sanctumState.swarmBats = [];
-  const count = 26;
+  // Big dramatic bass-drop colony rush (52 bats bursting out of the rafters toward the viewer!)
+  const count = 52;
   for (let i = 0; i < count; i++) {
-    const angle = (i / count) * Math.PI * 2 + ((i * 1.37) % 0.65);
+    const angle = (i / count) * Math.PI * 2 + ((i * 1.618) % 0.7);
     sanctumState.swarmBats.push({
       angle,
-      radialSpeed: 0.72 + (i % 5) * 0.14,
-      z: 0.85 + (i % 7) * 0.14,
-      wingPhase: i * 1.15,
-      speedZ: 0.52 + (i % 4) * 0.11,
+      radialSpeed: 0.62 + (i % 6) * 0.14,
+      z: 0.72 + (i % 11) * 0.11,
+      wingPhase: i * 1.07,
+      speedZ: 0.48 + (i % 5) * 0.11,
     });
+  }
+  // Scatter perched arch bats into swooping arcs as the drop hits!
+  for (let i = 0; i < sanctumState.roostBats.length; i++) {
+    const rb = sanctumState.roostBats[i];
+    if (rb.mode === 'perched') {
+      rb.mode = 'swooping';
+      rb.flightT = 0;
+      rb.flightDur = 1.35 + (i % 4) * 0.22;
+      rb.dipDepth = 82 + (i % 3) * 24;
+      rb.targetU = ARCH_PERCH_SLOTS[(i + 4) % ARCH_PERCH_SLOTS.length];
+    }
   }
 }
 
 /**
- * Draws a crisp 16-bit dark-fantasy Barbarian / Vampire Hunter Hero on the left stone platform,
- * complete with animated cape, breathing idle, beat-reactive coiled leather whip, and throw pose.
+ * Draws a crisp 16-bit dark-fantasy Buff Barbarian Hero (loincloth, spiked fur pauldrons,
+ * muscular bare chest with subtle chest hair, animated cape, coiled leather whip & throw pose).
  */
 function drawBarbarianHero(
   ctx: CanvasRenderingContext2D,
@@ -186,20 +261,23 @@ function drawBarbarianHero(
   ctx.save();
   ctx.translate(x, footY);
 
-  const breath = Math.sin(timeSec * 3.1) * 1.4;
+  const breath = Math.sin(timeSec * 3.1) * 1.5;
   const throwRecoil = throwT > 0 ? Math.sin(Math.min(1, throwT * 1.8) * Math.PI) : 0;
   const capeColor = lerpRgb(palette[5], [185, 28, 28], 0.55);
   const armorHighlight = lerpRgb(palette[6], [245, 198, 108], 0.55);
   const steelColor = lerpRgb(palette[7], [226, 232, 240], 0.6);
+  const skinBase = '#e3a577';
+  const skinShade = '#b9784c';
+  const hairBrown = '#3b1c0a';
 
   // Subtle heroic aura when speaking
   if (isSpeaking) {
-    const auraGrad = ctx.createRadialGradient(0, -34, 4, 0, -34, 44);
-    auraGrad.addColorStop(0, rgbToCss(palette[6], 0.28 + beat * 0.14));
+    const auraGrad = ctx.createRadialGradient(0, -34, 4, 0, -34, 46);
+    auraGrad.addColorStop(0, rgbToCss(palette[6], 0.30 + beat * 0.14));
     auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = auraGrad;
     ctx.beginPath();
-    ctx.arc(0, -34, 44, 0, Math.PI * 2);
+    ctx.arc(0, -34, 46, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -209,144 +287,304 @@ function drawBarbarianHero(
   ctx.strokeStyle = '#090b12';
   ctx.lineWidth = 1.4;
   ctx.beginPath();
-  ctx.moveTo(-4, -48 + breath);
-  ctx.quadraticCurveTo(-20 - capeFlutter * 0.5, -30, -28 - capeFlutter, -5);
-  ctx.lineTo(-14 - capeFlutter * 0.5, -2);
-  ctx.lineTo(-4, -18);
+  ctx.moveTo(-6, -49 + breath);
+  ctx.quadraticCurveTo(-22 - capeFlutter * 0.5, -30, -30 - capeFlutter, -5);
+  ctx.lineTo(-15 - capeFlutter * 0.5, -2);
+  ctx.lineTo(-5, -18);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // 2. Leather Boots & Planted Wide Stance Legs
-  ctx.fillStyle = '#1e1b2e';
-  ctx.strokeStyle = rgbToCss(palette[4], 0.65);
-  ctx.lineWidth = 1.2;
-  // Back leg
+  // 2. Muscular Bare Barbarian Thighs & Fur-Cuffed Leather Boots
+  ctx.fillStyle = skinBase;
+  ctx.strokeStyle = '#451a03';
+  ctx.lineWidth = 1.25;
+  // Back muscular leg
   ctx.beginPath();
-  ctx.moveTo(-5, -24 + breath * 0.4);
-  ctx.lineTo(-13, -10);
-  ctx.lineTo(-15, 0);
-  ctx.lineTo(-7, 0);
-  ctx.lineTo(-5, -10);
+  ctx.moveTo(-6, -24 + breath * 0.4);
+  ctx.lineTo(-14, -10);
+  ctx.lineTo(-15, -7);
+  ctx.lineTo(-6, -7);
+  ctx.lineTo(-4, -11);
   ctx.lineTo(1, -22 + breath * 0.4);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
-  // Front leg
+  // Front muscular leg
   ctx.beginPath();
   ctx.moveTo(2, -24 + breath * 0.4);
-  ctx.lineTo(11, -11);
-  ctx.lineTo(15, 0);
-  ctx.lineTo(7, 0);
-  ctx.lineTo(4, -10);
+  ctx.lineTo(12, -11);
+  ctx.lineTo(15, -7);
+  ctx.lineTo(6, -7);
+  ctx.lineTo(4, -11);
   ctx.lineTo(-2, -22 + breath * 0.4);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // Leather boot cuffs
-  ctx.fillStyle = '#78350f';
-  ctx.fillRect(-15, -7, 9, 7);
-  ctx.fillRect(6, -7, 9, 7);
+  // Subtle quad shading + barbarian leg hair ticks
+  ctx.strokeStyle = skinShade;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(-9, -18);
+  ctx.lineTo(-11, -11);
+  ctx.moveTo(6, -18);
+  ctx.lineTo(9, -11);
+  ctx.stroke();
+  ctx.strokeStyle = hairBrown;
+  ctx.lineWidth = 0.85;
+  ctx.beginPath();
+  ctx.moveTo(-11, -14);
+  ctx.lineTo(-12.5, -12.5);
+  ctx.moveTo(9, -14);
+  ctx.lineTo(10.5, -12.5);
+  ctx.stroke();
 
-  // 3. Armored Barbarian Tunic, Fur Loincloth Trim & Bronze Belt
-  ctx.fillStyle = '#312e47';
-  ctx.strokeStyle = '#0f172a';
+  // Heavy Fur-Cuffed Leather Barbarian Boots
+  ctx.fillStyle = '#5c280b';
+  ctx.strokeStyle = '#1c0f07';
+  ctx.lineWidth = 1.2;
+  ctx.fillRect(-16, -9, 10, 9);
+  ctx.strokeRect(-16, -9, 10, 9);
+  ctx.fillRect(6, -9, 10, 9);
+  ctx.strokeRect(6, -9, 10, 9);
+  // Shaggy wolf-fur boot cuffs
+  ctx.fillStyle = '#cbb793';
+  ctx.beginPath();
+  ctx.roundRect(-16.5, -11.5, 11, 3.5, 1.5);
+  ctx.roundRect(5.5, -11.5, 11, 3.5, 1.5);
+  ctx.fill();
+
+  // 3. Buff Broad-Shouldered Bare Chest, Sculpted Abs & Subtle Chest Hair!
+  ctx.fillStyle = skinBase;
+  ctx.strokeStyle = '#451a03';
   ctx.lineWidth = 1.3;
   ctx.beginPath();
-  ctx.moveTo(-9, -46 + breath);
-  ctx.lineTo(9, -46 + breath);
+  ctx.moveTo(-12, -47 + breath);
+  ctx.lineTo(12, -47 + breath);
+  ctx.lineTo(9, -35 + breath * 0.7);
   ctx.lineTo(7, -23 + breath * 0.5);
   ctx.lineTo(-7, -23 + breath * 0.5);
+  ctx.lineTo(-9, -35 + breath * 0.7);
   ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // Cross-chest leather baldric & bronze buckle
-  ctx.strokeStyle = rgbToCss(armorHighlight, 0.92);
-  ctx.lineWidth = 2.4;
+  // Sculpted Pectoral & 6-Pack Ab Shading
+  ctx.strokeStyle = skinShade;
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
-  ctx.moveTo(-7, -45 + breath);
-  ctx.lineTo(7, -26 + breath * 0.5);
+  // Pec underside curves
+  ctx.moveTo(-8, -38 + breath);
+  ctx.quadraticCurveTo(-4, -36 + breath, -0.5, -38.5 + breath);
+  ctx.moveTo(0.5, -38.5 + breath);
+  ctx.quadraticCurveTo(4.5, -36 + breath, 8.5, -38 + breath);
+  // Sternum & ab midline
+  ctx.moveTo(0, -41 + breath);
+  ctx.lineTo(0, -27 + breath * 0.5);
+  // Ab horizontal notches
+  ctx.moveTo(-4, -33 + breath * 0.7);
+  ctx.lineTo(4, -33 + breath * 0.7);
+  ctx.moveTo(-3.5, -29.5 + breath * 0.6);
+  ctx.lineTo(3.5, -29.5 + breath * 0.6);
   ctx.stroke();
-  ctx.fillStyle = '#b45309';
-  ctx.fillRect(-8, -26 + breath * 0.5, 16, 4.5);
-  ctx.fillStyle = '#facc15';
-  ctx.fillRect(-2.5, -26 + breath * 0.5, 5, 4.5);
 
-  // Fur-trimmed Barbarian Pauldrons
-  ctx.fillStyle = '#92400e';
-  ctx.strokeStyle = rgbToCss(armorHighlight, 0.88);
-  ctx.lineWidth = 1.3;
+  // Classic hairy barbarian chest hair tufts & happy trail!
+  ctx.strokeStyle = hairBrown;
+  ctx.lineWidth = 1.0;
   ctx.beginPath();
-  ctx.arc(-9, -44 + breath, 6.2, 0, Math.PI * 2);
-  ctx.arc(8, -44 + breath, 5.8, 0, Math.PI * 2);
+  // Left & right pec tufts
+  ctx.moveTo(-5, -42 + breath);
+  ctx.lineTo(-3, -40 + breath);
+  ctx.moveTo(-2, -41.5 + breath);
+  ctx.lineTo(-0.5, -39.5 + breath);
+  ctx.moveTo(1.5, -42 + breath);
+  ctx.lineTo(3.5, -40 + breath);
+  ctx.moveTo(4.5, -41 + breath);
+  ctx.lineTo(6, -39.5 + breath);
+  ctx.moveTo(-3, -39.5 + breath);
+  ctx.lineTo(-1, -38 + breath);
+  ctx.moveTo(1, -39.5 + breath);
+  ctx.lineTo(3, -38 + breath);
+  // Subtle belly hair trail
+  ctx.moveTo(-1, -32 + breath * 0.6);
+  ctx.lineTo(1, -30.5 + breath * 0.6);
+  ctx.moveTo(0.5, -29 + breath * 0.5);
+  ctx.lineTo(-0.5, -27.2 + breath * 0.5);
+  ctx.stroke();
+
+  // Single Diagonal Studded Leather Harness Strap (keeps buff chest clearly visible)
+  ctx.strokeStyle = '#6b3410';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(-10, -46 + breath);
+  ctx.lineTo(7, -25 + breath * 0.5);
+  ctx.stroke();
+  ctx.fillStyle = '#facc15';
+  ctx.beginPath();
+  ctx.arc(-2, -36 + breath * 0.8, 2.0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 4. Fur-Trimmed Leather Loincloth & Ornate Bronze Barbarian Belt
+  // Shaggy wolf-fur hip pelt
+  ctx.fillStyle = '#cbb793';
+  ctx.strokeStyle = '#5c3d1e';
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(-10, -25 + breath * 0.5);
+  ctx.lineTo(10, -25 + breath * 0.5);
+  ctx.lineTo(11, -18 + breath * 0.3);
+  ctx.lineTo(6, -20 + breath * 0.3);
+  ctx.lineTo(3, -17 + breath * 0.3);
+  ctx.lineTo(-3, -17 + breath * 0.3);
+  ctx.lineTo(-6, -20 + breath * 0.3);
+  ctx.lineTo(-11, -18 + breath * 0.3);
+  ctx.closePath();
   ctx.fill();
   ctx.stroke();
 
-  // 4. Head, Crimson Headband & Flowing Hair (facing right toward Boss Portrait)
-  const headY = -55 + breath;
-  // Back hair tufts
-  ctx.fillStyle = '#451a03';
+  // Center leather loincloth flap hanging down between thighs
+  ctx.fillStyle = '#78350f';
+  ctx.strokeStyle = '#291205';
+  ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.moveTo(-6, headY - 4);
-  ctx.lineTo(-14 - capeFlutter * 0.25, headY + 2);
-  ctx.lineTo(-11, headY + 7);
+  ctx.moveTo(-5, -23 + breath * 0.5);
+  ctx.lineTo(5, -23 + breath * 0.5);
+  ctx.lineTo(4, -12);
+  ctx.lineTo(0, -10);
+  ctx.lineTo(-4, -12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Thick Barbarian Belt + Golden Medallion Buckle
+  ctx.fillStyle = '#92400e';
+  ctx.fillRect(-9.5, -26.5 + breath * 0.5, 19, 4.5);
+  ctx.fillStyle = '#facc15';
+  ctx.strokeStyle = '#78350f';
+  ctx.lineWidth = 1.0;
+  ctx.beginPath();
+  ctx.arc(0, -24.2 + breath * 0.5, 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // 5. Heavy Spiked & Fur-Lined Barbarian Pauldrons
+  for (const side of [-1, 1]) {
+    const px = side * 11.5;
+    const py = -45.5 + breath;
+    // Fur under-trim
+    ctx.fillStyle = '#cbb793';
+    ctx.beginPath();
+    ctx.arc(px, py + 1.5, 7.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Forged bronze/iron dome pauldron
+    ctx.fillStyle = '#78350f';
+    ctx.strokeStyle = rgbToCss(armorHighlight, 0.92);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(px, py, 6.4, Math.PI * 0.95, Math.PI * 2.15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Iconic barbarian shoulder spike
+    ctx.fillStyle = rgbToCss(steelColor, 0.96);
+    ctx.beginPath();
+    ctx.moveTo(px + side * 2, py - 5);
+    ctx.lineTo(px + side * 6.5, py - 11.5);
+    ctx.lineTo(px + side * 5.5, py - 3);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 6. Head, Wild Barbarian Mane & Crimson Headband (facing right toward Boss Portrait)
+  const headY = -56 + breath;
+  // Wild flowing barbarian back hair
+  ctx.fillStyle = hairBrown;
+  ctx.beginPath();
+  ctx.moveTo(-6, headY - 5);
+  ctx.lineTo(-17 - capeFlutter * 0.25, headY + 1);
+  ctx.lineTo(-14 - capeFlutter * 0.2, headY + 8);
+  ctx.lineTo(-9, headY + 11);
   ctx.lineTo(-3, headY + 4);
   ctx.closePath();
   ctx.fill();
 
-  // Face
-  ctx.fillStyle = '#f5cba7';
+  // Rugged chiseled face
+  ctx.fillStyle = skinBase;
   ctx.strokeStyle = '#451a03';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
-  ctx.roundRect(-5.5, headY - 6, 12, 12.5, 4);
+  ctx.roundRect(-5.5, headY - 6, 12.5, 13, 3.8);
   ctx.fill();
   ctx.stroke();
 
-  // Determined brow & eye facing right
+  // Determined brow, eye & slight barbarian stubble/jawline
   ctx.fillStyle = '#0f172a';
-  ctx.fillRect(2, headY - 2, 2.5, 2);
+  ctx.fillRect(2, headY - 2, 2.6, 2);
+  ctx.fillStyle = 'rgba(59, 28, 10, 0.32)';
+  ctx.fillRect(1, headY + 3, 5.5, 3);
 
-  // Iconic Vampire Hunter Headband + Fluttering Tail
+  // Iconic Crimson Headband + Fluttering Tail
   ctx.fillStyle = '#dc2626';
-  ctx.fillRect(-6, headY - 5, 13, 3);
+  ctx.fillRect(-6, headY - 5, 13.5, 3);
   ctx.strokeStyle = '#ef4444';
   ctx.lineWidth = 2.0;
   ctx.beginPath();
   ctx.moveTo(-6, headY - 3.5);
-  ctx.quadraticCurveTo(-14, headY - 5 + Math.sin(timeSec * 7) * 2.5, -20, headY - 1 + Math.cos(timeSec * 6) * 2.5);
+  ctx.quadraticCurveTo(
+    -15,
+    headY - 5 + Math.sin(timeSec * 7) * 2.5,
+    -21,
+    headY - 1 + Math.cos(timeSec * 6) * 2.5,
+  );
   ctx.stroke();
 
-  // 5. Throwing / Whip Arm + Animated Leather Chain-Whip!
+  // 7. Off-Hand Muscular Bicep on Hip + Throwing / Whip Arm with Leather Bracer
+  // Left muscular bicep resting heroically near belt
+  ctx.strokeStyle = skinBase;
+  ctx.lineWidth = 5.0;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-11, -42 + breath);
+  ctx.lineTo(-15, -33 + breath * 0.7);
+  ctx.lineTo(-10, -25 + breath * 0.5);
+  ctx.stroke();
+  ctx.strokeStyle = '#78350f';
+  ctx.lineWidth = 5.2;
+  ctx.beginPath();
+  ctx.moveTo(-14, -30 + breath * 0.6);
+  ctx.lineTo(-11, -26 + breath * 0.5);
+  ctx.stroke();
+
+  // Right muscular throwing/whip arm
   const armAngle =
     throwRecoil > 0.05
       ? -0.95 + throwRecoil * 1.15
       : 0.28 + Math.sin(timeSec * 3.1) * 0.08 - beat * 0.22;
-  const shoulderX = 7;
+  const shoulderX = 10;
   const shoulderY = -42 + breath;
-  const handX = shoulderX + Math.cos(armAngle) * 15;
-  const handY = shoulderY + Math.sin(armAngle) * 15;
+  const handX = shoulderX + Math.cos(armAngle) * 16;
+  const handY = shoulderY + Math.sin(armAngle) * 16;
 
-  // Muscular arm + bracer
-  ctx.strokeStyle = '#f5cba7';
-  ctx.lineWidth = 4.2;
+  // Muscular bare bicep + forearm
+  ctx.strokeStyle = skinBase;
+  ctx.lineWidth = 5.2;
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(shoulderX, shoulderY);
   ctx.lineTo(handX, handY);
   ctx.stroke();
 
-  ctx.strokeStyle = '#92400e';
-  ctx.lineWidth = 4.6;
+  // Studded leather wrist bracer
+  ctx.strokeStyle = '#78350f';
+  ctx.lineWidth = 5.4;
   ctx.beginPath();
-  ctx.moveTo(shoulderX + (handX - shoulderX) * 0.45, shoulderY + (handY - shoulderY) * 0.45);
+  ctx.moveTo(shoulderX + (handX - shoulderX) * 0.52, shoulderY + (handY - shoulderY) * 0.52);
   ctx.lineTo(handX, handY);
   ctx.stroke();
 
   // Whip Handle
-  ctx.strokeStyle = '#78350f';
+  ctx.strokeStyle = '#5c280b';
   ctx.lineWidth = 2.8;
   ctx.beginPath();
   ctx.moveTo(handX, handY);
@@ -884,6 +1122,7 @@ function drawSubWeaponProjectile(
 ): void {
   ctx.save();
   ctx.translate(x, y);
+  ctx.scale(1.26, 1.26);
 
   if (weapon === 'axe') {
     // Glowing motion arc smear + spinning double-bit battleaxe
@@ -1100,6 +1339,70 @@ function drawGothicBat(
 }
 
 /**
+ * Draws a cathedral bat hanging upside-down by its claws from the upper vaulted stone arch,
+ * folded wings tucked snug, subtly swaying and glinting red eyes on beats.
+ */
+function drawPerchedUpsideDownBat(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  timeSec: number,
+  beat: number,
+  seed: number,
+  palette: RgbTuple[],
+): void {
+  const sway = Math.sin(timeSec * 2.2 + seed) * 0.08;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(sway);
+
+  // Tiny claws gripping the stone arch
+  ctx.strokeStyle = rgbToCss(palette[6], 0.72);
+  ctx.lineWidth = 1.0;
+  ctx.beginPath();
+  ctx.moveTo(-1.5 * scale, 0);
+  ctx.lineTo(-1.5 * scale, 3 * scale);
+  ctx.moveTo(1.5 * scale, 0);
+  ctx.lineTo(1.5 * scale, 3 * scale);
+  ctx.stroke();
+
+  // Folded dark teardrop bat cloak hanging upside down
+  ctx.fillStyle = '#090c17';
+  ctx.strokeStyle = rgbToCss(palette[5], 0.74);
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(0, 2.5 * scale);
+  ctx.quadraticCurveTo(6.5 * scale, 6.5 * scale, 4.5 * scale, 14.5 * scale);
+  ctx.lineTo(2.5 * scale, 17.5 * scale); // Left upside-down ear
+  ctx.lineTo(0.8 * scale, 15 * scale);
+  ctx.lineTo(-0.8 * scale, 15 * scale);
+  ctx.lineTo(-2.5 * scale, 17.5 * scale); // Right upside-down ear
+  ctx.lineTo(-4.5 * scale, 14.5 * scale);
+  ctx.quadraticCurveTo(-6.5 * scale, 6.5 * scale, 0, 2.5 * scale);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Wing-fold crease
+  ctx.strokeStyle = rgbToCss(palette[4], 0.45);
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0, 4 * scale);
+  ctx.lineTo(0, 12.5 * scale);
+  ctx.stroke();
+
+  // Blinking crimson eyes near the hanging head (glint brighter on beats!)
+  const blink = ((Math.floor(timeSec * 1.4 + seed * 3) % 7) !== 0);
+  if (blink) {
+    ctx.fillStyle = beat > 0.45 ? '#fca5a5' : '#ef4444';
+    ctx.fillRect(-2.1 * scale, 12.2 * scale, 1.3 * scale, 1.3 * scale);
+    ctx.fillRect(0.9 * scale, 12.2 * scale, 1.3 * scale, 1.3 * scale);
+  }
+  ctx.restore();
+}
+
+/**
  * Mode 8 (Wave 2): 16-Bit Dark Fantasy Sanctum (Crisp 1280×720 Gothic Cathedral Boss Stage)
  * - Full interior gothic cathedral with perspective tiled stone floor, vaulted arches,
  *   16-band spectral pipe-organ EQ columns, flickering braziers, backlit album-art stained-glass
@@ -1122,6 +1425,7 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
     midEnergy,
     highEnergy,
     drop,
+    trans,
     sb,
     palette,
     artCanvas,
@@ -1172,14 +1476,34 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
 
       if (hasActiveLyric) {
         if (cleanLyric !== sanctumState.lastLyricSeen) {
+          const gapSinceLast =
+            sanctumState.lastLyricChangeAt >= 0 ? timeSec - sanctumState.lastLyricChangeAt : 0;
+          const detectedSectionBreak =
+            sanctumState.linesSpokenInTurn >= 2 &&
+            (sanctumState.lyricGapSec >= 1.4 || gapSinceLast >= 5.2);
+          const hitWallOfTextStanzaCap = sanctumState.linesSpokenInTurn >= 4;
+
+          if (detectedSectionBreak || hitWallOfTextStanzaCap) {
+            sanctumState.speaker = sanctumState.speaker === 'monster' ? 'hero' : 'monster';
+            sanctumState.linesSpokenInTurn = 1;
+            sanctumState.turnLines = [cleanLyric];
+            sanctumState.exchangeCount++;
+          } else {
+            sanctumState.linesSpokenInTurn++;
+            sanctumState.turnLines.push(cleanLyric);
+            if (sanctumState.turnLines.length > 3) {
+              sanctumState.turnLines.shift();
+            }
+          }
           sanctumState.lastLyricSeen = cleanLyric;
-          sanctumState.speaker = sanctumState.speaker === 'monster' ? 'hero' : 'monster';
-          sanctumState.exchangeCount++;
+          sanctumState.lastLyricChangeAt = timeSec;
+          sanctumState.lyricGapSec = 0;
           sanctumState.lineReveal = 0.08;
         }
       } else {
+        sanctumState.lyricGapSec += safeDt;
         sanctumState.banterTurnTimer += safeDt;
-        if (sanctumState.banterTurnTimer >= 4.4) {
+        if (sanctumState.banterTurnTimer >= 4.8) {
           sanctumState.banterTurnTimer = 0;
           if (sanctumState.speaker === 'monster') {
             sanctumState.speaker = 'hero';
@@ -1193,10 +1517,11 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
         }
       }
 
-      // After ~4 exchanges (or ~20s), the Hero hurls an iconic sub-weapon at the Monster Portrait!
+      // After each side delivers a full verse/stanza exchange (or 4 banter turns / ~26s), Hero throws a sub-weapon!
+      const neededExchanges = hasActiveLyric ? 2 : 4;
       if (
-        (sanctumState.exchangeCount >= 4 && sanctumState.bossElapsed >= 11.5) ||
-        sanctumState.bossElapsed >= 21.0
+        (sanctumState.exchangeCount >= neededExchanges && sanctumState.bossElapsed >= 14.0) ||
+        sanctumState.bossElapsed >= 26.0
       ) {
         sanctumState.phase = 'throwing';
         sanctumState.phaseTimer = 0;
@@ -1205,8 +1530,8 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
       }
     } else if (sanctumState.phase === 'throwing') {
       sanctumState.phaseTimer += safeDt;
-      sanctumState.throwAnimT = Math.min(1, sanctumState.phaseTimer / 0.55);
-      const flightDur = currentWeapon === 'knife' ? 0.52 : 0.78;
+      sanctumState.throwAnimT = Math.min(1, sanctumState.phaseTimer / 0.65);
+      const flightDur = currentWeapon === 'knife' ? 0.78 : 1.15;
       if (sanctumState.phaseTimer >= flightDur) {
         sanctumState.phase = 'imploding';
         sanctumState.phaseTimer = 0;
@@ -1224,6 +1549,8 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
         sanctumState.bossElapsed = 0;
         sanctumState.banterPairIdx = 0;
         sanctumState.banterTurnTimer = 0;
+        sanctumState.linesSpokenInTurn = 0;
+        sanctumState.turnLines = [];
         sanctumState.speaker = 'monster';
         sanctumState.lineReveal = 0.05;
         sanctumState.phase = 'spawning';
@@ -1260,20 +1587,49 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
       }
     }
 
-    // Trigger & step 3D Bat Camera-Rush Swarm on drops or periodic gothic crescendo
+    // Step roosting arch bats: hang upside-down on top arch, swoop in a U-arc to a new perch!
+    for (let i = 0; i < sanctumState.roostBats.length; i++) {
+      const rb = sanctumState.roostBats[i];
+      if (rb.mode === 'perched') {
+        rb.waitTimer -= safeDt * (1 + (beat > 0.65 ? 0.8 : 0));
+        if (rb.waitTimer <= 0) {
+          sanctumState.roostSeed = (sanctumState.roostSeed * 1664525 + 1013904223) >>> 0;
+          const nextSlot = ARCH_PERCH_SLOTS[sanctumState.roostSeed % ARCH_PERCH_SLOTS.length];
+          rb.targetU = Math.abs(nextSlot - rb.perchU) < 0.05
+            ? ARCH_PERCH_SLOTS[(sanctumState.roostSeed + 3) % ARCH_PERCH_SLOTS.length]
+            : nextSlot;
+          rb.mode = 'swooping';
+          rb.flightT = 0;
+          rb.flightDur = 1.45 + ((sanctumState.roostSeed >> 4) % 4) * 0.25;
+          rb.dipDepth = 64 + ((sanctumState.roostSeed >> 8) % 4) * 18;
+        }
+      } else {
+        rb.flightT += safeDt / rb.flightDur;
+        rb.wingPhase += (16 + beat * 8) * safeDt;
+        if (rb.flightT >= 1.0) {
+          rb.perchU = rb.targetU;
+          rb.mode = 'perched';
+          rb.flightT = 0;
+          sanctumState.roostSeed = (sanctumState.roostSeed * 1664525 + 1013904223) >>> 0;
+          rb.waitTimer = 2.8 + ((sanctumState.roostSeed >> 6) % 7) * 0.9;
+        }
+      }
+    }
+
+    // Trigger & step 3D Bat Camera-Rush Swarm on bass drops or periodic gothic crescendo
     if (
       timeSec > sanctumState.swarmActiveUntil &&
-      timeSec - sanctumState.lastSwarmAt > 18.0 &&
-      (drop > 0.36 || timeSec - sanctumState.lastSwarmAt > 27.0)
+      timeSec - sanctumState.lastSwarmAt > 14.0 &&
+      (drop > 0.30 || (subBass > 0.72 && beat > 0.76) || timeSec - sanctumState.lastSwarmAt > 25.0)
     ) {
       triggerBatCameraSwarm(timeSec);
     }
     if (timeSec <= sanctumState.swarmActiveUntil) {
       for (const b of sanctumState.swarmBats) {
-        b.z -= b.speedZ * (1 + subBass * 0.45) * safeDt;
-        b.wingPhase += (18 + beat * 8) * safeDt;
+        b.z -= b.speedZ * (1 + subBass * 0.5) * safeDt;
+        b.wingPhase += (19 + beat * 9) * safeDt;
         if (b.z <= 0.03) {
-          b.z = 1.05;
+          b.z = 1.12;
         }
       }
     }
@@ -1586,25 +1942,31 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
   });
 
   // =========================================================================
-  // 8. Ambient Music-Reactive Bats & Sine-Wave Medusa Heads
+  // 8. Roosting Cathedral Arch Bats (Upside-Down Perches -> Swooping Arcs) & Medusa Heads
   // =========================================================================
-  for (let b = 0; b < 8; b++) {
-    const bx = ((b * 89 + timeSec * (28 + (b % 3) * 9 + midEnergy * 14)) % (CANVAS_W - 60)) + 30;
-    const by =
-      floorY -
-      48 -
-      ((timeSec * (16 + (b % 4) * 5) + b * 27) % 145) -
-      sb[(b * 2) & 15] * 14;
-    const flap = timeSec * (13 + beat * 6) + b * 2.1;
-    drawGothicBat(
-      ctx,
-      bx,
-      by,
-      0.58 + (b % 3) * 0.12,
-      flap,
-      '#0b0f1e',
-      rgbToCss(palette[6], 0.72),
-    );
+  for (let i = 0; i < sanctumState.roostBats.length; i++) {
+    const rb = sanctumState.roostBats[i];
+    if (rb.mode === 'perched') {
+      const [px, py] = getArchPerchPoint(rb.perchU);
+      drawPerchedUpsideDownBat(ctx, px, py, rb.scale, timeSec, beat, i * 1.9, palette);
+    } else {
+      const [sx, sy] = getArchPerchPoint(rb.perchU);
+      const [ex, ey] = getArchPerchPoint(rb.targetU);
+      const t = Math.max(0, Math.min(1, rb.flightT));
+      // Smooth ease-in-out horizontal glide + graceful downward U-arc dive & climb back to perch
+      const easeT = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      const bx = sx + (ex - sx) * easeT;
+      const by = sy + (ey - sy) * easeT + Math.sin(t * Math.PI) * rb.dipDepth;
+      drawGothicBat(
+        ctx,
+        bx,
+        by,
+        rb.scale * (0.95 + Math.sin(t * Math.PI) * 0.25),
+        rb.wingPhase,
+        '#090c17',
+        rgbToCss(palette[6], 0.8),
+      );
+    }
   }
 
   for (const m of sanctumState.medusas) {
@@ -1826,7 +2188,7 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
   // 11. Flying Iconic Sub-Weapon Projectile (Hero -> Boss Portrait!)
   // =========================================================================
   if (sanctumState.phase === 'throwing') {
-    const flightDur = currentWeapon === 'knife' ? 0.52 : 0.78;
+    const flightDur = currentWeapon === 'knife' ? 0.78 : 1.15;
     const u = Math.max(0, Math.min(1, sanctumState.phaseTimer / flightDur));
     const startX = heroX + 18;
     const startY = heroY - 38;
@@ -1862,66 +2224,132 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
   // =========================================================================
   if (timeSec <= sanctumState.swarmActiveUntil) {
     const swarmRem = sanctumState.swarmActiveUntil - timeSec;
-    const swarmFade = Math.min(1, swarmRem * 1.4, (2.75 - swarmRem) * 2.2);
+    const swarmFade = Math.min(1, swarmRem * 1.35, (3.1 - swarmRem) * 2.2);
     for (const b of sanctumState.swarmBats) {
-      const invZ = 1 / Math.max(0.06, b.z);
-      const spread = (1 - b.z) * 255 * b.radialSpeed;
-      const sx = cx + Math.cos(b.angle) * spread * 1.45;
-      const sy = 148 + Math.sin(b.angle) * spread * 0.92;
-      if (sx < -60 || sx > CANVAS_W + 60 || sy < -60 || sy > CANVAS_H + 60) continue;
-      const sc = Math.min(3.4, 0.35 + invZ * 0.24);
+      const invZ = 1 / Math.max(0.055, b.z);
+      const spread = (1 - Math.min(1, b.z)) * 275 * b.radialSpeed;
+      const sx = cx + Math.cos(b.angle) * spread * 1.48;
+      const sy = 136 + Math.sin(b.angle) * spread * 0.96;
+      if (sx < -80 || sx > CANVAS_W + 80 || sy < -80 || sy > CANVAS_H + 80) continue;
+      const sc = Math.min(3.8, 0.36 + invZ * 0.25);
       drawGothicBat(
         ctx,
         sx,
         sy,
         sc,
         b.wingPhase,
-        `rgba(5, 7, 15, ${(0.92 * swarmFade).toFixed(2)})`,
-        rgbToCss(palette[6], 0.72 * swarmFade),
+        `rgba(5, 7, 15, ${(0.93 * swarmFade).toFixed(2)})`,
+        rgbToCss(palette[6], 0.75 * swarmFade),
       );
     }
   }
 
   // =========================================================================
-  // 13. Ornate 16-Bit JRPG Dialogue Box (Monster ↔ Hero Lyrics or Campy Banter)
+  // 13. Dual Alternating 16-Bit RPG Speech Boxes (Multi-Line Stanza Blocks):
+  //     - Monster Box: Upper-Right beneath Boss Portrait (with pointer up to Portrait)
+  //     - Hero Box:    Lower-Left aligned with Barbarian Hero (with pointer up to Hero)
   // =========================================================================
-  let displayText: string;
-  if (hasActiveLyric) {
-    displayText = cleanLyric;
+  const isHeroSpeaker = sanctumState.speaker === 'hero';
+  const maxLineChars = isHeroSpeaker ? 36 : 31;
+
+  // Build up to 3 lines for the active speaker's RPG stanza block:
+  // Previous lines in this stanza render slightly muted above the crisp active typewriter line!
+  const renderedRows: { text: string; active: boolean }[] = [];
+  if (hasActiveLyric && sanctumState.turnLines.length > 0) {
+    const history = sanctumState.turnLines;
+    const prevLines = history.slice(0, -1);
+    const activeRaw = history[history.length - 1];
+    const visibleChars = Math.max(1, Math.ceil(activeRaw.length * sanctumState.lineReveal));
+    const activeWrapped = splitIntoBalancedLines(activeRaw.slice(0, visibleChars), maxLineChars);
+    const prevSlots = Math.max(0, 3 - activeWrapped.length);
+    for (const pl of prevLines.slice(-prevSlots)) {
+      const trimmedPrev =
+        pl.length > maxLineChars + 2 ? `${pl.slice(0, maxLineChars).trim()}…` : pl;
+      renderedRows.push({ text: trimmedPrev, active: false });
+    }
+    for (const al of activeWrapped) {
+      renderedRows.push({ text: al, active: true });
+    }
   } else {
     const pair =
       currentMonster.exchanges[sanctumState.banterPairIdx % currentMonster.exchanges.length];
-    displayText = sanctumState.speaker === 'monster' ? pair[0] : pair[1];
+    const displayText = hasActiveLyric
+      ? cleanLyric
+      : sanctumState.speaker === 'monster'
+        ? pair[0]
+        : pair[1];
+    const visibleChars = Math.max(1, Math.ceil(displayText.length * sanctumState.lineReveal));
+    const wrapped = splitIntoBalancedLines(displayText.slice(0, visibleChars), maxLineChars);
+    for (const wl of wrapped) {
+      renderedRows.push({ text: wl, active: true });
+    }
   }
-  const visibleChars = Math.max(1, Math.ceil(displayText.length * sanctumState.lineReveal));
-  const typedText = displayText.slice(0, visibleChars);
-  const lines = splitIntoBalancedLines(typedText, 44);
-  const boxW = Math.min(CANVAS_W - 60, Math.max(300, Math.max(...lines.map((l) => l.length), 12) * 7.6 + 52));
-  const boxH = lines.length * 17 + 26;
-  const boxX = cx - boxW * 0.5;
-  const boxY = Math.min(CANVAS_H - boxH - 10, cropBottomY - boxH - 8);
 
-  const isHeroSpeaker = sanctumState.speaker === 'hero';
+  const longestLine = Math.max(...renderedRows.map((r) => r.text.length), 14);
+  const boxH = renderedRows.length * 15.5 + 24;
+
+  let boxW: number;
+  let boxX: number;
+  let boxY: number;
+  let tailTipX: number;
+  let tailTipY: number;
+  let tailBaseX: number;
+
+  if (isHeroSpeaker) {
+    // Lower-Left Dialogue Box aligned directly beneath/beside the Barbarian Hero
+    boxW = Math.min(338, Math.max(224, Math.round(longestLine * 7.0 + 36)));
+    boxX = Math.max(vLeft + 16, Math.min(cx - 42, platX - 6));
+    boxY = Math.min(CANVAS_H - boxH - 10, cropBottomY - boxH - 8);
+    tailBaseX = Math.max(boxX + 26, Math.min(boxX + boxW - 26, heroX + 6));
+    tailTipX = heroX + 2;
+    tailTipY = boxY - 12;
+  } else {
+    // Upper-Right Dialogue Box aligned directly beneath the Monster Boss Portrait (clear of 3D Coffin!)
+    boxW = Math.min(276, Math.max(204, Math.round(longestLine * 6.9 + 34)));
+    boxX = Math.max(cx + 34, Math.min(vRight - boxW - 14, bossCx + bossHalf + 10 - boxW));
+    boxY = Math.min(
+      Math.max(bossCy + bossHalf + 30, 152),
+      cropBottomY - boxH - 14,
+    );
+    tailBaseX = Math.max(boxX + 26, Math.min(boxX + boxW - 26, bossCx));
+    tailTipX = bossCx;
+    tailTipY = boxY - 11;
+  }
+
   const speakerAccent: RgbTuple = isHeroSpeaker ? [56, 189, 248] : currentMonster.accentRgb;
   const speakerLabel = isHeroSpeaker
     ? hasActiveLyric
-      ? '♪ VAMPIRE HUNTER'
-      : 'VAMPIRE HUNTER'
+      ? '♪ BARBARIAN HERO'
+      : 'BARBARIAN HERO'
     : hasActiveLyric
       ? `♪ ${currentMonster.name}`
       : currentMonster.name;
 
   ctx.save();
   const dlgGrad = ctx.createLinearGradient(boxX, boxY, boxX, boxY + boxH);
-  dlgGrad.addColorStop(0, 'rgba(13, 19, 44, 0.93)');
-  dlgGrad.addColorStop(1, 'rgba(4, 6, 16, 0.96)');
+  dlgGrad.addColorStop(0, 'rgba(13, 19, 44, 0.94)');
+  dlgGrad.addColorStop(1, 'rgba(4, 6, 16, 0.97)');
   ctx.fillStyle = dlgGrad;
   ctx.strokeStyle = rgbToCss(speakerAccent, 0.95);
   ctx.lineWidth = 2.0;
+
+  // Main rounded RPG dialogue box
   ctx.beginPath();
   ctx.roundRect(boxX, boxY, boxW, boxH, 6);
   ctx.fill();
   ctx.stroke();
+
+  // Speech-bubble pointer triangle pointing toward Hero or Monster Portrait
+  ctx.beginPath();
+  ctx.moveTo(tailBaseX - 7, boxY + 1);
+  ctx.lineTo(tailTipX, tailTipY);
+  ctx.lineTo(tailBaseX + 7, boxY + 1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Seam cover so pointer blends seamlessly into the box interior
+  ctx.fillStyle = 'rgba(12, 18, 40, 0.96)';
+  ctx.fillRect(tailBaseX - 6, boxY, 12, 3.5);
 
   // Inner filigree trim
   ctx.strokeStyle = rgbToCss(palette[6], 0.42);
@@ -1930,31 +2358,34 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
   ctx.roundRect(boxX + 3, boxY + 3, boxW - 6, boxH - 6, 4);
   ctx.stroke();
 
-  // Speaker Name Tab perched on top-left of dialogue frame
-  ctx.font = '800 8.5px "JetBrains Mono", monospace';
-  const tabW = Math.max(92, speakerLabel.length * 6.0 + 18);
-  const tabX = boxX + 12;
-  const tabY = boxY - 9;
-  ctx.fillStyle = 'rgba(7, 10, 22, 0.96)';
+  // Speaker Name Tab (bottom-left for Hero, bottom-right for Monster)
+  ctx.font = '800 8px "JetBrains Mono", monospace';
+  const tabW = Math.max(88, speakerLabel.length * 5.7 + 16);
+  const tabX = isHeroSpeaker ? boxX + 10 : boxX + boxW - tabW - 10;
+  const tabY = boxY + boxH - 8;
+  ctx.fillStyle = 'rgba(7, 10, 22, 0.97)';
   ctx.strokeStyle = rgbToCss(speakerAccent, 0.95);
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = 1.3;
   ctx.beginPath();
-  ctx.roundRect(tabX, tabY, tabW, 16, 4);
+  ctx.roundRect(tabX, tabY, tabW, 14, 4);
   ctx.fill();
   ctx.stroke();
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = rgbToCss(lerpRgb(speakerAccent, [255, 255, 255], 0.42), 0.98);
-  ctx.fillText(speakerLabel, tabX + tabW * 0.5, tabY + 8.2);
+  ctx.fillText(speakerLabel, tabX + tabW * 0.5, tabY + 7.2);
 
-  // Dialogue text lines
-  ctx.font = '700 12px "JetBrains Mono", Georgia, serif';
+  // Dialogue text lines (stacked multi-line stanza block)
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#f8fafc';
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], cx, boxY + 21 + i * 17);
+  for (let i = 0; i < renderedRows.length; i++) {
+    const row = renderedRows[i];
+    ctx.font = row.active
+      ? '700 11.5px "JetBrains Mono", Georgia, serif'
+      : '600 10.5px "JetBrains Mono", Georgia, serif';
+    ctx.fillStyle = row.active ? '#f8fafc' : 'rgba(203, 213, 225, 0.62)';
+    ctx.fillText(row.text, boxX + boxW * 0.5, boxY + 16 + i * 15.5);
   }
   ctx.restore();
 
@@ -1997,6 +2428,50 @@ export function renderSanctumOdysseyScene(s: SceneRenderContext): void {
     ctx.font = '700 9.5px sans-serif';
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(displayBody, tx, py + 23);
+    ctx.restore();
+  }
+
+  // =========================================================================
+  // 15. Classic 16-Bit RPG Battle Swirl Transition (`trans > 0.01`)
+  // =========================================================================
+  if (trans > 0.01) {
+    const p = 1 - trans; // 0 -> 1 opening outward into the cathedral
+    const wave = Math.sin(trans * Math.PI);
+    const cy = CANVAS_H * 0.5;
+    const maxR = Math.hypot(cx, cy) + 24;
+    const blades = 12;
+    const spin = trans * Math.PI * 2.4;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    // Rotating gothic vortex iris blades that unwind outward to reveal the cathedral
+    const innerHoleR = Math.pow(p, 1.15) * maxR;
+    for (let i = 0; i < blades; i++) {
+      const a0 = spin + (i / blades) * Math.PI * 2;
+      const bladeSpan = ((Math.PI * 2) / blades) * Math.min(1, trans * 1.18);
+      ctx.fillStyle =
+        (i & 1) === 0
+          ? `rgba(4, 5, 12, ${(0.88 * Math.min(1, trans * 1.3)).toFixed(2)})`
+          : rgbToCss(palette[4], 0.42 * wave);
+      ctx.beginPath();
+      ctx.arc(0, 0, maxR, a0, a0 + bladeSpan);
+      ctx.arc(0, 0, Math.max(1, innerHoleR), a0 + bladeSpan + 0.28 * trans, a0 + 0.28 * trans, true);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Glowing arcane swirl rim + initial encounter flash
+    ctx.strokeStyle = rgbToCss(palette[6], 0.78 * wave);
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(4, innerHoleR), 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (trans > 0.80) {
+      const flashA = ((trans - 0.80) / 0.20) * 0.45;
+      ctx.fillStyle = `rgba(255, 255, 255, ${flashA.toFixed(2)})`;
+      ctx.fillRect(-cx, -cy, CANVAS_W, CANVAS_H);
+    }
     ctx.restore();
   }
 }

@@ -477,6 +477,7 @@ export function renderCosmosScene(s: SceneRenderContext): void {
     subBass,
     highEnergy,
     drop,
+    trans,
     sb,
     palette,
     artCanvas,
@@ -862,6 +863,48 @@ export function renderCosmosScene(s: SceneRenderContext): void {
       textX,
       podY + 26,
     );
+    ctx.restore();
+  }
+
+  // 10. Hyperspace Event-Horizon Zoom Transition (`trans > 0.01`)
+  if (trans > 0.01) {
+    const wave = Math.sin(trans * Math.PI);
+    const p = 1 - trans; // 0 -> 1 opening outward
+    ctx.save();
+
+    // Gravitational event-horizon iris opening from center singularity
+    if (trans > 0.15) {
+      const openR = 16 + Math.pow(p, 1.35) * 440;
+      const lensGrad = ctx.createRadialGradient(cx, cy, Math.max(2, openR * 0.62), cx, cy, openR + 46);
+      lensGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      lensGrad.addColorStop(0.65, rgbToCss(palette[5], 0.32 * wave));
+      lensGrad.addColorStop(1, `rgba(0, 0, 0, ${(0.88 * Math.min(1, trans * 1.25)).toFixed(2)})`);
+      ctx.fillStyle = lensGrad;
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
+
+    // Radial hyperspace star-streaks & dual event-horizon shockwave rings
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 36; i++) {
+      const a = (i / 36) * Math.PI * 2 + trans * 0.85;
+      const r0 = 22 + ((i * 29) % 70) + p * 160;
+      const len = (42 + (i % 5) * 26) * wave;
+      ctx.strokeStyle = rgbToCss(palette[5 + (i % 3)], 0.72 * wave);
+      ctx.lineWidth = (i & 3) === 0 ? 2.2 : 1.3;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.78);
+      ctx.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len) * 0.78);
+      ctx.stroke();
+    }
+
+    for (let ring = 0; ring < 2; ring++) {
+      const rr = 28 + p * (360 + ring * 110);
+      ctx.strokeStyle = rgbToCss(palette[6 + ring], 0.62 * wave);
+      ctx.lineWidth = 2.6 - ring * 0.8;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, rr, rr * 0.72, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }

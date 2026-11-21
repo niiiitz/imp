@@ -21,6 +21,12 @@ pub struct ReunionMoveItem {
     pub target_path: String,
     pub title: String,
     pub artist: String,
+    #[serde(default)]
+    pub proposed_title: Option<String>,
+    #[serde(default)]
+    pub proposed_artist: Option<String>,
+    #[serde(default)]
+    pub proposed_isrc: Option<String>,
     pub current_album: String,
     pub proposed_album: String,
     pub proposed_album_artist: String,
@@ -48,6 +54,12 @@ pub struct ReunionPlanReport {
 pub struct ReunionJournalEntry {
     pub original_path: String,
     pub new_path: String,
+    #[serde(default)]
+    pub original_title: Option<String>,
+    #[serde(default)]
+    pub original_artist: Option<String>,
+    #[serde(default)]
+    pub original_isrc: Option<String>,
     pub original_album: Option<String>,
     pub original_album_artist: Option<String>,
     pub original_track_number: Option<u32>,
@@ -188,7 +200,7 @@ fn is_supported_audio_file(path: &Path) -> bool {
     )
 }
 
-fn scan_reunion_audio_file(path: &Path) -> Option<ScannedAudioFile> {
+pub(crate) fn scan_reunion_audio_file(path: &Path) -> Option<ScannedAudioFile> {
     let tagged_file = Probe::open(path).ok()?.guess_file_type().ok()?.read().ok()?;
     let duration_ms = tagged_file.properties().duration().as_millis() as u64;
     let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
@@ -274,7 +286,7 @@ fn is_reunion_stray_file(file: &ScannedAudioFile) -> bool {
     matches!(file.track_total, Some(1))
 }
 
-fn compute_target_path(
+pub(crate) fn compute_target_path(
     album_dir: &Path,
     source_path: &Path,
     title: &str,
@@ -513,6 +525,9 @@ pub fn match_strays_against_canonical_tracks(
                     target_path,
                     title: stray.title.clone(),
                     artist: stray.artist.clone(),
+                    proposed_title: None,
+                    proposed_artist: None,
+                    proposed_isrc: None,
                     current_album: stray.album.clone(),
                     proposed_album: album.album.clone(),
                     proposed_album_artist: album.artist.clone(),
@@ -559,6 +574,9 @@ pub fn match_strays_against_canonical_tracks(
             target_path,
             title: stray.title.clone(),
             artist: stray.artist.clone(),
+            proposed_title: None,
+            proposed_artist: None,
+            proposed_isrc: None,
             current_album: stray.album.clone(),
             proposed_album: album.album.clone(),
             proposed_album_artist: album.artist.clone(),
@@ -780,8 +798,12 @@ pub fn build_album_reunion_plan(
     Ok(report)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_reunion_tags(
     path: &Path,
+    title: Option<&str>,
+    artist: Option<&str>,
+    isrc: Option<&str>,
     album: Option<&str>,
     album_artist: Option<&str>,
     track_number: Option<u32>,
@@ -789,6 +811,7 @@ fn write_reunion_tags(
     disc_number: Option<u32>,
     year: Option<u32>,
     clear_missing_on_restore: bool,
+    restore_core_fields: bool,
 ) -> Result<()> {
     let mut tagged_file = Probe::open(path)?
         .guess_file_type()?
@@ -799,6 +822,24 @@ fn write_reunion_tags(
         tagged_file.insert_tag(Tag::new(tag_type));
     }
     if let Some(tag) = tagged_file.primary_tag_mut() {
+        match title {
+            Some(t) if !t.trim().is_empty() => tag.set_title(t.trim().to_string()),
+            Some(_) if restore_core_fields => tag.remove_title(),
+            _ => {}
+        }
+        match artist {
+            Some(ar) if !ar.trim().is_empty() => tag.set_artist(ar.trim().to_string()),
+            Some(_) if restore_core_fields => tag.remove_artist(),
+            _ => {}
+        }
+        match isrc {
+            Some(code) if !code.trim().is_empty() => {
+                tag.insert_text(ItemKey::Isrc, code.trim().to_ascii_uppercase());
+            }
+            Some(_) if restore_core_fields => tag.remove_key(&ItemKey::Isrc),
+            None if restore_core_fields => tag.remove_key(&ItemKey::Isrc),
+            _ => {}
+        }
         match album {
             Some(a) if !a.trim().is_empty() => tag.set_album(a.trim().to_string()),
             _ if clear_missing_on_restore => tag.remove_album(),
@@ -867,6 +908,9 @@ pub fn apply_album_reunion_plan(
         journal_entries.push(ReunionJournalEntry {
             original_path: item.source_path.clone(),
             new_path,
+            original_title: meta.as_ref().map(|m| m.title.clone()),
+            original_artist: meta.as_ref().map(|m| m.artist.clone()),
+            original_isrc: meta.as_ref().and_then(|m| m.isrc.clone()),
             original_album: meta.as_ref().map(|m| m.album.clone()),
             original_album_artist: meta.as_ref().map(|m| m.album_artist.clone()),
             original_track_number: meta.as_ref().and_then(|m| m.track_number),
@@ -901,12 +945,16 @@ pub fn apply_album_reunion_plan(
         }
         if let Err(e) = write_reunion_tags(
             src,
+            item.proposed_title.as_deref(),
+            item.proposed_artist.as_deref(),
+            item.proposed_isrc.as_deref(),
             Some(&item.proposed_album),
             Some(&item.proposed_album_artist),
             item.proposed_track_number,
             item.proposed_track_total,
             item.proposed_disc_number,
             item.proposed_year,
+            false,
             false,
         ) {
             failed.push(format!("Retag failed for {}: {e}", item.source_path));
@@ -974,8 +1022,9 @@ fn journal_entries_mut_note(
     Some(())
 }
 
-/// Reverts a Stage 3 reunion apply operation from its saved JSON journal (moving files back
-/// and restoring original `album`, `album_artist`, `track`, `track_total`, `disc`, `year` tags).
+/// Reverts a Stage 3 reunion/acoustic-mend apply operation from its saved JSON journal
+/// (moving files back and restoring original `title`, `artist`, `isrc`, `album`, `album_artist`,
+/// `track`, `track_total`, `disc`, `year` tags).
 pub fn undo_reunion_journal(journal_path: &Path) -> Result<usize> {
     let raw = std::fs::read(journal_path)
         .with_context(|| format!("Failed to read journal {}", journal_path.display()))?;
@@ -1000,8 +1049,12 @@ pub fn undo_reunion_journal(journal_path: &Path) -> Result<usize> {
             continue;
         };
 
+        let restore_core = entry.original_title.is_some() || entry.original_artist.is_some();
         write_reunion_tags(
             active_path,
+            entry.original_title.as_deref(),
+            entry.original_artist.as_deref(),
+            entry.original_isrc.as_deref(),
             entry.original_album.as_deref(),
             entry.original_album_artist.as_deref(),
             entry.original_track_number,
@@ -1009,6 +1062,7 @@ pub fn undo_reunion_journal(journal_path: &Path) -> Result<usize> {
             entry.original_disc_number,
             entry.original_year,
             true,
+            restore_core,
         )?;
         restored += 1;
     }
@@ -1211,6 +1265,76 @@ mod tests {
         assert_eq!(orig_tag.album().as_deref(), Some("Sample Album - Single"));
         assert_eq!(orig_tag.track(), Some(1));
         assert_eq!(orig_tag.track_total(), Some(1));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_acoustic_mend_apply_and_undo_restores_title_artist_and_isrc() {
+        let dir = temp_dir("acoustic_mend_roundtrip");
+        let unknown_dir = dir.join("Unknown Artist").join("Unknown Album");
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        let src = unknown_dir.join("Track 01.wav");
+        tag_wav(&src, "Track 01", "Unknown Artist", "Unknown Album", 1, 1, None);
+
+        let target = dir
+            .join("Example Artist")
+            .join("Example Studio Album")
+            .join("05 Restored Song.wav");
+
+        let plan = ReunionPlanReport {
+            plan_id: "acoustic-mend-test".to_string(),
+            root_dir: dir.to_string_lossy().to_string(),
+            scanned_files: 1,
+            incomplete_albums_found: 0,
+            catalog_lookups_performed: 1,
+            proposed_items: vec![ReunionMoveItem {
+                item_id: "mend-0001".to_string(),
+                source_path: src.to_string_lossy().to_string(),
+                target_path: target.to_string_lossy().to_string(),
+                title: "Track 01".to_string(),
+                artist: "Unknown Artist".to_string(),
+                proposed_title: Some("Restored Song".to_string()),
+                proposed_artist: Some("Example Artist".to_string()),
+                proposed_isrc: Some("USXXX0000001".to_string()),
+                current_album: "Unknown Album".to_string(),
+                proposed_album: "Example Studio Album".to_string(),
+                proposed_album_artist: "Example Artist".to_string(),
+                proposed_track_number: Some(5),
+                proposed_track_total: Some(10),
+                proposed_disc_number: Some(1),
+                proposed_year: Some(2012),
+                confidence: "high".to_string(),
+                match_reason: "AcoustID 97% (Studio Album)".to_string(),
+                catalog_album_id: Some("mb-rel-1".to_string()),
+            }],
+            created_at: 1,
+        };
+
+        let apply_res =
+            apply_album_reunion_plan(&plan, &["mend-0001".to_string()], true).expect("apply ok");
+        assert_eq!(apply_res.applied_count, 1);
+        assert_eq!(apply_res.moved_count, 1);
+        assert!(target.is_file());
+        assert!(!src.exists());
+
+        let mended = scan_reunion_audio_file(&target).expect("scan mended");
+        assert_eq!(mended.title, "Restored Song");
+        assert_eq!(mended.artist, "Example Artist");
+        assert_eq!(mended.album, "Example Studio Album");
+        assert_eq!(mended.track_number, Some(5));
+        assert_eq!(mended.year, Some(2012));
+
+        let restored = undo_reunion_journal(Path::new(&apply_res.journal_path)).expect("undo ok");
+        assert_eq!(restored, 1);
+        assert!(src.is_file());
+        assert!(!target.exists());
+
+        let reverted = scan_reunion_audio_file(&src).expect("scan reverted");
+        assert_eq!(reverted.title, "Track 01");
+        assert_eq!(reverted.artist, "Unknown Artist");
+        assert_eq!(reverted.album, "Unknown Album");
+        assert_eq!(reverted.track_number, Some(1));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

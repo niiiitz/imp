@@ -1,7 +1,8 @@
 use crate::liberation::census::{classify_http_error, HttpErrorKind};
 use crate::liberation::verify::verify_audio_file;
 use crate::library::services_cache::{
-    current_unix_sec, LiberationDownloadDbSummary, LiberationTrackRecord, ServicesCacheDatabase,
+    current_unix_sec, DownloadFilter, LiberationDownloadDbSummary, LiberationTrackRecord,
+    ServicesCacheDatabase,
 };
 use crate::sinks::apple_api::{
     detect_audio_container_from_magic, resolve_fresh_direct_audio_download, resolve_tokens,
@@ -31,6 +32,8 @@ const LOW_SPACE_PAUSE_FLOOR: u64 = 1_073_741_824;
 pub struct DownloadPreflightReport {
     pub dest_dir: String,
     pub scope: String,
+    #[serde(default)]
+    pub filter: DownloadFilter,
     pub remaining_tracks: usize,
     pub estimated_remaining_bytes: u64,
     pub required_with_headroom_bytes: u64,
@@ -114,7 +117,18 @@ pub fn preflight_download(
     dest_dir: &Path,
     scope: &str,
 ) -> Result<DownloadPreflightReport> {
-    let (remaining_tracks, estimated_remaining_bytes) = cache.get_download_scope_estimate(scope)?;
+    preflight_download_filtered(cache, dest_dir, scope, &DownloadFilter::default())
+}
+
+pub fn preflight_download_filtered(
+    cache: &ServicesCacheDatabase,
+    dest_dir: &Path,
+    scope: &str,
+    filter: &DownloadFilter,
+) -> Result<DownloadPreflightReport> {
+    let norm_filter = filter.normalized();
+    let (remaining_tracks, estimated_remaining_bytes) =
+        cache.get_download_scope_estimate_filtered(scope, &norm_filter)?;
     let available_bytes = available_disk_bytes(dest_dir)?;
     let required_with_headroom_bytes = estimated_remaining_bytes.saturating_add(TWO_GIB);
     let headroom_ok = available_bytes >= required_with_headroom_bytes;
@@ -123,6 +137,7 @@ pub fn preflight_download(
     Ok(DownloadPreflightReport {
         dest_dir: dest_dir.to_string_lossy().to_string(),
         scope: scope.to_string(),
+        filter: norm_filter,
         remaining_tracks,
         estimated_remaining_bytes,
         required_with_headroom_bytes,
@@ -356,6 +371,8 @@ pub struct LiberationDownloadRuntimeStatus {
     pub low_space_paused: bool,
     pub dest_dir: String,
     pub scope: String,
+    #[serde(default)]
+    pub filter: DownloadFilter,
     pub processed_this_run: usize,
     pub verified_this_run: usize,
     pub corrupt_this_run: usize,
@@ -377,6 +394,7 @@ impl Default for LiberationDownloadRuntimeStatus {
             low_space_paused: false,
             dest_dir: String::new(),
             scope: "uploaded_and_reclaimable".to_string(),
+            filter: DownloadFilter::default(),
             processed_this_run: 0,
             verified_this_run: 0,
             corrupt_this_run: 0,
@@ -433,6 +451,7 @@ impl LiberationDownloadController {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         self: &Arc<Self>,
         settings: SimpSettings,
@@ -442,6 +461,7 @@ impl LiberationDownloadController {
         allow_partial_space: bool,
         retry_failed: bool,
         max_tracks: Option<usize>,
+        filter: DownloadFilter,
     ) -> Result<LiberationDownloadStatusResponse> {
         if self.runtime.lock().unwrap().running {
             return self.status(&cache);
@@ -449,11 +469,12 @@ impl LiberationDownloadController {
         if dest_dir.as_os_str().is_empty() {
             return Err(anyhow!("Destination folder is required"));
         }
+        let norm_filter = filter.normalized();
         if retry_failed {
-            let _ = cache.reset_failed_liberation_downloads();
+            let _ = cache.reset_failed_liberation_downloads_filtered(&norm_filter);
         }
         let _ = cache.reset_interrupted_liberation_downloads();
-        let preflight = preflight_download(&cache, &dest_dir, &scope)?;
+        let preflight = preflight_download_filtered(&cache, &dest_dir, &scope, &norm_filter)?;
         if preflight.critical_low_space {
             return Err(anyhow!(
                 "Insufficient disk space at {} ({:.2} GB free; minimum 1.50 GB required).",
@@ -476,6 +497,10 @@ impl LiberationDownloadController {
 
         self.pause_flag.store(false, Ordering::SeqCst);
         let now = current_unix_sec();
+        let filter_suffix = norm_filter
+            .summary_label()
+            .map(|lbl| format!(" [{lbl}]"))
+            .unwrap_or_default();
         {
             let mut rt = self.runtime.lock().unwrap();
             *rt = LiberationDownloadRuntimeStatus {
@@ -486,6 +511,7 @@ impl LiberationDownloadController {
                 low_space_paused: false,
                 dest_dir: dest_dir.to_string_lossy().to_string(),
                 scope: scope.clone(),
+                filter: norm_filter.clone(),
                 processed_this_run: 0,
                 verified_this_run: 0,
                 corrupt_this_run: 0,
@@ -493,9 +519,9 @@ impl LiberationDownloadController {
                 bytes_this_run: 0,
                 current_track: String::new(),
                 last_message: if let Some(max) = max_tracks {
-                    format!("Starting verified Test Batch (up to {max} tracks)...")
+                    format!("Starting verified Test Batch (up to {max} tracks){filter_suffix}...")
                 } else {
-                    "Starting resumable DRM-free Cloud Locker reclamation...".to_string()
+                    format!("Starting resumable DRM-free Cloud Locker reclamation{filter_suffix}...")
                 },
                 started_at: Some(now),
                 updated_at: now,
@@ -514,6 +540,7 @@ impl LiberationDownloadController {
                     dest_dir,
                     scope,
                     max_tracks,
+                    norm_filter,
                 );
             })?;
 
@@ -619,6 +646,7 @@ impl LiberationDownloadController {
         Ok(raw_ver)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_worker(
         &self,
         dev_token: String,
@@ -627,6 +655,7 @@ impl LiberationDownloadController {
         dest_dir: PathBuf,
         scope: String,
         max_tracks: Option<usize>,
+        filter: DownloadFilter,
     ) {
         let art_cache: Mutex<HashMap<String, Option<Vec<u8>>>> = Mutex::new(HashMap::new());
         let mut remaining_budget = max_tracks.unwrap_or(usize::MAX);
@@ -635,7 +664,8 @@ impl LiberationDownloadController {
 
         while remaining_budget > 0 && !self.pause_flag.load(Ordering::SeqCst) {
             let batch_limit = remaining_budget.min(30);
-            let candidates = match cache.list_download_candidates(&scope, batch_limit) {
+            let candidates =
+                match cache.list_download_candidates_filtered(&scope, &filter, batch_limit) {
                 Ok(v) => v,
                 Err(e) => {
                     let mut rt = self.runtime.lock().unwrap();

@@ -217,6 +217,11 @@ if [[ -f "${ENV_FILE}" ]]; then
     export SIMP_EMBEDDED_SOUNDCLOUD_CLIENT_ID="${SC_ID}"
     echo "   • Baked public SoundCloud Client ID into binary (OAuth 2.1 token exchange proxied via simp-tap-67 Cloudflare Worker)"
   fi
+  ACOUSTID_KEY="$(ENV_FILE="${ENV_FILE}" "${PYTHON_BIN}" -c 'import os; env=dict(l.strip().split("=",1) for l in open(os.environ["ENV_FILE"]) if l.strip() and not l.strip().startswith("#") and "=" in l); print(env.get("ACOUSTID_API_KEY","").strip().strip("\x27\x22"), end="")' 2>/dev/null || true)"
+  if [[ -n "${ACOUSTID_KEY}" ]]; then
+    export IMP_EMBEDDED_ACOUSTID_API_KEY="${ACOUSTID_KEY}"
+    echo "   • Baked public AcoustID Client API Key into binary for pure-Rust Chromaprint Acoustic Mend"
+  fi
 fi
 
 "${CARGO_BIN}" build --release -p imp --offline

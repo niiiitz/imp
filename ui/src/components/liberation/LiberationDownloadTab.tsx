@@ -48,11 +48,19 @@ interface LiberationDownloadStatusResponse {
   db_summary: LiberationDownloadDbSummary;
 }
 
+export interface DownloadTargetFilter {
+  artist: string;
+  album: string;
+  search: string;
+}
+
 interface LiberationDownloadTabProps {
   open: boolean;
   destDir: string;
   setDestDir: (path: string) => void;
   onBrowseDest: () => void;
+  filter: DownloadTargetFilter;
+  setFilter: (next: DownloadTargetFilter) => void;
   onInspectFailed?: () => void;
   showToast?: (msg: string) => void;
 }
@@ -62,6 +70,8 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
   destDir,
   setDestDir,
   onBrowseDest,
+  filter,
+  setFilter,
   onInspectFailed,
   showToast,
 }) => {
@@ -102,6 +112,10 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
     return () => window.clearInterval(t);
   }, [open, isRunning, fetchStatus]);
 
+  const hasActiveFilter = Boolean(
+    filter.artist.trim() || filter.album.trim() || filter.search.trim()
+  );
+
   const runPreflight = async () => {
     if (!destDir.trim()) {
       setErrorMsg('Choose or enter a destination folder first.');
@@ -113,7 +127,13 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
       const resp = await fetch(resolveDaemonUrl('/api/liberation/download/preflight'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dest_dir: destDir.trim(), scope }),
+        body: JSON.stringify({
+          dest_dir: destDir.trim(),
+          scope,
+          artist_filter: filter.artist.trim() || null,
+          album_filter: filter.album.trim() || null,
+          search_filter: filter.search.trim() || null,
+        }),
       });
       const json = await resp.json();
       if (json?.ok && json?.data) {
@@ -145,6 +165,9 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
           allow_partial_space: allowPartialSpace,
           retry_failed: retryFailed,
           max_tracks: maxTracks ?? null,
+          artist_filter: filter.artist.trim() || null,
+          album_filter: filter.album.trim() || null,
+          search_filter: filter.search.trim() || null,
         }),
       });
       const json = await resp.json();
@@ -283,6 +306,89 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
           </label>
         </div>
 
+        {/* Targeted Collection Filter (Optional Reclaim -> Mend Subset) */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            flexWrap: 'wrap',
+            paddingTop: 6,
+            borderTop: '1px solid rgba(255,255,255,0.06)',
+          }}
+        >
+          <span style={{ fontSize: 10.5, color: '#94a3b8', fontWeight: 700 }}>
+            Targeted Filter (optional):
+          </span>
+          <input
+            type="text"
+            value={filter.artist}
+            onChange={(e) => setFilter({ ...filter, artist: e.target.value })}
+            placeholder="Artist..."
+            style={{
+              flex: '1 1 130px',
+              minWidth: 110,
+              padding: '5px 8px',
+              borderRadius: 6,
+              border: filter.artist.trim()
+                ? '1px solid rgba(56, 189, 248, 0.5)'
+                : '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(0,0,0,0.4)',
+              color: '#f1f5f9',
+              fontSize: 11,
+            }}
+          />
+          <input
+            type="text"
+            value={filter.album}
+            onChange={(e) => setFilter({ ...filter, album: e.target.value })}
+            placeholder="Album..."
+            style={{
+              flex: '1 1 140px',
+              minWidth: 115,
+              padding: '5px 8px',
+              borderRadius: 6,
+              border: filter.album.trim()
+                ? '1px solid rgba(52, 211, 153, 0.5)'
+                : '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(0,0,0,0.4)',
+              color: '#f1f5f9',
+              fontSize: 11,
+            }}
+          />
+          <input
+            type="text"
+            value={filter.search}
+            onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+            placeholder="Title / keyword..."
+            style={{
+              flex: '1 1 130px',
+              minWidth: 110,
+              padding: '5px 8px',
+              borderRadius: 6,
+              border: filter.search.trim()
+                ? '1px solid rgba(192, 132, 252, 0.5)'
+                : '1px solid rgba(255,255,255,0.14)',
+              background: 'rgba(0,0,0,0.4)',
+              color: '#f1f5f9',
+              fontSize: 11,
+            }}
+          />
+          {hasActiveFilter && (
+            <button
+              type="button"
+              data-focusable="true"
+              onClick={() => {
+                setFilter({ artist: '', album: '', search: '' });
+                setPreflight(null);
+              }}
+              style={liberationFilterPillStyle(false, '#fda4af')}
+            >
+              × Clear Filter
+            </button>
+          )}
+        </div>
+
         {preflight && (
           <div
             style={{
@@ -353,7 +459,11 @@ export const LiberationDownloadTab: React.FC<LiberationDownloadTabProps> = ({
               cursor: canStart ? 'pointer' : 'not-allowed',
             }}
           >
-            {isRunning ? 'Reclaiming...' : 'Reclaim All Uploaded'}
+            {isRunning
+              ? 'Reclaiming...'
+              : hasActiveFilter
+                ? 'Reclaim Filtered Tracks'
+                : 'Reclaim All Uploaded'}
           </button>
 
           <button

@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.9.0-alpha.4"
+version = "0.9.0-alpha.5"
 edition = "2021"
 license = "LicenseRef-Proprietary"
 authors = ["niiiitz"]
@@ -28,6 +28,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2.5"
 lofty = "0.21"
 blake3 = "1.5"
+rusty-chromaprint = "0.3"
 rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
 symphonia = { version = "0.5.4", default-features = false, features = ["all"] }
 souvlaki = "0.7"

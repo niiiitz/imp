@@ -6,9 +6,11 @@ use axum::{
 };
 use imp_core::liberation::{
     apply_album_reunion_plan, build_album_reunion_plan, compute_album_fragmentation_diagnostics,
-    get_cached_reunion_plan, global_liberation_controller, global_liberation_downloader,
-    global_local_audit_controller, preflight_download, undo_reunion_journal,
+    get_cached_reunion_plan, global_acoustic_mend_controller, global_liberation_controller,
+    global_liberation_downloader, global_local_audit_controller, preflight_download_filtered,
+    undo_reunion_journal,
 };
+use imp_core::library::services_cache::DownloadFilter;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -181,6 +183,12 @@ pub(super) struct DownloadPreflightBody {
     dest_dir: String,
     #[serde(default = "default_download_scope")]
     scope: String,
+    #[serde(default)]
+    artist_filter: Option<String>,
+    #[serde(default)]
+    album_filter: Option<String>,
+    #[serde(default)]
+    search_filter: Option<String>,
 }
 
 fn default_download_scope() -> String {
@@ -194,8 +202,15 @@ pub(super) async fn liberation_download_preflight_handler(
     let cache = state.services_cache.clone();
     let dest_dir = PathBuf::from(body.dest_dir.trim());
     let scope = body.scope;
-    let res =
-        tokio::task::spawn_blocking(move || preflight_download(&cache, &dest_dir, &scope)).await;
+    let filter = DownloadFilter {
+        artist: body.artist_filter,
+        album: body.album_filter,
+        search: body.search_filter,
+    };
+    let res = tokio::task::spawn_blocking(move || {
+        preflight_download_filtered(&cache, &dest_dir, &scope, &filter)
+    })
+    .await;
     match res {
         Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
@@ -214,6 +229,12 @@ pub(super) struct DownloadStartBody {
     retry_failed: bool,
     #[serde(default)]
     max_tracks: Option<usize>,
+    #[serde(default)]
+    artist_filter: Option<String>,
+    #[serde(default)]
+    album_filter: Option<String>,
+    #[serde(default)]
+    search_filter: Option<String>,
 }
 
 pub(super) async fn liberation_download_start_handler(
@@ -227,6 +248,11 @@ pub(super) async fn liberation_download_start_handler(
     let allow_partial_space = body.allow_partial_space;
     let retry_failed = body.retry_failed;
     let max_tracks = body.max_tracks;
+    let filter = DownloadFilter {
+        artist: body.artist_filter,
+        album: body.album_filter,
+        search: body.search_filter,
+    };
     let res = tokio::task::spawn_blocking(move || {
         global_liberation_downloader().start(
             cfg,
@@ -236,6 +262,7 @@ pub(super) async fn liberation_download_start_handler(
             allow_partial_space,
             retry_failed,
             max_tracks,
+            filter,
         )
     })
     .await;
@@ -444,6 +471,69 @@ pub(super) async fn liberation_reunion_undo_handler(
     match res {
         Ok(Ok(restored)) => Json(serde_json::json!({ "ok": true, "data": { "restored": restored } })),
         Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+fn default_target_mode() -> String {
+    "unknowns_only".to_string()
+}
+
+#[derive(Deserialize)]
+pub(super) struct FingerprintStartBody {
+    root_dir: String,
+    #[serde(default = "default_target_mode")]
+    target_mode: String,
+    #[serde(default = "default_true")]
+    enable_acoustid_lookup: bool,
+    #[serde(default)]
+    folder_filter: Option<String>,
+    #[serde(default)]
+    api_key_override: Option<String>,
+}
+
+pub(super) async fn liberation_fingerprint_start_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<FingerprintStartBody>,
+) -> impl IntoResponse {
+    let cache = state.services_cache.clone();
+    let root_dir = PathBuf::from(body.root_dir.trim());
+    let res = tokio::task::spawn_blocking(move || {
+        global_acoustic_mend_controller().start(
+            cache,
+            root_dir,
+            body.target_mode,
+            body.enable_acoustid_lookup,
+            body.folder_filter,
+            body.api_key_override,
+        )
+    })
+    .await;
+    match res {
+        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn liberation_fingerprint_pause_handler() -> impl IntoResponse {
+    let res = tokio::task::spawn_blocking(|| {
+        let ctrl = global_acoustic_mend_controller();
+        ctrl.pause()?;
+        Ok::<_, anyhow::Error>(ctrl.status())
+    })
+    .await;
+    match res {
+        Ok(Ok(data)) => Json(serde_json::json!({ "ok": true, "data": data })),
+        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn liberation_fingerprint_status_handler() -> impl IntoResponse {
+    let res = tokio::task::spawn_blocking(|| global_acoustic_mend_controller().status()).await;
+    match res {
+        Ok(data) => Json(serde_json::json!({ "ok": true, "data": data })),
         Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }

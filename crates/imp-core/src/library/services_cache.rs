@@ -80,6 +80,81 @@ pub struct LiberationDownloadDbSummary {
     pub estimated_remaining_bytes: u64,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DownloadFilter {
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub search: Option<String>,
+}
+
+impl DownloadFilter {
+    pub fn normalized(&self) -> Self {
+        let norm = |opt: &Option<String>| {
+            opt.as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        };
+        Self {
+            artist: norm(&self.artist),
+            album: norm(&self.album),
+            search: norm(&self.search),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let n = self.normalized();
+        n.artist.is_none() && n.album.is_none() && n.search.is_none()
+    }
+
+    pub fn summary_label(&self) -> Option<String> {
+        let n = self.normalized();
+        let mut parts = Vec::new();
+        if let Some(a) = n.artist {
+            parts.push(format!("Artist: {a}"));
+        }
+        if let Some(al) = n.album {
+            parts.push(format!("Album: {al}"));
+        }
+        if let Some(q) = n.search {
+            parts.push(format!("Search: \"{q}\""));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" · "))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiberationFingerprintRecord {
+    pub file_path: String,
+    pub root_dir: String,
+    pub file_size_bytes: u64,
+    pub mtime_sec: i64,
+    pub decoded_duration_sec: u32,
+    pub fingerprint_b64: String,
+    pub raw_fingerprint_b64: String,
+    pub acoustid_score: Option<f64>,
+    pub mb_recording_id: Option<String>,
+    pub mb_release_id: Option<String>,
+    pub matched_title: Option<String>,
+    pub matched_artist: Option<String>,
+    pub matched_album: Option<String>,
+    pub matched_album_artist: Option<String>,
+    pub matched_track_number: Option<u32>,
+    pub matched_track_total: Option<u32>,
+    pub matched_disc_number: Option<u32>,
+    pub matched_year: Option<u32>,
+    pub matched_isrc: Option<String>,
+    pub lookup_status: String,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalAuditRecord {
     pub file_path: String,
@@ -265,6 +340,35 @@ impl ServicesCacheDatabase {
                 ON liberation_local_audit(status);
             CREATE INDEX IF NOT EXISTS idx_liberation_local_audit_root
                 ON liberation_local_audit(root_dir);
+
+            CREATE TABLE IF NOT EXISTS liberation_fingerprints (
+                file_path             TEXT PRIMARY KEY,
+                root_dir              TEXT NOT NULL,
+                file_size_bytes       INTEGER NOT NULL DEFAULT 0,
+                mtime_sec             INTEGER NOT NULL DEFAULT 0,
+                decoded_duration_sec  INTEGER NOT NULL DEFAULT 0,
+                fingerprint_b64       TEXT NOT NULL,
+                raw_fingerprint_b64   TEXT NOT NULL DEFAULT '',
+                acoustid_score        REAL,
+                mb_recording_id       TEXT,
+                mb_release_id         TEXT,
+                matched_title         TEXT,
+                matched_artist        TEXT,
+                matched_album         TEXT,
+                matched_album_artist  TEXT,
+                matched_track_number  INTEGER,
+                matched_track_total   INTEGER,
+                matched_disc_number   INTEGER,
+                matched_year          INTEGER,
+                matched_isrc          TEXT,
+                lookup_status         TEXT NOT NULL DEFAULT 'local_only',
+                updated_at            INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_liberation_fingerprints_root
+                ON liberation_fingerprints(root_dir);
+            CREATE INDEX IF NOT EXISTS idx_liberation_fingerprints_status
+                ON liberation_fingerprints(lookup_status);
             ",
         )?;
         for ddl in [
@@ -874,13 +978,56 @@ impl ServicesCacheDatabase {
         }
     }
 
+    fn append_download_filter_clauses(
+        filter: &DownloadFilter,
+        where_clauses: &mut Vec<String>,
+        bind_values: &mut Vec<rusqlite::types::Value>,
+    ) {
+        let norm = filter.normalized();
+        if let Some(artist) = norm.artist {
+            let pat = format!("%{}%", artist.to_ascii_lowercase());
+            where_clauses.push(
+                "(LOWER(artist) LIKE ? OR LOWER(album_artist) LIKE ?)".to_string(),
+            );
+            bind_values.push(rusqlite::types::Value::Text(pat.clone()));
+            bind_values.push(rusqlite::types::Value::Text(pat));
+        }
+        if let Some(album) = norm.album {
+            let pat = format!("%{}%", album.to_ascii_lowercase());
+            where_clauses.push("LOWER(album) LIKE ?".to_string());
+            bind_values.push(rusqlite::types::Value::Text(pat));
+        }
+        if let Some(search) = norm.search {
+            let pat = format!("%{}%", search.to_ascii_lowercase());
+            where_clauses.push(
+                "(LOWER(title) LIKE ? OR LOWER(artist) LIKE ? OR LOWER(album) LIKE ?)".to_string(),
+            );
+            bind_values.push(rusqlite::types::Value::Text(pat.clone()));
+            bind_values.push(rusqlite::types::Value::Text(pat.clone()));
+            bind_values.push(rusqlite::types::Value::Text(pat));
+        }
+    }
+
     pub fn list_download_candidates(
         &self,
         scope: &str,
         limit: usize,
     ) -> Result<Vec<LiberationTrackRecord>> {
+        self.list_download_candidates_filtered(scope, &DownloadFilter::default(), limit)
+    }
+
+    pub fn list_download_candidates_filtered(
+        &self,
+        scope: &str,
+        filter: &DownloadFilter,
+        limit: usize,
+    ) -> Result<Vec<LiberationTrackRecord>> {
         let conn = self.conn.lock().unwrap();
-        let where_sql = Self::download_scope_where(scope);
+        let mut where_clauses = vec![Self::download_scope_where(scope).to_string()];
+        let mut bind_values: Vec<rusqlite::types::Value> = Vec::new();
+        Self::append_download_filter_clauses(filter, &mut where_clauses, &mut bind_values);
+        bind_values.push(rusqlite::types::Value::Integer(limit.max(1) as i64));
+
         let sql = format!(
             "SELECT library_song_id, catalog_id, purchased_id, isrc, title, artist, album_artist, album,
                     library_album_id, track_number, disc_number, album_track_count, duration_ms, year, genre,
@@ -888,25 +1035,194 @@ impl ServicesCacheDatabase {
                     observed_flavors_json, content_length_bytes, probe_status, verification_status, blake3_hash,
                     last_error, updated_at, local_path, downloaded_bytes
              FROM liberation_tracks
-             WHERE {where_sql}
+             WHERE {}
              ORDER BY artist ASC, album ASC, COALESCE(disc_number, 1) ASC, COALESCE(track_number, 0) ASC, library_song_id ASC
-             LIMIT ?1"
+             LIMIT ?",
+            where_clauses.join(" AND ")
         );
         let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![limit.max(1) as i64], Self::map_liberation_track_row)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(bind_values),
+            Self::map_liberation_track_row,
+        )?;
         Ok(rows.filter_map(Result::ok).collect())
     }
 
     pub fn get_download_scope_estimate(&self, scope: &str) -> Result<(usize, u64)> {
+        self.get_download_scope_estimate_filtered(scope, &DownloadFilter::default())
+    }
+
+    pub fn get_download_scope_estimate_filtered(
+        &self,
+        scope: &str,
+        filter: &DownloadFilter,
+    ) -> Result<(usize, u64)> {
         let conn = self.conn.lock().unwrap();
-        let where_sql = Self::download_scope_where(scope);
+        let mut where_clauses = vec![Self::download_scope_where(scope).to_string()];
+        let mut bind_values: Vec<rusqlite::types::Value> = Vec::new();
+        Self::append_download_filter_clauses(filter, &mut where_clauses, &mut bind_values);
         let sql = format!(
             "SELECT COUNT(*), COALESCE(SUM(COALESCE(content_length_bytes, CAST(duration_ms AS INTEGER) * 32)), 0)
              FROM liberation_tracks
-             WHERE {where_sql}"
+             WHERE {}",
+            where_clauses.join(" AND ")
         );
-        let (cnt, bytes): (i64, i64) = conn.query_row(&sql, [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let (cnt, bytes): (i64, i64) =
+            conn.query_row(&sql, rusqlite::params_from_iter(bind_values), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
         Ok((cnt.max(0) as usize, bytes.max(0) as u64))
+    }
+
+    pub fn reset_failed_liberation_downloads_filtered(
+        &self,
+        filter: &DownloadFilter,
+    ) -> Result<usize> {
+        if filter.is_empty() {
+            return self.reset_failed_liberation_downloads();
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut where_clauses = vec!["verification_status = 'corrupt_failed'".to_string()];
+        let mut bind_values: Vec<rusqlite::types::Value> = Vec::new();
+        Self::append_download_filter_clauses(filter, &mut where_clauses, &mut bind_values);
+        let sql = format!(
+            "UPDATE liberation_tracks
+             SET verification_status = 'not_started', last_error = NULL
+             WHERE {}",
+            where_clauses.join(" AND ")
+        );
+        let count = conn.execute(&sql, rusqlite::params_from_iter(bind_values))?;
+        Ok(count)
+    }
+
+    fn map_liberation_fingerprint_row(
+        row: &rusqlite::Row<'_>,
+    ) -> rusqlite::Result<LiberationFingerprintRecord> {
+        Ok(LiberationFingerprintRecord {
+            file_path: row.get(0)?,
+            root_dir: row.get(1)?,
+            file_size_bytes: row.get::<_, i64>(2)?.max(0) as u64,
+            mtime_sec: row.get(3)?,
+            decoded_duration_sec: row.get::<_, i64>(4)?.max(0) as u32,
+            fingerprint_b64: row.get(5)?,
+            raw_fingerprint_b64: row.get(6)?,
+            acoustid_score: row.get(7)?,
+            mb_recording_id: row.get(8)?,
+            mb_release_id: row.get(9)?,
+            matched_title: row.get(10)?,
+            matched_artist: row.get(11)?,
+            matched_album: row.get(12)?,
+            matched_album_artist: row.get(13)?,
+            matched_track_number: row.get::<_, Option<i64>>(14)?.map(|v| v.max(0) as u32),
+            matched_track_total: row.get::<_, Option<i64>>(15)?.map(|v| v.max(0) as u32),
+            matched_disc_number: row.get::<_, Option<i64>>(16)?.map(|v| v.max(0) as u32),
+            matched_year: row.get::<_, Option<i64>>(17)?.map(|v| v.max(0) as u32),
+            matched_isrc: row.get(18)?,
+            lookup_status: row.get(19)?,
+            updated_at: row.get(20)?,
+        })
+    }
+
+    pub fn get_cached_liberation_fingerprint(
+        &self,
+        file_path: &str,
+        file_size_bytes: u64,
+        mtime_sec: i64,
+    ) -> Result<Option<LiberationFingerprintRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let rec = conn
+            .query_row(
+                "SELECT file_path, root_dir, file_size_bytes, mtime_sec, decoded_duration_sec,
+                        fingerprint_b64, raw_fingerprint_b64, acoustid_score, mb_recording_id,
+                        mb_release_id, matched_title, matched_artist, matched_album,
+                        matched_album_artist, matched_track_number, matched_track_total,
+                        matched_disc_number, matched_year, matched_isrc, lookup_status, updated_at
+                 FROM liberation_fingerprints
+                 WHERE file_path = ?1 AND file_size_bytes = ?2 AND mtime_sec = ?3",
+                params![file_path, file_size_bytes as i64, mtime_sec],
+                Self::map_liberation_fingerprint_row,
+            )
+            .optional()?;
+        Ok(rec)
+    }
+
+    pub fn upsert_liberation_fingerprint(&self, rec: &LiberationFingerprintRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO liberation_fingerprints (
+                file_path, root_dir, file_size_bytes, mtime_sec, decoded_duration_sec,
+                fingerprint_b64, raw_fingerprint_b64, acoustid_score, mb_recording_id,
+                mb_release_id, matched_title, matched_artist, matched_album,
+                matched_album_artist, matched_track_number, matched_track_total,
+                matched_disc_number, matched_year, matched_isrc, lookup_status, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+            )
+            ON CONFLICT(file_path) DO UPDATE SET
+                root_dir = excluded.root_dir,
+                file_size_bytes = excluded.file_size_bytes,
+                mtime_sec = excluded.mtime_sec,
+                decoded_duration_sec = excluded.decoded_duration_sec,
+                fingerprint_b64 = excluded.fingerprint_b64,
+                raw_fingerprint_b64 = excluded.raw_fingerprint_b64,
+                acoustid_score = excluded.acoustid_score,
+                mb_recording_id = excluded.mb_recording_id,
+                mb_release_id = excluded.mb_release_id,
+                matched_title = excluded.matched_title,
+                matched_artist = excluded.matched_artist,
+                matched_album = excluded.matched_album,
+                matched_album_artist = excluded.matched_album_artist,
+                matched_track_number = excluded.matched_track_number,
+                matched_track_total = excluded.matched_track_total,
+                matched_disc_number = excluded.matched_disc_number,
+                matched_year = excluded.matched_year,
+                matched_isrc = excluded.matched_isrc,
+                lookup_status = excluded.lookup_status,
+                updated_at = excluded.updated_at",
+            params![
+                rec.file_path,
+                rec.root_dir,
+                rec.file_size_bytes as i64,
+                rec.mtime_sec,
+                rec.decoded_duration_sec as i64,
+                rec.fingerprint_b64,
+                rec.raw_fingerprint_b64,
+                rec.acoustid_score,
+                rec.mb_recording_id,
+                rec.mb_release_id,
+                rec.matched_title,
+                rec.matched_artist,
+                rec.matched_album,
+                rec.matched_album_artist,
+                rec.matched_track_number.map(|v| v as i64),
+                rec.matched_track_total.map(|v| v as i64),
+                rec.matched_disc_number.map(|v| v as i64),
+                rec.matched_year.map(|v| v as i64),
+                rec.matched_isrc,
+                rec.lookup_status,
+                rec.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_liberation_fingerprints_under_root(
+        &self,
+        root_dir: &str,
+    ) -> Result<Vec<LiberationFingerprintRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT file_path, root_dir, file_size_bytes, mtime_sec, decoded_duration_sec,
+                    fingerprint_b64, raw_fingerprint_b64, acoustid_score, mb_recording_id,
+                    mb_release_id, matched_title, matched_artist, matched_album,
+                    matched_album_artist, matched_track_number, matched_track_total,
+                    matched_disc_number, matched_year, matched_isrc, lookup_status, updated_at
+             FROM liberation_fingerprints
+             WHERE root_dir = ?1
+             ORDER BY file_path ASC",
+        )?;
+        let rows = stmt.query_map(params![root_dir], Self::map_liberation_fingerprint_row)?;
+        Ok(rows.filter_map(Result::ok).collect())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1559,6 +1875,86 @@ mod tests {
             .query_liberation_tracks(None, None, Some("corrupt_failed"), None, 50, 0)
             .unwrap();
         assert_eq!(failed_after, 0);
+
+        let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+    }
+
+    #[test]
+    fn test_liberation_download_filter_and_fingerprint_cache_roundtrip() {
+        let db_path = temp_cache_db_path("liberation_filter_and_fp");
+        let db = ServicesCacheDatabase::open(&db_path).unwrap();
+
+        let mut a = sample_liberation_track("i.f1", "Track Alpha");
+        a.artist = "Artist One".to_string();
+        a.album_artist = "Artist One".to_string();
+        a.album = "Album North".to_string();
+        a.cloud_origin_hint = "uploaded".to_string();
+        a.ownership_class = "reclaimable_direct".to_string();
+
+        let mut b = sample_liberation_track("i.f2", "Track Beta");
+        b.artist = "Artist Two".to_string();
+        b.album_artist = "Artist Two".to_string();
+        b.album = "Album South".to_string();
+        b.cloud_origin_hint = "uploaded".to_string();
+        b.ownership_class = "reclaimable_direct".to_string();
+
+        db.upsert_liberation_tracks_batch(&[a, b]).unwrap();
+
+        let filter = DownloadFilter {
+            artist: Some("Artist One".to_string()),
+            album: Some("North".to_string()),
+            search: None,
+        };
+        let (cnt, _) = db
+            .get_download_scope_estimate_filtered("uploaded_and_reclaimable", &filter)
+            .unwrap();
+        assert_eq!(cnt, 1);
+        let rows = db
+            .list_download_candidates_filtered("uploaded_and_reclaimable", &filter, 10)
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].library_song_id, "i.f1");
+
+        let fp_rec = LiberationFingerprintRecord {
+            file_path: "/tmp/music/01_sample.flac".to_string(),
+            root_dir: "/tmp/music".to_string(),
+            file_size_bytes: 12_345,
+            mtime_sec: 1_700_000_000,
+            decoded_duration_sec: 184,
+            fingerprint_b64: "AQAAfakecompressed".to_string(),
+            raw_fingerprint_b64: "AQAAAA==".to_string(),
+            acoustid_score: Some(0.95),
+            mb_recording_id: Some("mb-rec-1".to_string()),
+            mb_release_id: Some("mb-rel-1".to_string()),
+            matched_title: Some("Sample Song".to_string()),
+            matched_artist: Some("Artist One".to_string()),
+            matched_album: Some("Album North".to_string()),
+            matched_album_artist: Some("Artist One".to_string()),
+            matched_track_number: Some(1),
+            matched_track_total: Some(10),
+            matched_disc_number: Some(1),
+            matched_year: Some(2019),
+            matched_isrc: Some("USXXX0000001".to_string()),
+            lookup_status: "matched".to_string(),
+            updated_at: 1_700_000_123,
+        };
+        db.upsert_liberation_fingerprint(&fp_rec).unwrap();
+
+        let hit = db
+            .get_cached_liberation_fingerprint("/tmp/music/01_sample.flac", 12_345, 1_700_000_000)
+            .unwrap()
+            .expect("cached fingerprint should hit");
+        assert_eq!(hit.matched_album.as_deref(), Some("Album North"));
+        assert_eq!(hit.matched_track_number, Some(1));
+
+        // Changed mtime must invalidate cache lookup
+        let miss = db
+            .get_cached_liberation_fingerprint("/tmp/music/01_sample.flac", 12_345, 1_700_000_999)
+            .unwrap();
+        assert!(miss.is_none());
+
+        let under = db.list_liberation_fingerprints_under_root("/tmp/music").unwrap();
+        assert_eq!(under.len(), 1);
 
         let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
     }

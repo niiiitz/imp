@@ -264,6 +264,7 @@ export function renderVaporwave3dScene(s: SceneRenderContext): void {
     midEnergy,
     highEnergy,
     drop,
+    trans,
     sb,
     palette,
     artCanvas,
@@ -1115,6 +1116,48 @@ export function renderVaporwave3dScene(s: SceneRenderContext): void {
       textX,
       aimY + 28,
     );
+    ctx.restore();
+  }
+
+  // 14. Solitaire & VHS Tracking Tear Transition (`trans > 0.01`)
+  if (trans > 0.01) {
+    const wave = Math.sin(trans * Math.PI);
+    const p = 1 - trans;
+    ctx.save();
+
+    // Chromatic VHS head-switching tear bands slicing horizontally across the viewport
+    for (let s = 0; s < 6; s++) {
+      const sy = ((s * 61 + Math.floor(timeSec * 140)) % (CANVAS_H - 18)) + 6;
+      const sh = 3 + (s % 3) * 3;
+      const offsetX = Math.sin(timeSec * 37 + s * 2.4) * 38 * wave;
+      ctx.fillStyle =
+        (s & 1) === 0
+          ? rgbToCss(palette[6], 0.34 * wave)
+          : rgbToCss(palette[5], 0.28 * wave);
+      ctx.fillRect(offsetX, sy, CANVAS_W, sh);
+    }
+
+    // Sweeping Win95 Solitaire victory card fan arcing across the transition
+    const suits = ['A♠', 'K♥', 'Q♦', 'J♣', '10♠', 'A♥', 'K♦', 'Q♣'];
+    for (let c = 0; c < suits.length; c++) {
+      const u = Math.max(0, Math.min(1, p * 1.25 - c * 0.055));
+      if (u <= 0 || u >= 1) continue;
+      const cardX = -32 + u * (CANVAS_W + 64);
+      const cardY = CANVAS_H * 0.72 - Math.abs(Math.sin(u * Math.PI * 2.2)) * 155;
+      ctx.fillStyle = rgbToCss(palette[7], 0.94 * wave);
+      ctx.strokeStyle = rgbToCss(palette[1], 0.96 * wave);
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(cardX, cardY, 26, 36, 3);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = rgbToCss(palette[(c & 1) === 0 ? 1 : 5], 0.96 * wave);
+      ctx.font = 'bold 8.5px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(suits[c], cardX + 3.5, cardY + 4);
+    }
     ctx.restore();
   }
 }

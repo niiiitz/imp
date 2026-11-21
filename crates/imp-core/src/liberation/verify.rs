@@ -142,7 +142,7 @@ fn plausible_mp3_frame_len(buf: &[u8], pos: usize) -> Option<usize> {
     Some(frame_len)
 }
 
-fn find_fallback_payload_offset(file_path: &Path) -> Option<(u64, Option<&'static str>)> {
+pub(crate) fn find_fallback_payload_offset(file_path: &Path) -> Option<(u64, Option<&'static str>)> {
     let mut f = File::open(file_path).ok()?;
     let mut buf = vec![0u8; 512 * 1024];
     let n = f.read(&mut buf).ok()?;

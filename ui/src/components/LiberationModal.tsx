@@ -214,6 +214,34 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
     }
   });
   const [chooserTarget, setChooserTarget] = useState<'download' | 'audit' | 'reunion' | null>(null);
+  const [downloadFilter, setDownloadFilter] = useState<{
+    artist: string;
+    album: string;
+    search: string;
+  }>({ artist: '', album: '', search: '' });
+
+  const jumpToTargetedReclaim = useCallback(
+    (next: { artist?: string; album?: string; search?: string }) => {
+      const cleaned = {
+        artist: (next.artist || '').trim(),
+        album: (next.album || '').trim(),
+        search: (next.search || '').trim(),
+      };
+      setDownloadFilter(cleaned);
+      setActiveTab('download');
+      if (showToast) {
+        const label = [
+          cleaned.artist ? `Artist: ${cleaned.artist}` : '',
+          cleaned.album ? `Album: ${cleaned.album}` : '',
+          cleaned.search ? `Search: ${cleaned.search}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        showToast(label ? `Targeted Stage 2A filter set (${label})` : 'Opened Stage 2A Reclamation');
+      }
+    },
+    [showToast]
+  );
 
   const updateRescueFolder = useCallback((next: string) => {
     setRescueFolder(next);
@@ -619,7 +647,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
             onClick={() => setActiveTab('reunion')}
             style={tabBtnStyle(activeTab === 'reunion')}
           >
-            Stage 3: Album Reunion
+            Stage 3: Reunion &amp; Acoustic Mend
           </button>
         </div>
 
@@ -1070,6 +1098,50 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
                             <div style={{ fontSize: 10, color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {t.album}
                             </div>
+                            {(t.artist || t.album) && (
+                              <div style={{ display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap' }}>
+                                {t.album && (
+                                  <button
+                                    type="button"
+                                    data-focusable="true"
+                                    onClick={() =>
+                                      jumpToTargetedReclaim({ artist: t.artist, album: t.album })
+                                    }
+                                    style={{
+                                      padding: '1px 6px',
+                                      borderRadius: 5,
+                                      border: '1px solid rgba(52, 211, 153, 0.35)',
+                                      background: 'rgba(16, 185, 129, 0.1)',
+                                      color: '#6ee7b7',
+                                      fontSize: 9.5,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Reclaim Album
+                                  </button>
+                                )}
+                                {t.artist && (
+                                  <button
+                                    type="button"
+                                    data-focusable="true"
+                                    onClick={() => jumpToTargetedReclaim({ artist: t.artist })}
+                                    style={{
+                                      padding: '1px 6px',
+                                      borderRadius: 5,
+                                      border: '1px solid rgba(56, 189, 248, 0.32)',
+                                      background: 'rgba(14, 165, 233, 0.1)',
+                                      color: '#7dd3fc',
+                                      fontSize: 9.5,
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Reclaim Artist
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', color: '#94a3b8', fontFamily: 'monospace' }}>
                             {t.track_number ?? '-'}/{t.album_track_count ?? '-'} · {formatDurationMs(t.duration_ms)}
@@ -1216,7 +1288,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
                           {alb.owned_or_library_tracks} / {alb.expected_track_count} tracks
                         </span>
                       </div>
-                      <div style={{ display: 'flex', gap: 6, fontSize: 10 }}>
+                      <div style={{ display: 'flex', gap: 6, fontSize: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                         <span style={chipStyle('#34d399')}>Reclaimable {alb.reclaimable_count}</span>
                         <span style={chipStyle('#fb923c')}>Sub DRM {alb.subscription_count}</span>
                         {alb.missing_track_numbers.length > 0 && (
@@ -1224,6 +1296,42 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
                             Missing #{alb.missing_track_numbers.join(', #')}
                           </span>
                         )}
+                        <button
+                          type="button"
+                          data-focusable="true"
+                          onClick={() =>
+                            jumpToTargetedReclaim({ artist: alb.artist, album: alb.album })
+                          }
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            border: '1px solid rgba(52, 211, 153, 0.45)',
+                            background: 'rgba(16, 185, 129, 0.15)',
+                            color: '#6ee7b7',
+                            fontSize: 10,
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Reclaim Album
+                        </button>
+                        <button
+                          type="button"
+                          data-focusable="true"
+                          onClick={() => jumpToTargetedReclaim({ artist: alb.artist })}
+                          style={{
+                            padding: '2px 7px',
+                            borderRadius: 6,
+                            border: '1px solid rgba(56, 189, 248, 0.42)',
+                            background: 'rgba(14, 165, 233, 0.14)',
+                            color: '#7dd3fc',
+                            fontSize: 10,
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Reclaim Artist
+                        </button>
                       </div>
                     </div>
 
@@ -1255,6 +1363,8 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
             destDir={rescueFolder}
             setDestDir={updateRescueFolder}
             onBrowseDest={() => setChooserTarget('download')}
+            filter={downloadFilter}
+            setFilter={setDownloadFilter}
             onInspectFailed={() => {
               setOwnershipFilter('all');
               setOriginFilter('all');
@@ -1273,6 +1383,7 @@ export const LiberationModal: React.FC<LiberationModalProps> = ({ open, onClose,
           />
         ) : (
           <LiberationReunionTab
+            open={open && activeTab === 'reunion'}
             rootDir={rescueFolder}
             setRootDir={updateRescueFolder}
             onBrowseRoot={() => setChooserTarget('reunion')}
