@@ -222,6 +222,12 @@ if [[ -f "${ENV_FILE}" ]]; then
     export IMP_EMBEDDED_ACOUSTID_API_KEY="${ACOUSTID_KEY}"
     echo "   • Baked public AcoustID Client API Key into binary for pure-Rust Chromaprint Acoustic Mend"
   fi
+  if [[ -z "${APPLE_NOTARIZE_PROFILE:-}" ]]; then
+    NOTARY_PROF="$(ENV_FILE="${ENV_FILE}" "${PYTHON_BIN}" -c 'import os; env=dict(l.strip().split("=",1) for l in open(os.environ["ENV_FILE"]) if l.strip() and not l.strip().startswith("#") and "=" in l); print(env.get("APPLE_NOTARIZE_PROFILE","").strip().strip("\x27\x22"), end="")' 2>/dev/null || true)"
+    if [[ -n "${NOTARY_PROF}" ]]; then
+      export APPLE_NOTARIZE_PROFILE="${NOTARY_PROF}"
+    fi
+  fi
 fi
 
 "${CARGO_BIN}" build --release -p imp --offline
@@ -343,10 +349,33 @@ cp -R "${REPO_ROOT}/ui/dist/"* "${APP_BUNDLE}/Contents/Resources/ui/"
 echo "5/5 Code signing dist/IMP.app and creating dist/IMP-macos-${ARCH_SLUG}.zip..."
 SIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-${EXPANDED_CODE_SIGN_IDENTITY:-}}"
 SIGN_LABEL="${EXPANDED_CODE_SIGN_IDENTITY_NAME:-}"
+SIGN_KEYCHAIN="${MACOS_CODESIGN_KEYCHAIN:-}"
+LOGIN_KEYCHAIN="${HOME}/Library/Keychains/login.keychain-db"
 if [[ -z "${SIGN_IDENTITY}" ]]; then
-  # Auto-detect Developer ID Application or Apple Development identity SHA-1 hash in Keychain if present
-  SIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk '/Developer ID Application|Apple Development/ {print $2; exit}' || true)"
-  SIGN_LABEL="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application|Apple Development/ {print $2; exit}' || true)"
+  # Prefer Developer ID Application over Apple Development, searching login.keychain-db first
+  # to avoid ambiguous-identity errors if the certificate was also imported into System.keychain.
+  KEYCHAIN_CANDIDATES=()
+  if [[ -f "${LOGIN_KEYCHAIN}" ]]; then
+    KEYCHAIN_CANDIDATES+=("${LOGIN_KEYCHAIN}")
+  fi
+  KEYCHAIN_CANDIDATES+=("")
+
+  for KIND in "Developer ID Application" "Apple Development"; do
+    for KC in "${KEYCHAIN_CANDIDATES[@]}"; do
+      if [[ -n "${KC}" ]]; then
+        IDENTITIES_OUT="$(security find-identity -v -p codesigning "${KC}" 2>/dev/null || true)"
+      else
+        IDENTITIES_OUT="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+      fi
+      FOUND_HASH="$(printf '%s\n' "${IDENTITIES_OUT}" | awk -v kind="${KIND}" 'index($0, kind) {print $2; exit}')"
+      if [[ -n "${FOUND_HASH}" ]]; then
+        SIGN_IDENTITY="${FOUND_HASH}"
+        SIGN_LABEL="$(printf '%s\n' "${IDENTITIES_OUT}" | awk -F'"' -v kind="${KIND}" 'index($0, kind) {print $2; exit}')"
+        SIGN_KEYCHAIN="${KC}"
+        break 2
+      fi
+    done
+  done
 fi
 if [[ -z "${SIGN_IDENTITY}" ]]; then
   SIGN_IDENTITY="-"
@@ -357,12 +386,17 @@ if [[ -z "${SIGN_IDENTITY}" ]]; then
     "${APP_BUNDLE}"
 else
   echo "   • Signing with Keychain identity (Hardened Runtime): ${SIGN_LABEL:-${SIGN_IDENTITY}} (${SIGN_IDENTITY})"
-  codesign --force --deep \
-    --options runtime \
-    --timestamp \
-    --entitlements "${REPO_ROOT}/packaging/macos/entitlements.plist" \
-    --sign "${SIGN_IDENTITY}" \
-    "${APP_BUNDLE}"
+  CODESIGN_ARGS=(
+    --force --deep
+    --options runtime
+    --timestamp
+    --entitlements "${REPO_ROOT}/packaging/macos/entitlements.plist"
+  )
+  if [[ -n "${SIGN_KEYCHAIN}" ]]; then
+    CODESIGN_ARGS+=(--keychain "${SIGN_KEYCHAIN}")
+  fi
+  CODESIGN_ARGS+=(--sign "${SIGN_IDENTITY}" "${APP_BUNDLE}")
+  codesign "${CODESIGN_ARGS[@]}"
 fi
 
 codesign --verify --deep --strict "${APP_BUNDLE}"
