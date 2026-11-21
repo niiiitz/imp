@@ -8,7 +8,7 @@ use std::sync::{Mutex, OnceLock};
 
 /// Registered public LRCLIB App ID for IMP (`https://lrclib.net/docs`).
 pub const LRCLIB_APP_ID: &str = "kryw9SKiYEUW54S7gCwM3-SLp4McSiBzeIcJRdUN-2w";
-pub const LRCLIB_USER_AGENT: &str = "IMP/0.9.0 (https://github.com/niiiitz/imp)";
+pub const LRCLIB_USER_AGENT: &str = "IMP/1.0.0 (https://github.com/niiiitz/imp)";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SyncedLyricLine {

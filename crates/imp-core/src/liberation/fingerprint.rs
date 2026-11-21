@@ -38,7 +38,7 @@ use symphonia::default::{get_codecs, get_probe};
 use walkdir::WalkDir;
 
 const ACOUSTID_API_URL: &str = "https://api.acoustid.org/v2/lookup";
-const ACOUSTID_USER_AGENT: &str = "IMP-MediaPlayer/0.9 (https://github.com/niiiitz/imp)";
+const ACOUSTID_USER_AGENT: &str = "IMP-MediaPlayer/1.0.0 (https://github.com/niiiitz/imp)";
 const MAX_FINGERPRINT_SECONDS: u64 = 120;
 const MIN_ACOUSTID_SCORE: f64 = 0.85;
 const MAX_DURATION_DRIFT_SEC: i64 = 8;
