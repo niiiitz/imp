@@ -104,7 +104,7 @@ impl LibraryDatabase {
             PRAGMA synchronous = NORMAL;
             PRAGMA foreign_keys = ON;
             PRAGMA temp_store = MEMORY;
-            PRAGMA cache_size = -2000;
+            PRAGMA cache_size = -16000;
 
             CREATE TABLE IF NOT EXISTS storage_mounts (
                 mount_root      TEXT PRIMARY KEY,
@@ -234,12 +234,13 @@ impl LibraryDatabase {
             CREATE INDEX IF NOT EXISTS idx_track_props_synced_lyrics ON track_properties(has_synced_lyrics, suppress_lyrics);
             CREATE INDEX IF NOT EXISTS idx_track_props_art ON track_properties(has_art);
 
-            INSERT INTO track_properties (uri, has_art, updated_at)
-            SELECT uri,
-                   CASE WHEN art_url IS NOT NULL AND art_url != '' THEN 1 ELSE 0 END,
+            INSERT OR IGNORE INTO track_properties (uri, has_art, updated_at)
+            SELECT t.uri,
+                   CASE WHEN t.art_url IS NOT NULL AND t.art_url != '' THEN 1 ELSE 0 END,
                    strftime('%s', 'now')
-            FROM tracks
-            WHERE uri NOT IN (SELECT uri FROM track_properties);
+            FROM tracks t
+            LEFT JOIN track_properties tp ON tp.uri = t.uri
+            WHERE tp.uri IS NULL;
             ",
         )?;
 
@@ -323,7 +324,8 @@ impl LibraryDatabase {
                   AND m.art_url LIKE '%mzstatic.com%'
                 LIMIT 1
             )
-            WHERE (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')
+            WHERE source = 'apple_music'
+              AND (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')
               AND EXISTS (
                 SELECT 1 FROM apple_catalog_map m
                 WHERE ('applemusic:song:' || m.raw_id = tracks.uri OR 'applemusic:track:' || m.raw_id = tracks.uri)
@@ -333,17 +335,20 @@ impl LibraryDatabase {
             UPDATE tracks
             SET art_url = (
                 SELECT t2.art_url FROM tracks t2
-                WHERE t2.album_title = tracks.album_title
+                WHERE t2.source = 'apple_music'
+                  AND t2.album_title = tracks.album_title
                   AND t2.album_title != ''
                   AND t2.artists_json = tracks.artists_json
                   AND t2.art_url LIKE '%mzstatic.com%'
                 LIMIT 1
             )
-            WHERE (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')
+            WHERE source = 'apple_music'
+              AND (art_url IS NULL OR art_url = '' OR art_url LIKE '%blobstore.apple.com%')
               AND tracks.uri NOT LIKE 'applemusic:%:i.%'
               AND EXISTS (
                 SELECT 1 FROM tracks t2
-                WHERE t2.album_title = tracks.album_title
+                WHERE t2.source = 'apple_music'
+                  AND t2.album_title = tracks.album_title
                   AND t2.album_title != ''
                   AND t2.artists_json = tracks.artists_json
                   AND t2.art_url LIKE '%mzstatic.com%'

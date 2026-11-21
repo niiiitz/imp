@@ -417,7 +417,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
     if let Ok(bytes) = crate::http_pool::http_get_bytes(
         url,
         &[
-            ("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)"),
+            ("User-Agent", "IMP/1.0.2 (https://github.com/niiiitz/imp)"),
             ("Accept", "application/json"),
         ],
         None,
@@ -445,7 +445,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
         "--max-time",
         "15",
         "-H",
-        "User-Agent: IMP/1.0.1 (https://github.com/niiiitz/imp)",
+        "User-Agent: IMP/1.0.2 (https://github.com/niiiitz/imp)",
         "-H",
         "Accept: application/json",
         url,
@@ -464,7 +464,7 @@ fn query_mb_releases(url: &str) -> Option<Vec<serde_json::Value>> {
 fn download_cover_art_to(url: &str, dest_path: &Path) -> bool {
     if let Ok(bytes) = crate::http_pool::http_get_bytes(
         url,
-        &[("User-Agent", "IMP/1.0.1 (https://github.com/niiiitz/imp)")],
+        &[("User-Agent", "IMP/1.0.2 (https://github.com/niiiitz/imp)")],
         None,
         10,
     ) {
@@ -482,7 +482,7 @@ fn download_cover_art_to(url: &str, dest_path: &Path) -> bool {
         "--max-time",
         "10",
         "-H",
-        "User-Agent: IMP/1.0.1 (https://github.com/niiiitz/imp)",
+        "User-Agent: IMP/1.0.2 (https://github.com/niiiitz/imp)",
         "-o",
         &dest_path.to_string_lossy(),
         url,

@@ -25,6 +25,9 @@ extern "C" {}
 extern "C" {}
 
 static MAIN_WINDOW_PTR: AtomicUsize = AtomicUsize::new(0);
+static MAIN_WEBVIEW_PTR: AtomicUsize = AtomicUsize::new(0);
+static MAIN_UI_URL: OnceLock<String> = OnceLock::new();
+static NAV_RETRY_COUNT: AtomicUsize = AtomicUsize::new(0);
 static STATUS_MENU_PTR: AtomicUsize = AtomicUsize::new(0);
 static STATUS_ITEM_PTR: AtomicUsize = AtomicUsize::new(0);
 static STATUS_HEADER_ITEM_PTR: AtomicUsize = AtomicUsize::new(0);
@@ -321,6 +324,48 @@ extern "C" fn on_popup_webview_did_close(_this: &Object, _cmd: Sel, webview: id)
     }
 }
 
+/// WKNavigationDelegate `webView:didFinishNavigation:` — clears startup retry counter once UI paints.
+extern "C" fn on_webview_did_finish(_this: &Object, _cmd: Sel, webview: id, _nav: id) {
+    if (webview as usize) == MAIN_WEBVIEW_PTR.load(Ordering::SeqCst) {
+        NAV_RETRY_COUNT.store(0, Ordering::SeqCst);
+    }
+}
+
+/// WKNavigationDelegate `webView:didFailProvisionalNavigation:withError:` — retries loading
+/// `127.0.0.1:18888` if WebKit raced daemon readiness so the window cannot stay blank/black.
+extern "C" fn on_webview_did_fail_provisional(
+    _this: &Object,
+    _cmd: Sel,
+    webview: id,
+    _nav: id,
+    _err: id,
+) {
+    let main_wv = MAIN_WEBVIEW_PTR.load(Ordering::SeqCst);
+    if (webview as usize) != main_wv || main_wv == 0 {
+        return;
+    }
+    let Some(ui_url) = MAIN_UI_URL.get() else {
+        return;
+    };
+    let attempt = NAV_RETRY_COUNT.fetch_add(1, Ordering::SeqCst);
+    if attempt >= 25 {
+        return;
+    }
+    let url_clone = ui_url.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(350));
+        Queue::main().exec_async(move || unsafe {
+            let wv_ptr = MAIN_WEBVIEW_PTR.load(Ordering::SeqCst) as id;
+            if wv_ptr == nil {
+                return;
+            }
+            let ns_url: id = msg_send![class!(NSURL), URLWithString: ns_string(&url_clone)];
+            let ns_req: id = msg_send![class!(NSURLRequest), requestWithURL: ns_url];
+            let _: id = msg_send![wv_ptr, loadRequest: ns_req];
+        });
+    });
+}
+
 fn register_delegate_class() -> &'static Class {
     static DELEGATE_CLASS: OnceLock<&'static Class> = OnceLock::new();
     DELEGATE_CLASS.get_or_init(|| unsafe {
@@ -367,6 +412,14 @@ fn register_delegate_class() -> &'static Class {
         decl.add_method(
             sel!(webViewDidClose:),
             on_popup_webview_did_close as extern "C" fn(&Object, Sel, id),
+        );
+        decl.add_method(
+            sel!(webView:didFinishNavigation:),
+            on_webview_did_finish as extern "C" fn(&Object, Sel, id, id),
+        );
+        decl.add_method(
+            sel!(webView:didFailProvisionalNavigation:withError:),
+            on_webview_did_fail_provisional as extern "C" fn(&Object, Sel, id, id, id),
         );
 
         decl.register()
@@ -526,7 +579,7 @@ pub fn ensure_inprocess_or_existing_daemon() {
             let _ = rt.block_on(imp_daemon::run_daemon());
         });
 
-    for _ in 0..30 {
+    for _ in 0..150 {
         if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
             break;
         }
@@ -608,9 +661,12 @@ pub fn run_macos_native_app(ui_url: &str) {
             }
         }
 
+        let _ = MAIN_UI_URL.set(ui_url.to_string());
         let webview: id = msg_send![class!(WKWebView), alloc];
         let webview: id = msg_send![webview, initWithFrame: frame configuration: wk_config];
         let _: () = msg_send![webview, setUIDelegate: delegate];
+        let _: () = msg_send![webview, setNavigationDelegate: delegate];
+        MAIN_WEBVIEW_PTR.store(webview as usize, Ordering::SeqCst);
 
         // Allow transparent/dark background before first paint
         let no_val: id = msg_send![class!(NSNumber), numberWithBool: NO];
