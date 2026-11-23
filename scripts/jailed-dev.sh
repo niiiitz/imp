@@ -4,7 +4,8 @@ set -euo pipefail
 # ==============================================================================
 # IMP Bubblewrap (bwrap) Dev & Build Jail
 # Isolates `cargo`, `npm`, and build scripts from host secrets (~/.ssh, ~/.aws,
-# ~/.gnupg, /mnt/c Windows drive, .env, *.p8 signing keys).
+# ~/.gnupg, ~/.local/share/imp, /mnt/c, .env, *.p8, *.key, AGENTS.md,
+# reference_documentation/).
 #
 # Usage:
 #   ./scripts/jailed-dev.sh cargo test --workspace --offline
@@ -33,6 +34,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JAIL_HOME="${HOME}/.cache/imp-dev-jail-home"
 mkdir -p "${JAIL_HOME}" "${HOME}/.cargo" "${HOME}/.rustup" "${HOME}/.npm"
 
+JAIL_PATH="/home/dev/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
+
 BWRAP_ARGS=(
   --die-with-parent
   --unshare-pid
@@ -56,7 +59,6 @@ BWRAP_ARGS=(
   --clearenv
   --setenv HOME /home/dev
   --setenv USER dev
-  --setenv PATH "/home/dev/.cargo/bin:/usr/local/bin:/usr/bin:/bin"
   --setenv CARGO_HOME /home/dev/.cargo
   --setenv RUSTUP_HOME /home/dev/.rustup
   --setenv npm_config_cache /home/dev/.npm
@@ -71,22 +73,38 @@ if [[ -d /usr/local ]]; then
   BWRAP_ARGS+=(--ro-bind /usr/local /usr/local)
 fi
 
-# Pass through NVM/Node bin directory read-only if node is outside /usr/bin
-NODE_BIN_DIR="$(dirname "$(command -v node 2>/dev/null || echo /usr/bin/node)")"
-if [[ -d "${NODE_BIN_DIR}" && "${NODE_BIN_DIR}" != /usr/* && "${NODE_BIN_DIR}" != /bin ]]; then
-  NODE_ROOT="$(dirname "${NODE_BIN_DIR}")"
-  BWRAP_ARGS+=(--ro-bind "${NODE_ROOT}" "${NODE_ROOT}")
-  BWRAP_ARGS+=(--setenv PATH "${NODE_BIN_DIR}:/home/dev/.cargo/bin:/usr/local/bin:/usr/bin:/bin")
+# Resolve actual Node.js distribution prefix (never bind ~/.local or $HOME)
+NODE_CMD="$(command -v node 2>/dev/null || echo /usr/bin/node)"
+NODE_REAL="$(readlink -f "${NODE_CMD}" 2>/dev/null || echo "${NODE_CMD}")"
+NODE_DIST_ROOT="$(dirname "$(dirname "${NODE_REAL}")")"
+if [[ -d "${NODE_DIST_ROOT}/bin" \
+   && "${NODE_DIST_ROOT}" != "/" \
+   && "${NODE_DIST_ROOT}" != "/usr" \
+   && "${NODE_DIST_ROOT}" != "/usr/local" \
+   && "${NODE_DIST_ROOT}" != "${HOME}" \
+   && "${NODE_DIST_ROOT}" != "${HOME}/.local" ]]; then
+  BWRAP_ARGS+=(--ro-bind "${NODE_DIST_ROOT}" /opt/node)
+  JAIL_PATH="/opt/node/bin:${JAIL_PATH}"
 fi
+BWRAP_ARGS+=(--setenv PATH "${JAIL_PATH}")
 
-# Mask private keys and .env inside /workspace so untrusted build.rs / postinstall cannot read them
-if [[ -f "${REPO_ROOT}/.env" ]]; then
-  BWRAP_ARGS+=(--ro-bind /dev/null /workspace/.env)
-fi
+# Mask private keys, env files, agent instructions, and private docs inside /workspace
 shopt -s nullglob
-for keyfile in "${REPO_ROOT}"/*.p8 "${REPO_ROOT}"/AuthKey_*; do
-  if [[ -f "${keyfile}" ]]; then
-    BWRAP_ARGS+=(--ro-bind /dev/null "/workspace/$(basename "${keyfile}")")
+for secfile in \
+  "${REPO_ROOT}/.env" \
+  "${REPO_ROOT}"/.env.* \
+  "${REPO_ROOT}"/*.p8 \
+  "${REPO_ROOT}"/AuthKey_* \
+  "${REPO_ROOT}"/*.key \
+  "${REPO_ROOT}"/*.pem \
+  "${REPO_ROOT}/AGENTS.md"; do
+  if [[ -f "${secfile}" ]]; then
+    BWRAP_ARGS+=(--ro-bind /dev/null "/workspace/$(basename "${secfile}")")
+  fi
+done
+for secdir in "${REPO_ROOT}/reference_documentation" "${REPO_ROOT}/.agents"; do
+  if [[ -d "${secdir}" ]]; then
+    BWRAP_ARGS+=(--tmpfs "/workspace/$(basename "${secdir}")")
   fi
 done
 shopt -u nullglob
