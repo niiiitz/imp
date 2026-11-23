@@ -109,9 +109,9 @@ export const InternetArchiveDiscoverPane: React.FC<InternetArchiveDiscoverPanePr
                                 style={{
                                   padding: '4px 10px',
                                   borderRadius: 6,
-                                  background: isCollPinned ? '#0f222a' : '#261a0b',
-                                  border: isCollPinned ? '1px solid #2aa3c4' : '1px solid #d97706',
-                                  color: isCollPinned ? '#67e8f9' : '#fde68a',
+                                  background: isCollPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#261a0b',
+                                  border: isCollPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #d97706',
+                                  color: isCollPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a',
                                   fontSize: 11,
                                   fontWeight: 800,
                                   cursor: 'pointer',

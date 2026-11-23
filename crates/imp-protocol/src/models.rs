@@ -253,6 +253,16 @@ pub struct ProvisioningSettings {
     pub release_asset_template: String,
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
+    #[serde(default = "default_true")]
+    pub fetch_lyrics_online: bool,
+    #[serde(default = "default_true")]
+    pub fetch_artwork_online: bool,
+    #[serde(default = "default_true")]
+    pub fetch_factoids_online: bool,
+    #[serde(default = "default_true")]
+    pub fetch_disc_metadata_online: bool,
+    #[serde(default = "default_true")]
+    pub fetch_sc_comments_online: bool,
 }
 
 fn default_widevine_version() -> String {
@@ -300,6 +310,11 @@ impl Default for ProvisioningSettings {
             github_releases_api_url: default_github_releases_api_url(),
             release_asset_template: default_release_asset_template(),
             update_channel: default_update_channel(),
+            fetch_lyrics_online: true,
+            fetch_artwork_online: true,
+            fetch_factoids_online: true,
+            fetch_disc_metadata_online: true,
+            fetch_sc_comments_online: true,
         }
     }
 }

@@ -121,7 +121,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
         borderRadius: 4,
         background: '#141822',
         border: '1px solid #283044',
-        color: '#67e8f9',
+        color: 'var(--imp-accent-active-text, #f5e1be)',
         fontFamily: 'monospace',
         fontSize: 10,
         fontWeight: 800,
@@ -131,7 +131,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
         gap: 3,
       }}
     >
-      <ImpIcon name="gamepad-select" size={10} color="#67e8f9" />
+      <ImpIcon name="gamepad-select" size={10} color="var(--imp-accent-active-text, #f5e1be)" />
       <span>SELECT</span>
     </span>
   );
@@ -187,7 +187,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                 borderRadius: 6,
                 background: '#14141e',
                 border: '1px solid #2a2a38',
-                color: '#bfeaf5',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 11,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -265,7 +265,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
               borderRadius: 6,
               background: '#121820',
               border: '1px solid #283848',
-              color: '#bfeaf5',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 11,
               fontWeight: 700,
               cursor: 'pointer',
@@ -341,9 +341,9 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   alignItems: 'center',
                   padding: '3px 9px',
                   borderRadius: 6,
-                  background: isCloudPlaylistPinned ? '#0f222a' : '#241119',
-                  border: isCloudPlaylistPinned ? '1px solid #2aa3c4' : '1px solid #5c1f33',
-                  color: isCloudPlaylistPinned ? '#67e8f9' : '#fecdd3',
+                  background: isCloudPlaylistPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#241119',
+                  border: isCloudPlaylistPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #5c1f33',
+                  color: isCloudPlaylistPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fecdd3',
                   fontSize: 11,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -354,7 +354,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   <ImpIcon
                     name={isCloudPlaylistPinned ? 'check' : 'imp'}
                     size={11}
-                    color={isCloudPlaylistPinned ? '#67e8f9' : '#fecdd3'}
+                    color={isCloudPlaylistPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fecdd3'}
                   />
                   <span>{isCloudPlaylistPinned ? 'Pinned (Unpin)' : 'Pin to Imp'}</span>
                 </span>
@@ -380,9 +380,9 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   alignItems: 'center',
                   padding: '3px 9px',
                   borderRadius: 6,
-                  background: isScPlaylistPinned ? '#0f222a' : '#2c140a',
-                  border: isScPlaylistPinned ? '1px solid #2aa3c4' : '1px solid #ea580c',
-                  color: isScPlaylistPinned ? '#67e8f9' : '#fdba74',
+                  background: isScPlaylistPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#2c140a',
+                  border: isScPlaylistPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #ea580c',
+                  color: isScPlaylistPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74',
                   fontSize: 11,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -393,7 +393,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   <ImpIcon
                     name={isScPlaylistPinned ? 'check' : 'imp'}
                     size={11}
-                    color={isScPlaylistPinned ? '#67e8f9' : '#fdba74'}
+                    color={isScPlaylistPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74'}
                   />
                   <span>{isScPlaylistPinned ? 'Pinned (Unpin)' : 'Pin Set to Imp'}</span>
                 </span>
@@ -419,9 +419,9 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   alignItems: 'center',
                   padding: '3px 9px',
                   borderRadius: 6,
-                  background: isCloudAlbumPinned ? '#0f222a' : '#241119',
-                  border: isCloudAlbumPinned ? '1px solid #2aa3c4' : '1px solid #5c1f33',
-                  color: isCloudAlbumPinned ? '#67e8f9' : '#fecdd3',
+                  background: isCloudAlbumPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#241119',
+                  border: isCloudAlbumPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #5c1f33',
+                  color: isCloudAlbumPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fecdd3',
                   fontSize: 11,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -432,7 +432,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   <ImpIcon
                     name={isCloudAlbumPinned ? 'check' : 'imp'}
                     size={11}
-                    color={isCloudAlbumPinned ? '#67e8f9' : '#fecdd3'}
+                    color={isCloudAlbumPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fecdd3'}
                   />
                   <span>{isCloudAlbumPinned ? 'Pinned (Unpin)' : 'Pin Album to Imp'}</span>
                 </span>
@@ -458,9 +458,9 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   alignItems: 'center',
                   padding: '3px 9px',
                   borderRadius: 6,
-                  background: isArchiveItemPinned ? '#0f222a' : '#261a0b',
-                  border: isArchiveItemPinned ? '1px solid #2aa3c4' : '1px solid #d97706',
-                  color: isArchiveItemPinned ? '#67e8f9' : '#fde68a',
+                  background: isArchiveItemPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#261a0b',
+                  border: isArchiveItemPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #d97706',
+                  color: isArchiveItemPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a',
                   fontSize: 11,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -471,7 +471,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                   <ImpIcon
                     name={isArchiveItemPinned ? 'check' : 'imp'}
                     size={11}
-                    color={isArchiveItemPinned ? '#67e8f9' : '#fde68a'}
+                    color={isArchiveItemPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a'}
                   />
                   <span>{isArchiveItemPinned ? 'Pinned (Unpin)' : 'Pin to Imp'}</span>
                 </span>
@@ -554,9 +554,9 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     alignItems: 'center',
                     padding: '3px 9px',
                     borderRadius: 6,
-                    background: isLocalAlbumPinned ? '#0f222a' : '#121820',
-                    border: isLocalAlbumPinned ? '1px solid #2aa3c4' : '1px solid #283848',
-                    color: isLocalAlbumPinned ? '#67e8f9' : '#bfeaf5',
+                    background: isLocalAlbumPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#121820',
+                    border: isLocalAlbumPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #283848',
+                    color: isLocalAlbumPinned ? 'var(--imp-accent-active-text, #f5e1be)' : 'var(--imp-accent-active-text, #f5e1be)',
                     fontSize: 11,
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -567,7 +567,7 @@ export const LibraryContextLegendBar: React.FC<LibraryContextLegendBarProps> = (
                     <ImpIcon
                       name={isLocalAlbumPinned ? 'check' : 'imp'}
                       size={11}
-                      color={isLocalAlbumPinned ? '#67e8f9' : '#bfeaf5'}
+                      color={isLocalAlbumPinned ? 'var(--imp-accent-active-text, #f5e1be)' : 'var(--imp-accent-active-text, #f5e1be)'}
                     />
                     <span>{isLocalAlbumPinned ? 'Pinned (Unpin)' : 'Pin Album to Imp'}</span>
                   </span>

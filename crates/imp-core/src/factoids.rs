@@ -970,6 +970,14 @@ pub fn fetch_track_factoids(
         }
     }
 
+    if !crate::is_online_factoids_fetch_enabled() {
+        return TrackFactoidsResponse {
+            found: false,
+            provider: "offline_policy".to_string(),
+            bubbles: Vec::new(),
+        };
+    }
+
     let primary_artist = clean_artist
         .split(&[',', '&', '/'][..])
         .next()

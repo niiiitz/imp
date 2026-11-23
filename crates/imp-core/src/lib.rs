@@ -19,7 +19,65 @@ pub use orchestrator::AudioOrchestrator;
 pub use time_tracker::LocalTimeTracker;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
+
+static FETCH_LYRICS_ONLINE: AtomicBool = AtomicBool::new(true);
+static FETCH_ARTWORK_ONLINE: AtomicBool = AtomicBool::new(true);
+static FETCH_FACTOIDS_ONLINE: AtomicBool = AtomicBool::new(true);
+static FETCH_DISC_METADATA_ONLINE: AtomicBool = AtomicBool::new(true);
+static FETCH_SC_COMMENTS_ONLINE: AtomicBool = AtomicBool::new(true);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnlineRetrievalPolicy {
+    pub lyrics: bool,
+    pub artwork: bool,
+    pub factoids: bool,
+    pub disc_metadata: bool,
+    pub sc_comments: bool,
+}
+
+impl Default for OnlineRetrievalPolicy {
+    fn default() -> Self {
+        Self {
+            lyrics: true,
+            artwork: true,
+            factoids: true,
+            disc_metadata: true,
+            sc_comments: true,
+        }
+    }
+}
+
+/// Updates process-wide online metadata retrieval policy across all 5 categories.
+/// Locally cached assets and SQLite entries remain available when disabled.
+pub fn set_online_retrieval_policy(policy: OnlineRetrievalPolicy) {
+    FETCH_LYRICS_ONLINE.store(policy.lyrics, Ordering::Relaxed);
+    FETCH_ARTWORK_ONLINE.store(policy.artwork, Ordering::Relaxed);
+    FETCH_FACTOIDS_ONLINE.store(policy.factoids, Ordering::Relaxed);
+    FETCH_DISC_METADATA_ONLINE.store(policy.disc_metadata, Ordering::Relaxed);
+    FETCH_SC_COMMENTS_ONLINE.store(policy.sc_comments, Ordering::Relaxed);
+}
+
+pub fn is_online_lyrics_fetch_enabled() -> bool {
+    FETCH_LYRICS_ONLINE.load(Ordering::Relaxed)
+}
+
+pub fn is_online_artwork_fetch_enabled() -> bool {
+    FETCH_ARTWORK_ONLINE.load(Ordering::Relaxed)
+}
+
+pub fn is_online_factoids_fetch_enabled() -> bool {
+    FETCH_FACTOIDS_ONLINE.load(Ordering::Relaxed)
+}
+
+pub fn is_online_disc_metadata_fetch_enabled() -> bool {
+    FETCH_DISC_METADATA_ONLINE.load(Ordering::Relaxed)
+}
+
+pub fn is_online_sc_comments_fetch_enabled() -> bool {
+    FETCH_SC_COMMENTS_ONLINE.load(Ordering::Relaxed)
+}
 
 /// Returns `Some(<exe_dir>/data)` when IMP is running in Portable Mode
 /// (i.e. `portable.txt` exists next to `imp` / `Imp.exe`, or `IMP_PORTABLE_DIR` / `SIMP_PORTABLE_DIR` is set).
@@ -1232,6 +1290,43 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_online_metadata_policy_toggle_roundtrip() {
+        crate::set_online_retrieval_policy(crate::OnlineRetrievalPolicy {
+            lyrics: false,
+            artwork: false,
+            factoids: false,
+            disc_metadata: false,
+            sc_comments: false,
+        });
+        assert!(!crate::is_online_lyrics_fetch_enabled());
+        assert!(!crate::is_online_artwork_fetch_enabled());
+        assert!(!crate::is_online_factoids_fetch_enabled());
+        assert!(!crate::is_online_disc_metadata_fetch_enabled());
+        assert!(!crate::is_online_sc_comments_fetch_enabled());
+
+        crate::set_online_retrieval_policy(crate::OnlineRetrievalPolicy {
+            lyrics: true,
+            artwork: false,
+            factoids: true,
+            disc_metadata: false,
+            sc_comments: false,
+        });
+        assert!(crate::is_online_lyrics_fetch_enabled());
+        assert!(!crate::is_online_artwork_fetch_enabled());
+        assert!(crate::is_online_factoids_fetch_enabled());
+        assert!(!crate::is_online_disc_metadata_fetch_enabled());
+        assert!(!crate::is_online_sc_comments_fetch_enabled());
+
+        // Restore default policy so other concurrent unit tests see online enabled
+        crate::set_online_retrieval_policy(crate::OnlineRetrievalPolicy::default());
+        assert!(crate::is_online_lyrics_fetch_enabled());
+        assert!(crate::is_online_artwork_fetch_enabled());
+        assert!(crate::is_online_factoids_fetch_enabled());
+        assert!(crate::is_online_disc_metadata_fetch_enabled());
+        assert!(crate::is_online_sc_comments_fetch_enabled());
     }
 }
 

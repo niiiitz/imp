@@ -25,6 +25,16 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     );
 
     let settings = Arc::new(Mutex::new(load_or_create_settings()));
+    {
+        let cfg = settings.lock().unwrap();
+        imp_core::set_online_retrieval_policy(imp_core::OnlineRetrievalPolicy {
+            lyrics: cfg.provisioning.fetch_lyrics_online,
+            artwork: cfg.provisioning.fetch_artwork_online,
+            factoids: cfg.provisioning.fetch_factoids_online,
+            disc_metadata: cfg.provisioning.fetch_disc_metadata_online,
+            sc_comments: cfg.provisioning.fetch_sc_comments_online,
+        });
+    }
     let db_path = library_db_path();
     let db = LibraryDatabase::open(&db_path)?;
     let services_cache = imp_core::library::ServicesCacheDatabase::open(

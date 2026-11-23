@@ -82,6 +82,19 @@ export function useGamepadNavigation({
   const lastGamepadInputTsRef = useRef<number>(0);
   const lastBrowserFocusRef = useRef<HTMLElement | null>(null);
   const lastBrowserColRef = useRef<string | null>(null);
+  const lastFocusPointRef = useRef<{ x: number; y: number } | null>(null);
+  const windowFocusedRef = useRef<boolean>(
+    typeof document !== 'undefined' ? document.hasFocus() : true
+  );
+  const gamepadFocusPolicyRef = useRef<'focused_only' | 'always' | 'off'>(
+    (() => {
+      try {
+        const raw = window.localStorage.getItem('imp_gamepad_focus_policy_v1');
+        if (raw === 'always' || raw === 'off' || raw === 'focused_only') return raw;
+      } catch {}
+      return 'focused_only';
+    })()
+  );
   const preMuteVolumeRef = useRef<number>(0.85);
   const lastActionTsRef = useRef<Record<string, number>>({});
   const lastActionSourceRef = useRef<Record<string, string>>({});
@@ -172,6 +185,13 @@ export function useGamepadNavigation({
     if (el) {
       el.setAttribute('data-simp-active-focus', 'true');
       el.classList.add('simp-gpfocus');
+      const focusRect = el.getBoundingClientRect();
+      if (focusRect.width > 0 && focusRect.height > 0) {
+        lastFocusPointRef.current = {
+          x: focusRect.left + focusRect.width / 2,
+          y: focusRect.top + focusRect.height / 2,
+        };
+      }
       const navColEl = el.closest<HTMLElement>('[data-nav-col]');
       if (navColEl) {
         lastBrowserFocusRef.current = el;
@@ -192,22 +212,122 @@ export function useGamepadNavigation({
           new CustomEvent('simp-xmb-left-focus', { detail: { element: el } })
         );
       }
-      if (el.dataset.selectCategory) {
-        window.dispatchEvent(
-          new CustomEvent('simp-select-category-focus', {
-            detail: { category: el.dataset.selectCategory },
-          })
-        );
-      }
-      if (el.closest('[data-settings-col="main"]')) {
-        window.dispatchEvent(
-          new CustomEvent('simp-settings-folders-focus', {
-            detail: { open: el.dataset.settingsFoldersTrigger === 'true' },
-          })
-        );
-      }
     }
   }, []);
+
+  // Sync window focus & gamepad focus policy to `imp-daemon` (`/api/ui/focus`) so background
+  // Gamescope / Steam Frame / Windows game sessions never have controller inputs hijacked by IMP,
+  // and listen for explicit sibling focus handoffs (`simp-handoff-focus`) when UI rows unmount.
+  useEffect(() => {
+    const resolveFocusUrl = () => {
+      try {
+        if (
+          window.location.protocol === 'http:' &&
+          window.location.hostname &&
+          window.location.hostname !== 'steamloopback.host'
+        ) {
+          const port =
+            window.location.port === '1420' ? '18888' : window.location.port || '18888';
+          return `http://${window.location.hostname}:${port}/api/ui/focus`;
+        }
+      } catch {}
+      return 'http://127.0.0.1:18888/api/ui/focus';
+    };
+
+    const syncDaemonFocus = (focused: boolean, policy = gamepadFocusPolicyRef.current) => {
+      windowFocusedRef.current = focused;
+      const payload = JSON.stringify({ focused, policy });
+      try {
+        fetch(resolveFocusUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
+    };
+
+    const initialFocused = document.visibilityState === 'visible' && document.hasFocus();
+    syncDaemonFocus(initialFocused);
+
+    const onWinFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncDaemonFocus(true);
+      }
+    };
+    const onWinBlur = () => {
+      syncDaemonFocus(false);
+    };
+    const onVisChange = () => {
+      syncDaemonFocus(document.visibilityState === 'visible' && document.hasFocus());
+    };
+    const onPageHide = () => {
+      windowFocusedRef.current = false;
+      try {
+        const blob = new Blob(
+          [JSON.stringify({ focused: false, policy: gamepadFocusPolicyRef.current })],
+          { type: 'application/json' }
+        );
+        navigator.sendBeacon?.(resolveFocusUrl(), blob);
+      } catch {}
+    };
+    const onPolicyChange = (ev: Event) => {
+      const next = (ev as CustomEvent<{ policy?: string }>)?.detail?.policy;
+      if (next === 'focused_only' || next === 'always' || next === 'off') {
+        gamepadFocusPolicyRef.current = next;
+        try {
+          window.localStorage.setItem('imp_gamepad_focus_policy_v1', next);
+        } catch {}
+        syncDaemonFocus(windowFocusedRef.current, next);
+      }
+    };
+    const onHandoffFocus = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ element?: HTMLElement | null; selector?: string }>)
+        ?.detail;
+      const candidate =
+        (detail?.element && detail.element.isConnected ? detail.element : null) ||
+        (detail?.selector ? document.querySelector<HTMLElement>(detail.selector) : null);
+      if (candidate && candidate.isConnected && !(candidate as HTMLButtonElement).disabled) {
+        applyFocusMarker(candidate);
+      }
+    };
+
+    const webview = (window as unknown as {
+      chrome?: {
+        webview?: {
+          addEventListener?: (type: string, fn: (ev: { data?: unknown }) => void) => void;
+          removeEventListener?: (type: string, fn: (ev: { data?: unknown }) => void) => void;
+        };
+      };
+    }).chrome?.webview;
+    const onWebviewMessage = (ev: { data?: unknown }) => {
+      const data = ev?.data as { type?: string; active?: boolean } | undefined;
+      if (data && data.type === 'imp_window_active' && typeof data.active === 'boolean') {
+        syncDaemonFocus(data.active);
+        window.dispatchEvent(
+          new CustomEvent('imp-window-active', { detail: { active: data.active } })
+        );
+      }
+    };
+
+    window.addEventListener('focus', onWinFocus);
+    window.addEventListener('blur', onWinBlur);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('imp-gamepad-policy-change', onPolicyChange);
+    window.addEventListener('simp-handoff-focus', onHandoffFocus);
+    document.addEventListener('visibilitychange', onVisChange);
+    webview?.addEventListener?.('message', onWebviewMessage);
+
+    return () => {
+      window.removeEventListener('focus', onWinFocus);
+      window.removeEventListener('blur', onWinBlur);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('imp-gamepad-policy-change', onPolicyChange);
+      window.removeEventListener('simp-handoff-focus', onHandoffFocus);
+      document.removeEventListener('visibilitychange', onVisChange);
+      webview?.removeEventListener?.('message', onWebviewMessage);
+    };
+  }, [applyFocusMarker]);
 
   // Automatically place the focus marker on the default focus target when entering Browser (or restore last browser focus) or opening Modals
   useEffect(() => {
@@ -387,21 +507,39 @@ export function useGamepadNavigation({
           (Boolean(active?.closest('[data-nav-col="right"]')) ||
             Boolean(lastBrowserFocusRef.current?.closest('[data-nav-col="right"]')) ||
             lastBrowserColRef.current === 'right');
-        const rightPrimaryNodes = wasInRightCol
+        const rightNodes = wasInRightCol
           ? nodes.filter(
               (n) =>
-                Boolean(n.closest('[data-nav-col="right"]')) &&
-                (n.dataset.rightTile === 'true' ||
-                  n.dataset.singleSongPlay === 'true' ||
-                  n.dataset.rightTrack === 'true') &&
-                n.dataset.loadMore !== 'true'
+                Boolean(n.closest('[data-nav-col="right"]')) && n.dataset.loadMore !== 'true'
             )
           : [];
+        let nearestRightNode: HTMLElement | null = null;
+        if (rightNodes.length > 0) {
+          const anchor = lastFocusPointRef.current;
+          if (anchor) {
+            let bestDist = Infinity;
+            for (const cand of rightNodes) {
+              const r = cand.getBoundingClientRect();
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              const inViewport = r.bottom >= 0 && r.top <= window.innerHeight;
+              const dist = Math.hypot(cx - anchor.x, cy - anchor.y) + (inViewport ? 0 : 10000);
+              if (dist < bestDist) {
+                bestDist = dist;
+                nearestRightNode = cand;
+              }
+            }
+          } else {
+            nearestRightNode =
+              rightNodes.find((n) => {
+                const r = n.getBoundingClientRect();
+                return r.bottom >= 0 && r.top <= window.innerHeight;
+              }) || rightNodes[0];
+          }
+        }
         const preferred =
           hoveredNode ||
-          (rightPrimaryNodes.length > 0
-            ? rightPrimaryNodes[rightPrimaryNodes.length - 1]
-            : null) ||
+          nearestRightNode ||
           nodes.find((el) => el.dataset.defaultFocus === 'true') ||
           nodes[0];
         applyFocusMarker(preferred);
@@ -440,84 +578,102 @@ export function useGamepadNavigation({
       const cy = cur.top + cur.height / 2;
       const curCol = getCol(active);
 
-      // Two-Column Player Actions (`SELECT`) Modal Navigation:
-      // - Up/Down stays strictly within `data-player-actions-col="left"` (settings) or `"right"` (queue tracks).
-      // - Right from `"left"` jumps directly to `data-queue-current="true"` in `"right"`.
-      // - Left from `"right"` returns directly to `"left"`.
-      const curPlayerCol =
-        active.closest<HTMLElement>('[data-player-actions-col]')?.dataset.playerActionsCol || null;
-      if (curPlayerCol && !oskTarget) {
-        if (dir === 'up' || dir === 'down') {
-          let bestInPlayerCol: HTMLElement | null = null;
-          let bestScore = Infinity;
-          let wrapTopMost: HTMLElement | null = null;
-          let wrapTopMinY = Infinity;
-          let wrapBottomMost: HTMLElement | null = null;
-          let wrapBottomMaxY = -Infinity;
+      // 3-Column XMB Unified START Menu (`[data-xmb-menu="true"]`):
+      // - In `main`: Left/Right switches columns across `Audio & Display | Library & Sources | System & Help`,
+      //   while Up/Down steps vertically (wrapping inside the column).
+      // - In `sub`: 2D spatial navigation inside the open source sub-panel (Up/Down/Left/Right).
+      const curXmbCol =
+        active.closest<HTMLElement>('[data-xmb-col]')?.dataset.xmbCol || null;
+      if (curXmbCol && !oskTarget) {
+        if (active.dataset.brightnessScrubActive === 'true') {
+          if (dir === 'left' || dir === 'right') {
+            window.dispatchEvent(
+              new CustomEvent('simp-brightness-step', {
+                detail: { delta: dir === 'left' ? -5 : 5 },
+              })
+            );
+            return;
+          }
+          if (dir === 'up' || dir === 'down') {
+            window.dispatchEvent(new CustomEvent('simp-brightness-exit'));
+          }
+        }
 
-          for (const candidate of nodes) {
-            if (candidate === active) continue;
-            const candCol =
-              candidate.closest<HTMLElement>('[data-player-actions-col]')?.dataset
-                .playerActionsCol || null;
-            if (candCol !== curPlayerCol) continue;
-            const r = candidate.getBoundingClientRect();
-            const ty = r.top + r.height / 2;
-            if (ty < wrapTopMinY) {
-              wrapTopMinY = ty;
-              wrapTopMost = candidate;
-            }
-            if (ty > wrapBottomMaxY) {
-              wrapBottomMaxY = ty;
-              wrapBottomMost = candidate;
-            }
-            const dy = ty - cy;
-            if (dir === 'down' && dy <= 4) continue;
-            if (dir === 'up' && dy >= -4) continue;
-            if (Math.abs(dy) < bestScore) {
-              bestScore = Math.abs(dy);
-              bestInPlayerCol = candidate;
-            }
-          }
-          if (bestInPlayerCol) {
-            applyFocusMarker(bestInPlayerCol);
-          } else {
-            const wrapped = dir === 'up' ? wrapBottomMost : wrapTopMost;
-            if (wrapped) {
-              applyFocusMarker(wrapped);
-            }
-          }
+        if (curXmbCol === 'main' && (dir === 'left' || dir === 'right')) {
+          window.dispatchEvent(
+            new CustomEvent('simp-xmb-switch-col', { detail: { dir } })
+          );
           return;
         }
-        if (curPlayerCol === 'left' && dir === 'right') {
-          const currentQueueTarget =
-            document.querySelector<HTMLElement>(
-              '[data-player-actions-modal="true"] [data-player-actions-col="right"] [data-queue-current="true"]:not([disabled])'
-            ) ||
-            document.querySelector<HTMLElement>(
-              '[data-player-actions-modal="true"] [data-player-actions-col="right"] button:not([disabled])'
-            );
-          if (currentQueueTarget) {
-            applyFocusMarker(currentQueueTarget);
+
+        let bestInXmbCol: HTMLElement | null = null;
+        let bestXmbScore = Infinity;
+        let wrapTopMost: HTMLElement | null = null;
+        let wrapTopMinY = Infinity;
+        let wrapBottomMost: HTMLElement | null = null;
+        let wrapBottomMaxY = -Infinity;
+
+        for (const candidate of nodes) {
+          if (candidate === active) continue;
+          const candXmbCol =
+            candidate.closest<HTMLElement>('[data-xmb-col]')?.dataset.xmbCol || null;
+          if (candXmbCol !== curXmbCol) continue;
+          const r = candidate.getBoundingClientRect();
+          const tx = r.left + r.width / 2;
+          const ty = r.top + r.height / 2;
+          const dx = tx - cx;
+          const dy = ty - cy;
+
+          if (ty < wrapTopMinY - 4 || (Math.abs(ty - wrapTopMinY) <= 4 && r.left < (wrapTopMost?.getBoundingClientRect().left ?? Infinity))) {
+            wrapTopMinY = ty;
+            wrapTopMost = candidate;
           }
+          if (ty > wrapBottomMaxY + 4 || (Math.abs(ty - wrapBottomMaxY) <= 4 && r.left < (wrapBottomMost?.getBoundingClientRect().left ?? Infinity))) {
+            wrapBottomMaxY = ty;
+            wrapBottomMost = candidate;
+          }
+
+          if (dir === 'right' && dx <= 6) continue;
+          if (dir === 'left' && dx >= -6) continue;
+          if (dir === 'down' && dy <= 6) continue;
+          if (dir === 'up' && dy >= -6) continue;
+
+          if (dir === 'left' || dir === 'right') {
+            const overlapsY = r.bottom > cur.top + 4 && r.top < cur.bottom - 4;
+            if (!overlapsY && Math.abs(dy) > 28) continue;
+          }
+
+          const primary = dir === 'left' || dir === 'right' ? Math.abs(dx) : Math.abs(dy);
+          const boxCross =
+            dir === 'left' || dir === 'right'
+              ? cy >= r.top && cy <= r.bottom
+                ? 0
+                : Math.min(Math.abs(cy - r.top), Math.abs(cy - r.bottom))
+              : cx >= r.left && cx <= r.right
+              ? 0
+              : Math.min(Math.abs(cx - r.left), Math.abs(cx - r.right));
+          const centerTieBreak =
+            (dir === 'left' || dir === 'right' ? Math.abs(ty - cy) : Math.abs(tx - cx)) * 0.08;
+          const score =
+            dir === 'left' || dir === 'right'
+              ? primary + (boxCross + centerTieBreak) * 2.2
+              : primary * 2.6 + boxCross * 0.4 + centerTieBreak;
+          if (score < bestXmbScore) {
+            bestXmbScore = score;
+            bestInXmbCol = candidate;
+          }
+        }
+
+        if (bestInXmbCol) {
+          applyFocusMarker(bestInXmbCol);
           return;
         }
-        if (curPlayerCol === 'right' && dir === 'left') {
-          const leftSettingTarget =
-            document.querySelector<HTMLElement>(
-              '[data-player-actions-modal="true"] [data-player-actions-col="left"] button[data-select-active="true"]:not([disabled])'
-            ) ||
-            document.querySelector<HTMLElement>(
-              '[data-player-actions-modal="true"] [data-player-actions-col="left"] button[data-default-focus="true"]:not([disabled])'
-            ) ||
-            document.querySelector<HTMLElement>(
-              '[data-player-actions-modal="true"] [data-player-actions-col="left"] button:not([disabled])'
-            );
-          if (leftSettingTarget) {
-            applyFocusMarker(leftSettingTarget);
-          }
+        if (dir === 'up' || dir === 'down') {
+          const wrapped = dir === 'up' ? wrapBottomMost : wrapTopMost;
+          if (wrapped) applyFocusMarker(wrapped);
           return;
         }
+        return;
       }
 
       // Two-Column Folder Chooser Modal (`data-folder-chooser-modal="true"`):
@@ -629,128 +785,8 @@ export function useGamepadNavigation({
         }
       }
 
-      // Two-Column Settings Drawer (`data-settings-col="main"` and slide-out `"sub"`):
-      // Keep Up/Down navigation within the active Settings column; if on the `Folders & Accounts` trigger
-      // and pressing Left, slide out / jump into the Folders & Accounts column!
-      const curSettingsCol =
-        active.closest<HTMLElement>('[data-settings-col]')?.dataset.settingsCol || null;
-      if (curSettingsCol && !oskTarget) {
-        if (active.dataset.brightnessScrubActive === 'true') {
-          if (dir === 'left' || dir === 'right') {
-            window.dispatchEvent(
-              new CustomEvent('simp-brightness-step', {
-                detail: { delta: dir === 'left' ? -5 : 5 },
-              })
-            );
-            return;
-          }
-          if (dir === 'up' || dir === 'down') {
-            window.dispatchEvent(new CustomEvent('simp-brightness-exit'));
-          }
-        }
-
-        if (
-          curSettingsCol === 'main' &&
-          dir === 'left' &&
-          active.dataset.settingsFoldersTrigger === 'true'
-        ) {
-          const existingSub = document.querySelector<HTMLElement>(
-            '[data-settings-col="sub"] button[data-sub-default="true"]:not([disabled]), [data-settings-col="sub"] button:not([disabled])'
-          );
-          if (existingSub) {
-            applyFocusMarker(existingSub);
-          } else {
-            active.click();
-          }
-          return;
-        }
-
-        let bestInSettingsCol: HTMLElement | null = null;
-        let bestSettingsScore = Infinity;
-        let wrapTopMost: HTMLElement | null = null;
-        let wrapTopMinY = Infinity;
-        let wrapBottomMost: HTMLElement | null = null;
-        let wrapBottomMaxY = -Infinity;
-
-        for (const candidate of nodes) {
-          if (candidate === active) continue;
-          const candSettingsCol =
-            candidate.closest<HTMLElement>('[data-settings-col]')?.dataset.settingsCol || null;
-          if (candSettingsCol !== curSettingsCol) continue;
-          const r = candidate.getBoundingClientRect();
-          const tx = r.left + r.width / 2;
-          const ty = r.top + r.height / 2;
-          const dx = tx - cx;
-          const dy = ty - cy;
-
-          if (ty < wrapTopMinY - 4 || (Math.abs(ty - wrapTopMinY) <= 4 && r.left < (wrapTopMost?.getBoundingClientRect().left ?? Infinity))) {
-            wrapTopMinY = ty;
-            wrapTopMost = candidate;
-          }
-          if (ty > wrapBottomMaxY + 4 || (Math.abs(ty - wrapBottomMaxY) <= 4 && r.left < (wrapBottomMost?.getBoundingClientRect().left ?? Infinity))) {
-            wrapBottomMaxY = ty;
-            wrapBottomMost = candidate;
-          }
-
-          if (dir === 'right' && dx <= 6) continue;
-          if (dir === 'left' && dx >= -6) continue;
-          if (dir === 'down' && dy <= 6) continue;
-          if (dir === 'up' && dy >= -6) continue;
-
-          if (dir === 'left' || dir === 'right') {
-            const overlapsY = r.bottom > cur.top + 4 && r.top < cur.bottom - 4;
-            if (!overlapsY && Math.abs(dy) > 28) continue;
-          }
-
-          const primary = dir === 'left' || dir === 'right' ? Math.abs(dx) : Math.abs(dy);
-          const boxCross =
-            dir === 'left' || dir === 'right'
-              ? cy >= r.top && cy <= r.bottom
-                ? 0
-                : Math.min(Math.abs(cy - r.top), Math.abs(cy - r.bottom))
-              : cx >= r.left && cx <= r.right
-              ? 0
-              : Math.min(Math.abs(cx - r.left), Math.abs(cx - r.right));
-          const centerTieBreak =
-            (dir === 'left' || dir === 'right' ? Math.abs(ty - cy) : Math.abs(tx - cx)) * 0.08;
-          // For Up/Down inside Settings/Folders & Accounts, weight vertical distance (`primary`) heavily
-          // so pressing Down/Up never skips over an expanded sub-row whose buttons sit slightly to the left or right.
-          const score =
-            dir === 'left' || dir === 'right'
-              ? primary + (boxCross + centerTieBreak) * 2.2
-              : primary * 2.6 + boxCross * 0.4 + centerTieBreak;
-          if (score < bestSettingsScore) {
-            bestSettingsScore = score;
-            bestInSettingsCol = candidate;
-          }
-        }
-
-        if (bestInSettingsCol) {
-          applyFocusMarker(bestInSettingsCol);
-          return;
-        }
-
-        if (dir === 'up' || dir === 'down') {
-          const wrapped = dir === 'up' ? wrapBottomMost : wrapTopMost;
-          if (wrapped) {
-            applyFocusMarker(wrapped);
-          }
-          return;
-        }
-
-        // If in `sub` column and no same-row element to the right, pressing Right returns to `Folders & Accounts` trigger in `main`
-        if (curSettingsCol === 'sub' && dir === 'right') {
-          const mainTrigger = document.querySelector<HTMLElement>(
-            '[data-settings-col="main"] [data-settings-folders-trigger="true"]:not([disabled])'
-          );
-          if (mainTrigger) {
-            applyFocusMarker(mainTrigger);
-          }
-        }
-        return;
-      }
-
       if (!oskTarget && !isModalOpen && (dir === 'up' || dir === 'down') && curCol) {
+        const activeRail = active.closest<HTMLElement>('[data-h-rail="true"]');
         // 1. Try moving Up/Down among primary row items inside the SAME column (`left` or `right`)
         let bestInCol: HTMLElement | null = null;
         let bestInColScore = Infinity;
@@ -761,6 +797,13 @@ export function useGamepadNavigation({
           if (isAuxRowElement(candidate)) continue;
 
           const r = candidate.getBoundingClientRect();
+          const candRail = candidate.closest<HTMLElement>('[data-h-rail="true"]');
+          if (candRail && candRail !== activeRail) {
+            const railRect = candRail.getBoundingClientRect();
+            if (r.right <= railRect.left + 8 || r.left >= railRect.right - 8) {
+              continue;
+            }
+          }
           const tx = r.left + r.width / 2;
           const ty = r.top + r.height / 2;
           const dx = tx - cx;
@@ -821,12 +864,16 @@ export function useGamepadNavigation({
         }
 
         // 1. First look for a sibling control on the SAME horizontal row in the SAME column
+        const activeRail = active.closest<HTMLElement>('[data-h-rail="true"]');
         let bestSameRow: HTMLElement | null = null;
         let bestSameRowDx = Infinity;
 
         for (const candidate of nodes) {
           if (candidate === active) continue;
           if (getCol(candidate) !== curCol) continue;
+          if (activeRail && candidate.closest<HTMLElement>('[data-h-rail="true"]') !== activeRail) {
+            continue;
+          }
           const r = candidate.getBoundingClientRect();
           const tx = r.left + r.width / 2;
           const dx = tx - cx;
@@ -1290,28 +1337,6 @@ export function useGamepadNavigation({
             filterModalClose.click();
             break;
           }
-          // In the Two-Column `SELECT` Player Actions modal, pressing `B` while in the Right Column
-          // returns focus to the Left Column settings first; pressing `B` in the Left Column closes the modal.
-          const activeModalEl =
-            (document.querySelector<HTMLElement>(
-              '[data-simp-active-focus="true"]'
-            ) as HTMLElement | null) || (document.activeElement as HTMLElement | null);
-          if (
-            activeModalEl?.closest<HTMLElement>('[data-player-actions-col]')?.dataset
-              .playerActionsCol === 'right'
-          ) {
-            const leftSettingBtn =
-              document.querySelector<HTMLElement>(
-                '[data-player-actions-modal="true"] [data-player-actions-col="left"] button[data-default-focus="true"]:not([disabled])'
-              ) ||
-              document.querySelector<HTMLElement>(
-                '[data-player-actions-modal="true"] [data-player-actions-col="left"] button:not([disabled])'
-              );
-            if (leftSettingBtn) {
-              applyFocusMarker(leftSettingBtn);
-              break;
-            }
-          }
           const playerActionsClose = document.querySelector<HTMLElement>(
             '[data-player-actions-close="true"]'
           );
@@ -1319,27 +1344,20 @@ export function useGamepadNavigation({
             playerActionsClose.click();
             break;
           }
-          // Hierarchical walk-back inside the Top-Right Settings Drawer (`SettingsModal`):
-          // 1. If a nested section (`iaAuthOpen`, `appleAuthOpen`, `scAuthOpen`, `addPathOpen`, `confirmHardReset`, `brightnessScrubActive`) is open, collapse it first.
-          const settingsWalkBack = document.querySelector<HTMLElement>(
-            '[data-settings-walk-back="true"]:not([disabled])'
+          // Hierarchical walk-back inside Unified XMB START Menu:
+          const xmbWalkBack = document.querySelector<HTMLElement>(
+            '[data-xmb-walk-back="true"]:not([disabled])'
           );
-          if (settingsWalkBack) {
-            settingsWalkBack.click();
+          if (xmbWalkBack) {
+            xmbWalkBack.click();
             break;
           }
-          // 2. If focus is inside the `Folders & Accounts` left shelf (`data-settings-col="sub"`), pressing `B` returns focus to the `Folders & Accounts` trigger in `main`.
-          if (
-            activeModalEl?.closest<HTMLElement>('[data-settings-col]')?.dataset.settingsCol ===
-            'sub'
-          ) {
-            const foldersTrigger = document.querySelector<HTMLElement>(
-              '[data-settings-col="main"] [data-settings-folders-trigger="true"]:not([disabled])'
-            );
-            if (foldersTrigger) {
-              applyFocusMarker(foldersTrigger);
-              break;
-            }
+          const xmbClose = document.querySelector<HTMLElement>(
+            '[data-xmb-close="true"]:not([disabled])'
+          );
+          if (xmbClose) {
+            xmbClose.click();
+            break;
           }
           if (volumePopoverOpen || brightnessPopoverOpen) {
             setVolumePopoverOpen(false);
@@ -1803,9 +1821,18 @@ export function useGamepadNavigation({
         return;
       }
       if (window.parent !== window) return;
-      // Only ignore if the browser tab is hidden in the background; in SteamVR Desktop overlay mode,
-      // visible windows (`visibilityState === 'visible'`) often have `document.hasFocus() === false` when using Gamepad mode!
-      if (document.visibilityState === 'hidden') return;
+      const policy = gamepadFocusPolicyRef.current;
+      if (policy === 'off') {
+        daemonHeldDir = null;
+        return;
+      }
+      if (
+        document.visibilityState === 'hidden' ||
+        (policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
+        daemonHeldDir = null;
+        return;
+      }
       const now = performance.now();
       if (now - lastBridgeMsgTsRef.current < 220) {
         return;
@@ -1820,7 +1847,12 @@ export function useGamepadNavigation({
 
     const daemonRepeatTimer = window.setInterval(() => {
       if (!daemonHeldDir) return;
-      if (document.visibilityState === 'hidden') {
+      const policy = gamepadFocusPolicyRef.current;
+      if (
+        policy === 'off' ||
+        document.visibilityState === 'hidden' ||
+        (policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
         daemonHeldDir = null;
         return;
       }
@@ -1916,7 +1948,15 @@ export function useGamepadNavigation({
     window.addEventListener('gamepaddisconnected', onGamepadDisconnected);
 
     const poll = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
+      const policy = gamepadFocusPolicyRef.current;
+      if (
+        policy === 'off' ||
+        document.visibilityState === 'hidden' ||
+        (window.parent === window && policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
+        heldDirByPad.clear();
+        return;
+      }
       const now = performance.now();
       if (!hasConnectedPad) {
         // In browsers that don't fire `gamepadconnected` until a button is pressed, probe once every 1.5s instead of 20Hz

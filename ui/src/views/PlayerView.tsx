@@ -11,11 +11,14 @@ import {
   VideoSubtitleVariant,
 } from '@simp/client';
 import {
+  cycleVisualizerFpsCap,
   loadEnabledVisualizerScenes,
   loadVisualizerFpsCap,
+  loadVisualizerPauseUnfocused,
   PlayerBackgroundVisualizer,
   saveEnabledVisualizerScenes,
   saveVisualizerFpsCap,
+  saveVisualizerPauseUnfocused,
   VISUALIZER_MODES,
   VISUALIZER_ENGINES,
   type VisualizerEngine,
@@ -45,9 +48,19 @@ import {
 } from '../api/servicesCacheApi';
 import { getSourceThemeForTrack, getSourceThemeCssVars } from '../theme/sourceTheme';
 import { PlayerUpNextStrip } from './player/PlayerUpNextStrip';
-import { PlayerSelectModal } from './player/PlayerSelectModal';
+import { PlayerTrackContextModal } from './player/PlayerTrackContextModal';
 import { PlayerVideoStage } from './player/PlayerVideoStage';
 import { type ActiveCommentBubble, formatCommentTs, PlayerTransportBar } from './player/PlayerTransportBar';
+import {
+  getSceneDescriptor,
+  VISUALIZER_MODES as REGISTRY_VIZ_MODES,
+  formatVisualizerFpsCapLabel,
+} from '../components/visualizers/sceneRegistry';
+import {
+  type AudioDisplayCommand,
+  publishAudioDisplayState,
+} from '../menu/menuCorpus';
+import { computeEffectivePlayerScale } from '../theme/uiScale';
 
 export interface BrowserTarget {
   kind:
@@ -129,19 +142,6 @@ export function isUiVideoTrack(track: TrackMetadata | null | undefined): boolean
   );
 }
 
-
-function computePlayerViewportScale(isVideo = false): number {
-  if (typeof window === 'undefined') return 1;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  if (vw <= 1340 && vh <= 840) return 1;
-  const baseWidth = isVideo ? 1160 : 1080;
-  const scaleX = (vw - 192) / baseWidth;
-  const scaleY = (vh - 210) / 520;
-  const maxScale = isVideo ? 1.65 : 1.75;
-  return Math.min(maxScale, Math.max(1, Math.min(scaleX, scaleY)));
-}
-
 export const PlayerView: React.FC<PlayerViewProps> = ({
   hidden = false,
   isPlayerIdle = false,
@@ -203,8 +203,18 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [vizFpsCap, setVizFpsCap] = useState<VisualizerFpsCap>(() => loadVisualizerFpsCap());
   const handleToggleVizFpsCap = useCallback(() => {
     setVizFpsCap((prev) => {
-      const next: VisualizerFpsCap = prev === 60 ? 30 : 60;
+      const next = cycleVisualizerFpsCap(prev);
       saveVisualizerFpsCap(next);
+      return next;
+    });
+  }, []);
+  const [vizPauseUnfocused, setVizPauseUnfocused] = useState<boolean>(() =>
+    loadVisualizerPauseUnfocused(),
+  );
+  const handleToggleVizPauseUnfocused = useCallback(() => {
+    setVizPauseUnfocused((prev) => {
+      const next = !prev;
+      saveVisualizerPauseUnfocused(next);
       return next;
     });
   }, []);
@@ -287,13 +297,10 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const lyricsDataRef = useRef<TrackLyricsResponse | null>(null);
   lyricsDataRef.current = lyricsData;
   const [rightColMode, setRightColMode] = useState<'queue' | 'chapters'>('queue');
-  const [selectCategory, setSelectCategory] = useState<
-    'track_options' | 'collection' | 'interface'
-  >('track_options');
   const [activeBubbles, setActiveBubbles] = useState<ActiveCommentBubble[]>([]);
   const [playerActionsOpen, setPlayerActionsOpen] = useState<boolean>(false);
   const [playerScale, setPlayerScale] = useState<number>(() =>
-    computePlayerViewportScale(isVideoTrack)
+    computeEffectivePlayerScale(isVideoTrack)
   );
   const mainRef = useRef<HTMLElement | null>(null);
   const artBoxRef = useRef<HTMLDivElement | null>(null);
@@ -325,10 +332,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [dvdSeekOffsetSec, setDvdSeekOffsetSec] = useState<number>(0);
 
   useEffect(() => {
-    setPlayerScale(computePlayerViewportScale(isVideoTrack));
-    const onResize = () => setPlayerScale(computePlayerViewportScale(isVideoTrack));
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    const syncPlayerScale = () => {
+      setPlayerScale(computeEffectivePlayerScale(isVideoTrack));
+    };
+    syncPlayerScale();
+    window.addEventListener('resize', syncPlayerScale);
+    window.addEventListener('imp-ui-scale-changed', syncPlayerScale);
+    return () => {
+      window.removeEventListener('resize', syncPlayerScale);
+      window.removeEventListener('imp-ui-scale-changed', syncPlayerScale);
+    };
   }, [isVideoTrack]);
 
   // Adaptive Scrub Bar & 7-Button Control Array stepwise horizontal anchoring:
@@ -438,23 +451,15 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         setVideoTheatreExpanded(false);
       }
     };
-    const onSelectCategoryFocus = (ev: Event) => {
-      const cat = (ev as CustomEvent<{ category?: string }>).detail?.category;
-      if (cat === 'track_options' || cat === 'collection' || cat === 'interface') {
-        setSelectCategory(cat);
-      }
-    };
     window.addEventListener('simp-player-actions-toggle', onToggleActions);
     window.addEventListener('simp-equalizer-toggle', onToggleEqualizer);
     window.addEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
-    window.addEventListener('simp-select-category-focus', onSelectCategoryFocus);
     window.addEventListener('simp-fullscreen-change', onFullscreenChange);
     document.addEventListener('fullscreenchange', onFullscreenChange);
     return () => {
       window.removeEventListener('simp-player-actions-toggle', onToggleActions);
       window.removeEventListener('simp-equalizer-toggle', onToggleEqualizer);
       window.removeEventListener('simp-player-fullscreen-toggle', onToggleFullscreen);
-      window.removeEventListener('simp-select-category-focus', onSelectCategoryFocus);
       window.removeEventListener('simp-fullscreen-change', onFullscreenChange);
       document.removeEventListener('fullscreenchange', onFullscreenChange);
     };
@@ -771,17 +776,14 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     setPlayerActionsOpen(false);
   }, []);
 
-  // Focus active item in Left Column when Player Track Actions Overlay opens
+  // Focus default item when SELECT Track Context Modal opens
   useEffect(() => {
     if (!playerActionsOpen) return;
     window.dispatchEvent(new CustomEvent('simp-wake-idle'));
     const t = window.setTimeout(() => {
       const firstBtn =
         document.querySelector<HTMLElement>(
-          '[data-player-actions-modal="true"] [data-player-actions-col="left"] button[data-select-active="true"]:not([disabled])'
-        ) ||
-        document.querySelector<HTMLElement>(
-          '[data-player-actions-modal="true"] [data-player-actions-col="left"] button[data-default-focus="true"]:not([disabled])'
+          '[data-player-actions-modal="true"] button[data-default-focus="true"]:not([disabled])'
         ) ||
         document.querySelector<HTMLElement>(
           '[data-player-actions-modal="true"] button:not([disabled])'
@@ -792,20 +794,6 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     }, 30);
     return () => window.clearTimeout(t);
   }, [playerActionsOpen, applyFocusMarker]);
-
-  // Scroll active queue item into view whenever the `collection` shelf is exposed
-  useEffect(() => {
-    if (!playerActionsOpen || selectCategory !== 'collection') return;
-    const t = window.setTimeout(() => {
-      const currentQueueEl = document.querySelector<HTMLElement>(
-        '[data-player-actions-modal="true"] [data-queue-current="true"]'
-      );
-      if (currentQueueEl) {
-        currentQueueEl.scrollIntoView({ block: 'center', inline: 'nearest' });
-      }
-    }, 25);
-    return () => window.clearTimeout(t);
-  }, [playerActionsOpen, selectCategory, rightColMode]);
 
   const handleSelectVizMode = useCallback(
     (nextMode: VisualizerMode) => {
@@ -1042,6 +1030,23 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
     });
   }, [showToast]);
 
+  const applyIdleFadeEnabled = useCallback(
+    (next: boolean, silent = false) => {
+      setIdleFadeEnabled(next);
+      try {
+        window.localStorage.setItem('simp_idle_fade_enabled', next ? '1' : '0');
+      } catch {}
+      if (!silent) {
+        showToast?.(
+          next
+            ? `✨ Idle Controls Auto-Fade ON (${idleOpacityPct}% opacity)`
+            : '✨ Idle Controls Auto-Fade OFF (100% opacity)'
+        );
+      }
+    },
+    [idleOpacityPct, showToast]
+  );
+
   const toggleIdleFade = useCallback(() => {
     setIdleFadeEnabled((prev) => {
       const next = !prev;
@@ -1270,14 +1275,6 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       };
     }
 
-    fetchSoundCloudTrackComments(track.uri)
-      .then((comments) => {
-        if (!cancelled) {
-          setScComments(comments);
-        }
-      })
-      .catch(() => {});
-
     fetchSoundCloudTrackWaveform(track.uri)
       .then((wf) => {
         if (!cancelled) {
@@ -1297,6 +1294,25 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       cancelled = true;
     };
   }, [isSoundCloudTrack, isVideoTrack, track?.uri]);
+
+  // Poll timed SoundCloud comments only while on a SoundCloud track AND SoundCloud Comments are enabled.
+  useEffect(() => {
+    if (!isSoundCloudTrack || !scCommentsEnabled || !track?.uri || isVideoTrack) {
+      setScComments([]);
+      return () => {};
+    }
+    let cancelled = false;
+    fetchSoundCloudTrackComments(track.uri)
+      .then((comments) => {
+        if (!cancelled) {
+          setScComments(comments);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isSoundCloudTrack, scCommentsEnabled, isVideoTrack, track?.uri]);
 
   // Periodically prune expired comment speech bubbles
   useEffect(() => {
@@ -1679,6 +1695,124 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const playerTheme = getSourceThemeForTrack(track?.uri, track?.source);
   const playerCssVars = getSourceThemeCssVars(playerTheme);
 
+  // Publish Audio & Display state for the 3-column START XMB menu and handle its commands
+  useEffect(() => {
+    const modeEntry = REGISTRY_VIZ_MODES.find((m) => m.id === vizMode);
+    const vizModeLabel =
+      vizMode === 'off'
+        ? 'Off'
+        : vizMode === 'cycle'
+          ? 'Auto Cycle'
+          : vizMode === 'shuffle'
+            ? 'Shuffle'
+            : modeEntry?.label || getSceneDescriptor(vizMode).label;
+
+    publishAudioDisplayState({
+      dspEnabled: dspState.eq_enabled || dspState.vocal_mode !== 'off',
+      vocalMode: dspState.vocal_mode,
+      vizModeLabel,
+      vizFpsCap,
+      vizFpsLabel: formatVisualizerFpsCapLabel(vizFpsCap),
+      vizPauseUnfocused,
+      idleFadeEnabled,
+      idleOpacityPct,
+      lyricsKaraokeEnabled,
+      lyricsVizEnabled,
+      factoidsEnabled,
+      scCommentsEnabled,
+      isVideoTrack,
+      videoTheatreExpanded,
+      videoQualityLabel: activeQuality?.label || 'Auto',
+      videoQualitiesCount: videoQualities.length,
+      videoSubtitleLabel: activeSubtitle ? activeSubtitle.label : 'Off',
+      videoSubtitlesCount: videoSubtitles.length,
+    });
+  }, [
+    dspState.eq_enabled,
+    dspState.vocal_mode,
+    vizMode,
+    vizFpsCap,
+    vizPauseUnfocused,
+    idleFadeEnabled,
+    idleOpacityPct,
+    lyricsKaraokeEnabled,
+    lyricsVizEnabled,
+    factoidsEnabled,
+    scCommentsEnabled,
+    isVideoTrack,
+    videoTheatreExpanded,
+    activeQuality?.label,
+    videoQualities.length,
+    activeSubtitle,
+    videoSubtitles.length,
+  ]);
+
+  useEffect(() => {
+    const onAudioDisplayCmd = (ev: Event) => {
+      const cmd = (ev as CustomEvent<AudioDisplayCommand>).detail;
+      if (!cmd) return;
+      switch (cmd.type) {
+        case 'open_equalizer':
+          setEqualizerOpen(true);
+          break;
+        case 'open_visualizer':
+          setVizDrawerOpen(true);
+          break;
+        case 'cycle_fps_cap':
+          handleToggleVizFpsCap();
+          break;
+        case 'toggle_pause_unfocused':
+          handleToggleVizPauseUnfocused();
+          break;
+        case 'toggle_idle_fade':
+          toggleIdleFade();
+          break;
+        case 'set_idle_fade':
+          applyIdleFadeEnabled(cmd.enabled, true);
+          break;
+        case 'step_idle_opacity':
+          updateIdleOpacityPct(idleOpacityPct + cmd.delta);
+          break;
+        case 'toggle_lyrics_karaoke':
+          toggleLyricsKaraoke();
+          break;
+        case 'toggle_lyrics_viz':
+          toggleLyricsViz();
+          break;
+        case 'toggle_factoids':
+          toggleFactoids();
+          break;
+        case 'toggle_sc_comments':
+          toggleScComments();
+          break;
+        case 'toggle_theatre_fullscreen':
+          toggleTheatreFullscreen();
+          break;
+        case 'cycle_video_quality':
+          cycleVideoQuality();
+          break;
+        case 'cycle_video_subtitles':
+          cycleVideoSubtitles();
+          break;
+      }
+    };
+    window.addEventListener('imp-audio-display-cmd', onAudioDisplayCmd);
+    return () => window.removeEventListener('imp-audio-display-cmd', onAudioDisplayCmd);
+  }, [
+    handleToggleVizFpsCap,
+    handleToggleVizPauseUnfocused,
+    toggleIdleFade,
+    updateIdleOpacityPct,
+    idleOpacityPct,
+    toggleLyricsKaraoke,
+    toggleLyricsViz,
+    toggleFactoids,
+    toggleScComments,
+    toggleTheatreFullscreen,
+    cycleVideoQuality,
+    cycleVideoSubtitles,
+  ]);
+
   return (
     <>
       <main
@@ -1702,6 +1836,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             mode={effectiveVizMode}
             enabledScenes={enabledVizScenes}
             fpsCap={vizFpsCap}
+            pauseWhenUnfocused={vizPauseUnfocused}
             preferredScene={
               (trackPropsState.preferred_viz_mode as VisualizerEngine | null | undefined) || null
             }
@@ -1885,14 +2020,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       </div>
       </main>
 
-      {/* Unified Two-Column Controller-First `SELECT` Track & Queue Actions Overlay Menu */}
-      <PlayerSelectModal
+      {/* Focused Playing Track & Queue SELECT Context Menu */}
+      <PlayerTrackContextModal
         playerActionsOpen={playerActionsOpen}
         setPlayerActionsOpen={setPlayerActionsOpen}
         track={track}
-        shuffle={Boolean(snap?.shuffle)}
-        selectCategory={selectCategory}
-        setSelectCategory={setSelectCategory}
         handleOpenCurrentCollection={handleOpenCurrentCollection}
         activeRightColItems={activeRightColItems}
         isSoundCloudTrack={isSoundCloudTrack}
@@ -1915,41 +2047,6 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         currentQueueIdx={currentQueueIdx}
         queueModalItems={queueModalItems}
         setRightColMode={setRightColMode}
-        isDeckyEmbedded={isDeckyEmbedded}
-        desktopMode={desktopMode}
-        onToggleDesktopMode={onToggleDesktopMode}
-        desktopVizIdleSec={desktopVizIdleSec}
-        onChangeDesktopVizIdleSec={onChangeDesktopVizIdleSec}
-        setVizDrawerOpen={setVizDrawerOpen}
-        vizMode={vizMode}
-        enabledVizScenes={enabledVizScenes}
-        setEqualizerOpen={setEqualizerOpen}
-        dspState={dspState}
-        handleToggleKaraokeMode={handleToggleKaraokeMode}
-        lyricsKaraokeEnabled={lyricsKaraokeEnabled}
-        toggleLyricsKaraoke={toggleLyricsKaraoke}
-        lyricsData={lyricsData}
-        toggleLyricsViz={toggleLyricsViz}
-        lyricsVizEnabled={lyricsVizEnabled}
-        toggleFactoids={toggleFactoids}
-        factoidsEnabled={factoidsEnabled}
-        factoidBubbles={factoidBubbles}
-        idleFadeEnabled={idleFadeEnabled}
-        toggleIdleFade={toggleIdleFade}
-        idleOpacityPct={idleOpacityPct}
-        updateIdleOpacityPct={updateIdleOpacityPct}
-        toggleScComments={toggleScComments}
-        scCommentsEnabled={scCommentsEnabled}
-        scComments={scComments}
-        toggleTheatreFullscreen={toggleTheatreFullscreen}
-        videoTheatreExpanded={videoTheatreExpanded}
-        cycleVideoQuality={cycleVideoQuality}
-        activeQuality={activeQuality}
-        videoQualities={videoQualities}
-        selectedQualityIdx={selectedQualityIdx}
-        cycleVideoSubtitles={cycleVideoSubtitles}
-        activeSubtitle={activeSubtitle}
-        videoSubtitles={videoSubtitles}
       />
 
       <VisualizerDrawerModal
@@ -1973,9 +2070,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         activeEngine={activeVizEngine}
         enabledScenes={enabledVizScenes}
         fpsCap={vizFpsCap}
+        pauseWhenUnfocused={vizPauseUnfocused}
         onSelectMode={handleSelectVizMode}
         onToggleSceneInRotation={handleToggleSceneInRotation}
         onToggleFpsCap={handleToggleVizFpsCap}
+        onTogglePauseWhenUnfocused={handleToggleVizPauseUnfocused}
         onSetAllScenesInRotation={handleSetAllScenesInRotation}
       />
 

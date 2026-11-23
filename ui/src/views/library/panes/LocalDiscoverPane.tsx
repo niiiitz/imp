@@ -30,6 +30,8 @@ import {
   FilterTriggerButton,
   PinnableSectionHeader,
 } from '../PinnableSectionHeader';
+import { CollectionTileCard } from '../cards/CollectionTileCard';
+import { HorizontalShelfRail } from '../HorizontalShelfRail';
 
 export interface LocalFacetsSummary {
   genres: Array<{ genre: string; count: number }>;
@@ -456,7 +458,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
       : effectiveSubTab === 'folders'
       ? effectiveMount
         ? `${effectiveMount.label}${folderDrillData.curPrefix ? ` / ${folderDrillData.curPrefix}` : ''}`
-        : 'Storage Mounts & Folders'
+        : 'Local Folders'
       : effectiveSubTab === 'videos'
       ? `Local Videos (${localVideos.length})`
       : 'Local Music & Storage';
@@ -616,16 +618,51 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[0]}
                 liveItems={localDiscover.smart_stations}
               />
-              <div style={tileGridStyle}>
+              <HorizontalShelfRail variant="tiles" itemCount={localDiscover.smart_stations.length}>
                 {localDiscover.smart_stations.map((st) => (
-                  <div
+                  <CollectionTileCard
                     key={st.id}
-                    data-right-tile="true"
-                    data-tile-key={`local_station:${st.id}`}
-                    role="button"
-                    tabIndex={0}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
+                    tileKey={`local_station:${st.id}`}
+                    selectedBg="#0f2d23"
+                    selectedBorder="1px solid #34d399"
+                    title={st.title}
+                    subtitle={`${st.track_count} tracks • ${st.subtitle}`}
+                    artwork={
+                      st.art_url ? (
+                        <img
+                          src={st.art_url}
+                          alt=""
+                          loading="lazy"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            aspectRatio: '1 / 1',
+                            borderRadius: 7,
+                            objectFit: 'cover',
+                            display: 'block',
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            aspectRatio: '1 / 1',
+                            borderRadius: 7,
+                            background: '#0f2d23',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <ImpIcon name="music" size={28} color="#6ee7b7" />
+                        </div>
+                      )
+                    }
+                    badge="Mix"
+                    badgeStyle={{ color: '#6ee7b7' }}
+                    onSelect={() => onPlayLocalSmartStation(st, false)}
+                    onOpenContextMenu={() =>
                       openLibraryContextMenu({
                         type: 'collection',
                         kind: 'local_station',
@@ -635,83 +672,11 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                         art_url: st.art_url,
                         source: 'local',
                         rawItem: st,
-                      });
-                    }}
-                    onClick={() => onPlayLocalSmartStation(st, false)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onPlayLocalSmartStation(st, false);
-                      }
-                    }}
-                    style={{
-                      borderRadius: 12,
-                      background: 'linear-gradient(155deg, #0b241c 0%, #090d14 100%)',
-                      border: '1px solid #143328',
-                      padding: 12,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                      cursor: 'pointer',
-                      minWidth: 0,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      {st.art_url ? (
-                        <img
-                          src={st.art_url}
-                          alt=""
-                          loading="lazy"
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 8,
-                            objectFit: 'cover',
-                            border: '1px solid #34d399',
-                            flexShrink: 0,
-                          }}
-                        />
-                      ) : (
-                        <div
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: 8,
-                            background: '#0f2d23',
-                            border: '1px solid #34d399',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            flexShrink: 0,
-                          }}
-                        >
-                          <ImpIcon name="music" size={18} color="#6ee7b7" />
-                        </div>
-                      )}
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 800,
-                            color: '#ecfdf5',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {st.title}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: '#6ee7b7', marginTop: 2 }}>
-                          {st.track_count} tracks
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.3 }}>
-                      {st.subtitle}
-                    </div>
-                  </div>
+                      })
+                    }
+                  />
                 ))}
-              </div>
+              </HorizontalShelfRail>
             </section>
           )}
 
@@ -942,9 +907,9 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[2]}
                 liveItems={localDiscover.recent_albums}
               />
-              <div style={tileGridStyle}>
+              <HorizontalShelfRail variant="tiles" itemCount={localDiscover.recent_albums.length}>
                 {localDiscover.recent_albums.map(renderSimpAlbumCard)}
-              </div>
+              </HorizontalShelfRail>
             </section>
           )}
 
@@ -960,9 +925,9 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[1]}
                 liveItems={localDiscover.rediscover_albums}
               />
-              <div style={tileGridStyle}>
+              <HorizontalShelfRail variant="tiles" itemCount={localDiscover.rediscover_albums.length}>
                 {localDiscover.rediscover_albums.map(renderSimpAlbumCard)}
-              </div>
+              </HorizontalShelfRail>
             </section>
           )}
         </>
@@ -1165,7 +1130,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                All Mounts ({mountsList.length})
+                All Folders ({mountsList.length})
               </button>
               {mountsList.map((m) => {
                 const isActive = effectiveMount?.mount_root === m.mount_root;
@@ -1399,7 +1364,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                         borderRadius: 8,
                         background: '#12141e',
                         border: '1px solid #2a2a38',
-                        color: '#67e8f9',
+                        color: 'var(--imp-accent-active-text, #f5e1be)',
                         fontSize: 11,
                         fontWeight: 800,
                         cursor: 'pointer',

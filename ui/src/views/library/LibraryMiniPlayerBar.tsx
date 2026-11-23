@@ -7,6 +7,7 @@ import {
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { getSourceThemeForTrack } from '../../theme/sourceTheme';
 import { ImpIcon } from '../../components/icons/ImpIcon';
+import { StatsHudPill } from '../../components/StatsHudPill';
 import {
   loadEnabledVisualizerScenes,
   PlayerBackgroundVisualizer,
@@ -128,13 +129,30 @@ const MiniSpectrumCanvas: React.FC<{
       return;
     }
 
-    let rafId = 0;
-    const tick = () => {
-      drawBars(true);
-      rafId = requestAnimationFrame(tick);
+    // Paced 15 FPS timer (0 FPS when tab/window is hidden) instead of uncapped 240Hz rAF
+    let intervalId: number | null = null;
+    const syncTimer = () => {
+      const active = document.visibilityState !== 'hidden';
+      if (active && intervalId === null) {
+        drawBars(true);
+        intervalId = window.setInterval(() => {
+          if (document.visibilityState !== 'hidden') {
+            drawBars(true);
+          }
+        }, 66);
+      } else if (!active && intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
     };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
+    syncTimer();
+    document.addEventListener('visibilitychange', syncTimer);
+    return () => {
+      document.removeEventListener('visibilitychange', syncTimer);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
   }, [isPlaying, hidden, accentColor, idleColor]);
 
   return (
@@ -214,12 +232,11 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
     setVolumePopoverOpen(false);
     setBrightnessPopoverOpen(false);
     setPowerModalOpen(false);
-    setSourceModalOpen(false);
     if (!track) {
-      window.dispatchEvent(
-        new CustomEvent('simp-select-category-focus', { detail: { category: 'interface' } })
-      );
+      setSourceModalOpen((v) => !v);
+      return;
     }
+    setSourceModalOpen(false);
     window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
   };
 
@@ -279,10 +296,12 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
         flexDirection: 'column',
         justifyContent: 'space-between',
         gap: 4,
-        minHeight: 84,
+        minHeight: 82,
         padding: '6px 12px',
-        background: '#06070b',
-        borderBottom: track ? `1px solid ${theme.accentBorder}` : '1px solid #181a24',
+        background: 'var(--imp-surface-panel, #161920)',
+        borderBottom: track
+          ? `1px solid ${theme.accentBorder}`
+          : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
         boxSizing: 'border-box',
         minWidth: 0,
         position: 'relative',
@@ -365,7 +384,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              ⏮
+              <ImpIcon name="skip-back" size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -386,7 +405,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              {snap?.is_playing ? '⏸' : '▶'}
+              <ImpIcon name={snap?.is_playing ? 'pause' : 'play'} size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -406,7 +425,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              ⏭
+              <ImpIcon name="skip-forward" size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -442,7 +461,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              🔁
+              <ImpIcon name="repeat" size={12} />
               {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
                 <span
                   style={{
@@ -480,6 +499,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             flexShrink: 0,
           }}
         >
+            <StatsHudPill track={track} compact />
             <div
               onWheel={(e) => {
                 e.preventDefault();
@@ -489,7 +509,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               style={{
                 height: 24,
                 borderRadius: 6,
-                background: '#0a0a0e',
+                background: 'var(--imp-surface-card, #1a1d24)',
                 border: volumePopoverOpen
                   ? '1px solid #383c52'
                   : isPlaying
@@ -527,7 +547,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                   gap: 3,
                 }}
               >
-                <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
+                <ImpIcon name={!isPlaying ? 'volume-mute' : 'volume'} size={12} />
               </button>
 
               <button
@@ -568,7 +588,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                     width: 74,
                     padding: '14px 10px',
                     borderRadius: 16,
-                    background: '#0c0c12',
+                    background: 'var(--imp-surface-elevated, #21252f)',
                     border: '2px solid #383c52',
                     boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
                     display: 'flex',
@@ -643,7 +663,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                   height: 24,
                   padding: '0 8px',
                   borderRadius: 6,
-                  background: brightnessPopoverOpen ? '#161822' : '#0a0a0e',
+                  background: brightnessPopoverOpen ? '#161822' : 'var(--imp-surface-card, #1a1d24)',
                   border: brightnessPopoverOpen ? '1px solid #383c52' : '1px solid #22222c',
                   color: brightnessPopoverOpen ? '#e2e8f0' : '#c8c8d2',
                   fontSize: 11,
@@ -655,7 +675,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                   gap: 4,
                 }}
               >
-                <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
+                <ImpIcon name={brightnessPct >= 50 ? 'sun' : 'moon'} size={12} />
                 <span>{brightnessPct}%</span>
                 <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
               </button>
@@ -670,7 +690,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                     width: 68,
                     padding: '14px 10px',
                     borderRadius: 16,
-                    background: '#0c0c12',
+                    background: 'var(--imp-surface-elevated, #21252f)',
                     border: '2px solid #383c52',
                     boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
                     display: 'flex',
@@ -947,7 +967,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 height: 24,
                 padding: '0 8px',
                 borderRadius: 6,
-                background: '#0a0a0e',
+                background: 'var(--imp-surface-card, #1a1d24)',
                 border: '1px solid #22222c',
                 color: '#c8c8d2',
                 fontSize: 10.5,

@@ -759,6 +759,14 @@ pub fn fetch_track_lyrics(
         return db_hit;
     }
 
+    if !crate::is_online_lyrics_fetch_enabled() {
+        return TrackLyricsResponse {
+            found: false,
+            source: "offline_policy".to_string(),
+            ..Default::default()
+        };
+    }
+
     // 2. Try exact match via `/api/get` when artist + title + duration are known
     if !clean_artist.is_empty() && dur_sec >= 15 && dur_sec <= 3600 {
         let mut get_url = format!(

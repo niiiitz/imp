@@ -12,7 +12,7 @@ import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { OskTargetKind } from "../../../hooks/useGamepadNavigation";
 import { BrowserTarget } from "../../PlayerView";
-import { SourceVisibilityPrefs } from "../../SettingsModal";
+import type { SourceVisibilityPrefs } from "../../../menu/menuCorpus";
 import {
   cleanCollectionTitle,
   type BrowseHubTarget,
@@ -186,7 +186,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
               : tab.accent === 'archive'
               ? '#261a0b'
               : '#0b241c'
-            : '#0a0a0e',
+            : 'var(--imp-surface-card, #1a1d24)',
           border: active
             ? tab.accent === 'apple'
               ? '1px solid #fa243c'
@@ -214,11 +214,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
           gap: 4,
         }}
       >
-        {tab.id === 'local' ? (
-          <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
-        ) : (
-          <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
-        )}
+        <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
         <span
           style={{
             overflow: 'hidden',
@@ -579,7 +575,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
           onClick={togglePlacesOpen}
           style={{
             marginTop: 2,
-            background: '#0d0d14',
+            background: 'var(--imp-surface-card, #1a1d24)',
             border: '1px solid #1e1e28',
             borderRadius: 8,
             padding: '6px 10px',
@@ -635,12 +631,12 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 background:
                   browseHubTarget === 'imp_fyp' || browseHubTarget === 'imp_library'
                     ? '#0f1c22'
-                    : '#0a0a0e',
+                    : 'var(--imp-surface-card, #1a1d24)',
                 border:
                   browseHubTarget === 'imp_fyp' || browseHubTarget === 'imp_library'
-                    ? '1px solid #2aa3c4'
+                    ? '1px solid var(--imp-focus-ring, #e8b86d)'
                     : '1px solid #181820',
-                color: '#bfeaf5',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 12.5,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -651,10 +647,10 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               }}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <ImpIcon name="imp" size={14} color="#67e8f9" />
+                <ImpIcon name="imp" size={14} color="var(--imp-accent-active-text, #f5e1be)" />
                 <span>Imp</span>
               </span>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#67e8f9' }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                 {impNavOpen ? '▾' : '▸'}
               </span>
             </button>
@@ -701,7 +697,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         minHeight: 32,
                         padding: '0 10px',
                         borderRadius: 8,
-                        background: fypIsActive ? '#1c1808' : '#0a0a0e',
+                        background: fypIsActive ? '#1c1808' : 'var(--imp-surface-card, #1a1d24)',
                         border: fypIsActive ? '1px solid #eab308' : '1px solid #181820',
                         color: fypIsActive ? '#fef08a' : '#e2e8f0',
                         fontSize: 12,
@@ -766,9 +762,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         minHeight: 32,
                         padding: '0 10px',
                         borderRadius: 8,
-                        background: impLibIsActive ? '#0f222a' : '#0a0a0e',
-                        border: impLibIsActive ? '1px solid #2aa3c4' : '1px solid #181820',
-                        color: impLibIsActive ? '#bfeaf5' : '#c8c8d2',
+                        background: impLibIsActive ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+                        border: impLibIsActive ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #181820',
+                        color: impLibIsActive ? 'var(--imp-accent-active-text, #f5e1be)' : '#c8c8d2',
                         fontSize: 12,
                         fontWeight: 700,
                         cursor: 'pointer',
@@ -782,7 +778,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         <ImpIcon
                           name="imp"
                           size={12.5}
-                          color={impLibIsActive ? '#bfeaf5' : '#67e8f9'}
+                          color={impLibIsActive ? 'var(--imp-accent-active-text, #f5e1be)' : 'var(--imp-accent-active-text, #f5e1be)'}
                         />
                         <span>
                           Imp Library ({filteredPlaylists.length + filteredAlbums.length})
@@ -792,7 +788,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         style={{
                           fontSize: 10,
                           fontFamily: 'monospace',
-                          color: impLibIsActive ? '#2aa3c4' : '#71717a',
+                          color: impLibIsActive ? 'var(--imp-focus-ring, #e8b86d)' : '#71717a',
                         }}
                       >
                         ⊞
@@ -812,7 +808,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       data-rail-collapse-key="imp_albums"
                       onClick={toggleAlbumsSecOpen}
                       style={{
-                        background: '#0d0d14',
+                        background: 'var(--imp-surface-card, #1a1d24)',
                         border: '1px solid #1e1e28',
                         borderRadius: 8,
                         padding: '5px 10px',
@@ -866,9 +862,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                                 minHeight: 32,
                                 padding: '0 10px',
                                 borderRadius: 8,
-                                background: isSelected ? '#0d1b22' : '#0a0a0e',
+                                background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
                                 border: isSelected
-                                  ? '1px solid #2aa3c4'
+                                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
                                   : '1px solid #181820',
                                 color: '#d4d4dc',
                                 display: 'flex',
@@ -898,7 +894,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                                 {isApple ? (
                                   <AppleMusicLogo size={11} />
                                 ) : (
-                                  <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
+                                  <ImpIcon name="local" size={11} />
                                 )}
                                 <span
                                   style={{
@@ -962,7 +958,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       data-rail-collapse-key="imp_stations"
                       onClick={toggleStationsSecOpen}
                       style={{
-                        background: '#0d0d14',
+                        background: 'var(--imp-surface-card, #1a1d24)',
                         border: '1px solid #1e1e28',
                         borderRadius: 8,
                         padding: '5px 10px',
@@ -1007,9 +1003,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                                 minHeight: 32,
                                 padding: '0 10px',
                                 borderRadius: 8,
-                                background: isSelected ? '#0d1b22' : '#0a0a0e',
+                                background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
                                 border: isSelected
-                                  ? '1px solid #2aa3c4'
+                                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
                                   : '1px solid #181820',
                                 color: '#d4d4dc',
                                 display: 'flex',
@@ -1105,7 +1101,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         minHeight: 34,
                         padding: '0 10px',
                         borderRadius: 8,
-                        background: isLocalHubActive ? '#0b241c' : '#0a0a0e',
+                        background: isLocalHubActive ? '#0b241c' : 'var(--imp-surface-card, #1a1d24)',
                         border: isLocalHubActive
                           ? '1px solid #34d399'
                           : '1px solid #181820',
@@ -1120,7 +1116,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       }}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <span>💾</span>
+                        <ImpIcon name="local" size={12} />
                         <span>Local</span>
                       </span>
                       <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#34d399' }}>
@@ -1144,15 +1140,15 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   >
                     {(
                       [
-                        { id: 'overview', label: '⚡ Overview' },
-                        { id: 'artists', label: `🎤 Artists (${localArtistsCount})` },
-                        { id: 'albums', label: `💿 Albums (${localAlbumsCount})` },
+                        { id: 'overview', label: 'Overview' },
+                        { id: 'artists', label: `Artists (${localArtistsCount})` },
+                        { id: 'albums', label: `Albums (${localAlbumsCount})` },
                         {
                           id: 'folders',
-                          label: `📂 Mounts & Folders (${snap?.mounts.length || 0})`,
+                          label: `Folders (${snap?.mounts.length || 0})`,
                         },
                         ...(localVideosCount > 0
-                          ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideosCount})` }]
+                          ? [{ id: 'videos' as const, label: `Videos (${localVideosCount})` }]
                           : []),
                       ] as const
                     ).map((hub) => {
@@ -1355,7 +1351,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               flexShrink: 0,
                             }}
                           >
-                            ← Mounts
+                            ← Folders
                           </button>
                           <button
                             data-left-mount-root-chip="true"
@@ -1680,7 +1676,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               ? '#1f160d'
                               : opticalDisc?.is_audio_cd || opticalDisc?.is_dvd_video
                               ? '#12100e'
-                              : '#0a0a0e',
+                              : 'var(--imp-surface-card, #1a1d24)',
                           border:
                             rightPaneMode === 'tracks' && browserTarget?.kind === 'cdda'
                               ? '1px solid #f59e0b'
@@ -1829,7 +1825,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     minHeight: 34,
                     padding: '0 10px',
                     borderRadius: 8,
-                    background: browseHubTarget === 'apple_discover' ? '#241018' : '#0a0a0e',
+                    background: browseHubTarget === 'apple_discover' ? '#241018' : 'var(--imp-surface-card, #1a1d24)',
                     border:
                       browseHubTarget === 'apple_discover'
                         ? '1px solid #fb7185'
@@ -1905,7 +1901,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                             minHeight: 32,
                             padding: '0 10px',
                             borderRadius: 8,
-                            background: active ? '#28111b' : '#0a0a0e',
+                            background: active ? '#28111b' : 'var(--imp-surface-card, #1a1d24)',
                             border: active ? '1px solid #fa243c' : '1px solid #181820',
                             color: active ? '#fecdd3' : '#c8c8d2',
                             fontSize: 12,
@@ -1971,7 +1967,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     padding: '0 10px',
                     borderRadius: 8,
                     background:
-                      browseHubTarget === 'soundcloud_discover' ? '#24130a' : '#0a0a0e',
+                      browseHubTarget === 'soundcloud_discover' ? '#24130a' : 'var(--imp-surface-card, #1a1d24)',
                     border:
                       browseHubTarget === 'soundcloud_discover'
                         ? '1px solid #fb923c'
@@ -2048,7 +2044,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                             minHeight: 32,
                             padding: '0 10px',
                             borderRadius: 8,
-                            background: active ? '#281409' : '#0a0a0e',
+                            background: active ? '#281409' : 'var(--imp-surface-card, #1a1d24)',
                             border: active ? '1px solid #ea580c' : '1px solid #181820',
                             color: active ? '#fdba74' : '#c8c8d2',
                             fontSize: 12,
@@ -2107,7 +2103,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     minHeight: 34,
                     padding: '0 10px',
                     borderRadius: 8,
-                    background: browseHubTarget === 'ia_discover' ? '#261a0b' : '#0a0a0e',
+                    background: browseHubTarget === 'ia_discover' ? '#261a0b' : 'var(--imp-surface-card, #1a1d24)',
                     border:
                       browseHubTarget === 'ia_discover'
                         ? '1px solid #f59e0b'
@@ -2176,7 +2172,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                             minHeight: 32,
                             padding: '0 10px',
                             borderRadius: 8,
-                            background: active ? '#261a0b' : '#0a0a0e',
+                            background: active ? '#261a0b' : 'var(--imp-surface-card, #1a1d24)',
                             border: active ? '1px solid #f59e0b' : '1px solid #181820',
                             color: active ? '#fde68a' : '#c8c8d2',
                             fontSize: 12,
@@ -2251,7 +2247,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
         <div
           style={{
             marginTop: 2,
-            background: '#0d0d14',
+            background: 'var(--imp-surface-card, #1a1d24)',
             border: '1px solid #1e1e28',
             borderRadius: 8,
             padding: '3px 6px 3px 10px',
@@ -2305,9 +2301,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             style={{
               padding: '2px 8px',
               borderRadius: 6,
-              background: creatingPlaylist ? '#221116' : '#0f222a',
-              border: creatingPlaylist ? '1px solid #5c222d' : '1px solid #2aa3c4',
-              color: creatingPlaylist ? '#fca5a5' : '#67e8f9',
+              background: creatingPlaylist ? '#221116' : 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              border: creatingPlaylist ? '1px solid #5c222d' : '1px solid var(--imp-focus-ring, #e8b86d)',
+              color: creatingPlaylist ? '#fca5a5' : 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 11,
               fontFamily: 'monospace',
               fontWeight: 800,
@@ -2343,7 +2339,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 minHeight: 36,
                 padding: '0 10px',
                 borderRadius: 8,
-                background: '#08080c',
+                background: 'var(--imp-bg-canvas, #121418)',
                 border: '1px solid #2e2e3c',
                 color: '#d4d4dc',
                 fontSize: 12,
@@ -2356,9 +2352,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 minHeight: 36,
                 padding: '0 12px',
                 borderRadius: 8,
-                background: '#0f222a',
-                color: '#bfeaf5',
-                border: '1px solid #2aa3c4',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
                 fontWeight: 800,
                 fontSize: 12,
                 cursor: 'pointer',
@@ -2403,8 +2399,8 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   minHeight: 36,
                   padding: '0 10px',
                   borderRadius: 9,
-                  background: isSelected ? '#0d1b22' : '#0a0a0e',
-                  border: isSelected ? '1px solid #2aa3c4' : '1px solid #181820',
+                  background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+                  border: isSelected ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #181820',
                   color: '#d4d4dc',
                   display: 'flex',
                   justifyContent: 'space-between',
@@ -2434,7 +2430,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     <ImpIcon
                       name={isActiveTarget ? 'star' : 'imp'}
                       size={12}
-                      color={isActiveTarget ? '#67e8f9' : '#94a3b8'}
+                      color={isActiveTarget ? 'var(--imp-accent-active-text, #f5e1be)' : '#94a3b8'}
                     />
                   ) : pl.origin === 'local_pinned' ? (
                     <ImpIcon name="local" size={12} color="#34d399" />
@@ -2453,7 +2449,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   style={{
                     fontSize: 11,
                     fontFamily: 'monospace',
-                    color: '#2aa3c4',
+                    color: 'var(--imp-focus-ring, #e8b86d)',
                     flexShrink: 0,
                     display: 'inline-flex',
                     alignItems: 'center',

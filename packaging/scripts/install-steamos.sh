@@ -337,9 +337,9 @@ if command -v systemctl >/dev/null 2>&1 && run_user_systemctl status >/dev/null 
   run_user_systemctl daemon-reload
   run_user_systemctl enable imp.service --now
   run_user_systemctl restart imp.service
-  echo "✓ Enabled & started:    systemd user unit (imp.service)"
+  echo "✓ Enabled & started:    systemd user unit (hardened imp.service)"
 else
-  echo "ℹ systemd user bus not active in this shell; launch with: imp --daemon"
+  echo "ℹ systemd user bus not active in this shell (hardened unit staged at ${SYSTEMD_USER_DIR}/imp.service); launch with: imp --daemon"
 fi
 
 # 7. Decky Loader plugin installation (enabled by default on x86_64 Steam Deck / gamescope when ~/homebrew/plugins exists; skipped on aarch64 Steam Frame)

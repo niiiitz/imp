@@ -49,6 +49,7 @@ export interface AppleRecommendationShelf {
   playlists: AppleCloudPlaylistSummary[];
   albums: AppleCloudAlbumSummary[];
   stations: AppleRadioStationSummary[];
+  item_order?: string[];
 }
 
 export interface AppleArtistSummary {
@@ -559,6 +560,40 @@ export async function fetchAppleRadioAndForYou(): Promise<{
     shelves?: AppleRecommendationShelf[];
     recently_played?: TrackMetadata[];
   }>('/api/apple/radio');
+}
+
+export async function fetchAppleRecentPlayedPage(offset: number): Promise<{
+  shelf: AppleRecommendationShelf;
+  next_offset: number | null;
+}> {
+  const r = await fetch(
+    `http://127.0.0.1:18888/api/apple/recent-played?kind=items&offset=${encodeURIComponent(String(offset))}`
+  );
+  const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
+  if (!r.ok || !j.ok || !j.shelf) {
+    throw new Error(j.error || 'Failed to paginate Apple Music Recently Played');
+  }
+  return {
+    shelf: j.shelf as AppleRecommendationShelf,
+    next_offset: typeof j.next_offset === 'number' ? j.next_offset : null,
+  };
+}
+
+export async function fetchAppleRecentPlayedTracksPage(offset: number): Promise<{
+  tracks: TrackMetadata[];
+  next_offset: number | null;
+}> {
+  const r = await fetch(
+    `http://127.0.0.1:18888/api/apple/recent-played?kind=tracks&offset=${encodeURIComponent(String(offset))}`
+  );
+  const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
+  if (!r.ok || !j.ok) {
+    throw new Error(j.error || 'Failed to paginate Apple Music Recently Played tracks');
+  }
+  return {
+    tracks: Array.isArray(j.tracks) ? (j.tracks as TrackMetadata[]) : [],
+    next_offset: typeof j.next_offset === 'number' ? j.next_offset : null,
+  };
 }
 
 export interface SyncedLyricLine {

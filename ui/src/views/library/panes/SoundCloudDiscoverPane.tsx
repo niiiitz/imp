@@ -14,8 +14,8 @@ import {
 } from "../../../drivers/SoundCloudDriver";
 import {
   type BrowseHubTarget,
-  tileGridStyle,
 } from "../libraryHelpers";
+import { HorizontalShelfRail } from "../HorizontalShelfRail";
 import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import { TTL_CATALOG_FEED_SEC, TTL_FAST_FEED_SEC } from "../../../api/servicesCacheApi";
 
@@ -227,9 +227,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scPlaylists}
                           />
-                          <div style={tileGridStyle}>
+                          <HorizontalShelfRail variant="tiles" itemCount={scPlaylists.length}>
                             {scPlaylists.map(renderSoundCloudPlaylistCard)}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -258,9 +258,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scFollowings}
                           />
-                          <div style={tileGridStyle}>
+                          <HorizontalShelfRail variant="tiles" itemCount={scFollowings.length}>
                             {scFollowings.map(renderSoundCloudUserCard)}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -289,11 +289,11 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scLikedTracks}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scLikedTracks.length}>
                             {scLikedTracks.map((s) =>
-                              renderSingleSongRow(s, scLikedTracks, 'sc_likes')
+                              renderSingleSongRow(s, scLikedTracks, 'sc_likes', true)
                             )}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -397,25 +397,21 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                     </div>
 
                     {(scStreamFilter === 'all' || scStreamFilter === 'history') &&
-                      recentlyPlayed.some((t) => t.source === 'soundcloud') && (
-                        <>
-                          <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                            🕒 LISTENING HISTORY IN IMP (
-                            {recentlyPlayed.filter((t) => t.source === 'soundcloud').length})
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {recentlyPlayed
-                              .filter((t) => t.source === 'soundcloud')
-                              .map((s) =>
-                                renderSingleSongRow(
-                                  s,
-                                  recentlyPlayed.filter((t) => t.source === 'soundcloud'),
-                                  'sc_history'
-                                )
+                      recentlyPlayed.some((t) => t.source === 'soundcloud') && (() => {
+                        const scHist = recentlyPlayed.filter((t) => t.source === 'soundcloud');
+                        return (
+                          <>
+                            <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
+                              🕒 LISTENING HISTORY IN IMP ({scHist.length})
+                            </div>
+                            <HorizontalShelfRail variant="tracks" itemCount={scHist.length}>
+                              {scHist.map((s) =>
+                                renderSingleSongRow(s, scHist, 'sc_history', true)
                               )}
-                          </div>
-                        </>
-                      )}
+                            </HorizontalShelfRail>
+                          </>
+                        );
+                      })()}
 
                     {(scStreamFilter === 'all' || scStreamFilter === 'sets') &&
                       scStreamPlaylists.length > 0 && (
@@ -442,9 +438,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scStreamPlaylists}
                           />
-                          <div style={tileGridStyle}>
+                          <HorizontalShelfRail variant="tiles" itemCount={scStreamPlaylists.length}>
                             {scStreamPlaylists.map(renderSoundCloudPlaylistCard)}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -473,11 +469,11 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scStreamTracks}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scStreamTracks.length}>
                             {scStreamTracks.map((s) =>
-                              renderSingleSongRow(s, scStreamTracks, 'sc_stream')
+                              renderSingleSongRow(s, scStreamTracks, 'sc_stream', true)
                             )}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -596,11 +592,11 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scMoreOfWhatYouLike}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scMoreOfWhatYouLike.length}>
                             {scMoreOfWhatYouLike.map((s) =>
-                              renderSingleSongRow(s, scMoreOfWhatYouLike, 'sc_for_you')
+                              renderSingleSongRow(s, scMoreOfWhatYouLike, 'sc_for_you', true)
                             )}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -634,9 +630,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scRecommendedArtists}
                           />
-                          <div style={tileGridStyle}>
+                          <HorizontalShelfRail variant="tiles" itemCount={scRecommendedArtists.length}>
                             {scRecommendedArtists.map(renderSoundCloudUserCard)}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -670,11 +666,11 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scFreshUploads}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scFreshUploads.length}>
                             {scFreshUploads.map((s) =>
-                              renderSingleSongRow(s, scFreshUploads, 'sc_fresh')
+                              renderSingleSongRow(s, scFreshUploads, 'sc_fresh', true)
                             )}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -712,9 +708,9 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scTrendingPlaylists}
                           />
-                          <div style={tileGridStyle}>
+                          <HorizontalShelfRail variant="tiles" itemCount={scTrendingPlaylists.length}>
                             {scTrendingPlaylists.map(renderSoundCloudPlaylistCard)}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -752,11 +748,11 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scTrendingMixes}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scTrendingMixes.length}>
                             {scTrendingMixes.map((s) =>
-                              renderSingleSongRow(s, scTrendingMixes, 'sc_mixes')
+                              renderSingleSongRow(s, scTrendingMixes, 'sc_mixes', true)
                             )}
-                          </div>
+                          </HorizontalShelfRail>
                         </section>
                       )}
 
@@ -794,37 +790,37 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                             }}
                             liveItems={scTrendingTracks}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <HorizontalShelfRail variant="tracks" itemCount={scTrendingTracks.length}>
                             {scTrendingTracks.map((s) =>
-                              renderSingleSongRow(s, scTrendingTracks, 'sc_trending')
+                              renderSingleSongRow(s, scTrendingTracks, 'sc_trending', true)
                             )}
-                            {scDiscoverNextHref && (
-                              <button
-                                data-right-tile="true"
-                                data-focusable="true"
-                                data-load-more="true"
-                                aria-busy={scLoadingMore}
-                                onClick={loadMoreScDiscover}
-                                style={{
-                                  minHeight: 40,
-                                  padding: '8px 16px',
-                                  borderRadius: 10,
-                                  background: '#2c140a',
-                                  border: '1px solid #ea580c',
-                                  color: '#fed7aa',
-                                  fontSize: 12,
-                                  fontWeight: 800,
-                                  cursor: scLoadingMore ? 'default' : 'pointer',
-                                  alignSelf: 'center',
-                                  marginTop: 4,
-                                }}
-                              >
-                                {scLoadingMore
-                                  ? '⏳ Loading more SoundCloud tracks...'
-                                  : '⬇ Load More SoundCloud Tracks'}
-                              </button>
-                            )}
-                          </div>
+                          </HorizontalShelfRail>
+                          {scDiscoverNextHref && (
+                            <button
+                              data-right-tile="true"
+                              data-focusable="true"
+                              data-load-more="true"
+                              aria-busy={scLoadingMore}
+                              onClick={loadMoreScDiscover}
+                              style={{
+                                minHeight: 40,
+                                padding: '8px 16px',
+                                borderRadius: 10,
+                                background: '#2c140a',
+                                border: '1px solid #ea580c',
+                                color: '#fed7aa',
+                                fontSize: 12,
+                                fontWeight: 800,
+                                cursor: scLoadingMore ? 'default' : 'pointer',
+                                alignSelf: 'center',
+                                marginTop: 4,
+                              }}
+                            >
+                              {scLoadingMore
+                                ? '⏳ Loading more SoundCloud tracks...'
+                                : '⬇ Load More SoundCloud Tracks'}
+                            </button>
+                          )}
                         </section>
                       )}
                   </>

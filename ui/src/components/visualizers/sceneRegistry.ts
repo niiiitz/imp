@@ -14,7 +14,7 @@ export type VisualizerEngine =
 
 export type VisualizerMode = VisualizerEngine | 'cycle' | 'shuffle' | 'off';
 
-export type VisualizerFpsCap = 60 | 30;
+export type VisualizerFpsCap = 20 | 30 | 40 | 0;
 
 export type VisualizerCohort = 'original' | 'wave2';
 
@@ -271,22 +271,59 @@ export const VISUALIZER_MODES: { id: VisualizerMode; label: string; shortLabel: 
 ];
 
 const ENABLED_SCENES_STORAGE_KEY = 'simp_viz_enabled_scenes_v4';
-const VIZ_FPS_CAP_STORAGE_KEY = 'imp_viz_fps_cap_v1';
+const VIZ_FPS_CAP_STORAGE_KEY = 'imp_viz_fps_cap_v2';
+const VIZ_PAUSE_UNFOCUSED_STORAGE_KEY = 'imp_viz_pause_unfocused_v1';
 
 export function loadVisualizerFpsCap(): VisualizerFpsCap {
   try {
     const raw = window.localStorage.getItem(VIZ_FPS_CAP_STORAGE_KEY);
+    if (raw === '20') return 20;
     if (raw === '30') return 30;
-    if (raw === '60') return 60;
+    if (raw === '40') return 40;
+    if (raw === '0') return 0;
   } catch {
     // ignore storage errors
   }
-  return 60;
+  // 30 FPS default divides 60Hz, 90Hz Steam Deck, 120Hz, and 240Hz displays evenly
+  return 30;
 }
 
 export function saveVisualizerFpsCap(fpsCap: VisualizerFpsCap): void {
   try {
     window.localStorage.setItem(VIZ_FPS_CAP_STORAGE_KEY, String(fpsCap));
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function cycleVisualizerFpsCap(current: VisualizerFpsCap): VisualizerFpsCap {
+  switch (current) {
+    case 20:
+      return 30;
+    case 30:
+      return 40;
+    case 40:
+      return 0;
+    default:
+      return 20;
+  }
+}
+
+export function formatVisualizerFpsCapLabel(fpsCap: VisualizerFpsCap): string {
+  return fpsCap === 0 ? 'Uncapped' : `${fpsCap} FPS`;
+}
+
+export function loadVisualizerPauseUnfocused(): boolean {
+  try {
+    return window.localStorage.getItem(VIZ_PAUSE_UNFOCUSED_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveVisualizerPauseUnfocused(pauseUnfocused: boolean): void {
+  try {
+    window.localStorage.setItem(VIZ_PAUSE_UNFOCUSED_STORAGE_KEY, pauseUnfocused ? '1' : '0');
   } catch {
     // ignore storage errors
   }

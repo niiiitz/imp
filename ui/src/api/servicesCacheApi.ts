@@ -182,6 +182,36 @@ export function emitSimpToast(message: string): void {
 
 let nativeWebViewFullscreen = false;
 let nativeWebViewListenerInstalled = false;
+let fullscreenEscapeLockListenerInstalled = false;
+
+type NavigatorKeyboardLock = {
+  lock?: (keyCodes?: string[]) => Promise<void>;
+  unlock?: () => void;
+};
+
+/**
+ * Prevents short `Escape` presses (including Steam Input KDE Desktop's `START -> Escape`
+ * mapping) from dropping Chromium HTML5 fullscreen while still allowing long-hold `Esc`.
+ */
+function syncFullscreenEscapeLock(): void {
+  if (typeof document === 'undefined' || typeof navigator === 'undefined') return;
+  const kb = (navigator as unknown as { keyboard?: NavigatorKeyboardLock }).keyboard;
+  if (!kb) return;
+  if (document.fullscreenElement) {
+    kb.lock?.(['Escape'])?.catch(() => {});
+  } else {
+    try {
+      kb.unlock?.();
+    } catch {
+      // Ignore environments without unlock support
+    }
+  }
+}
+
+if (typeof document !== 'undefined' && !fullscreenEscapeLockListenerInstalled) {
+  fullscreenEscapeLockListenerInstalled = true;
+  document.addEventListener('fullscreenchange', syncFullscreenEscapeLock);
+}
 
 function getNativeWebViewBridge(): {
   postMessage: (msg: unknown) => void;
@@ -243,7 +273,10 @@ export function setAppFullscreen(enter: boolean): void {
   if (typeof document === 'undefined') return;
   if (enter) {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      document.documentElement
+        .requestFullscreen?.()
+        ?.then(() => syncFullscreenEscapeLock())
+        .catch(() => {});
     }
   } else if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
@@ -263,7 +296,10 @@ export function toggleAppFullscreen(): void {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   } else {
-    document.documentElement.requestFullscreen?.().catch(() => {});
+    document.documentElement
+      .requestFullscreen?.()
+      ?.then(() => syncFullscreenEscapeLock())
+      .catch(() => {});
   }
 }
 
@@ -370,6 +406,52 @@ export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
 ];
 
 export function mapAppleShelfToFypItems(shelf: AppleRecommendationShelf): unknown[] {
+  if (shelf.item_order && shelf.item_order.length > 0) {
+    const stationMap = new Map((shelf.stations || []).map((st) => [st.id, st]));
+    const playlistMap = new Map((shelf.playlists || []).map((pl) => [pl.id, pl]));
+    const albumMap = new Map((shelf.albums || []).map((alb) => [alb.id, alb]));
+    const usedSt = new Set<string>();
+    const usedPl = new Set<string>();
+    const usedAlb = new Set<string>();
+    const ordered: unknown[] = [];
+
+    for (const token of shelf.item_order) {
+      if (token.startsWith('station:')) {
+        const id = token.slice('station:'.length);
+        const st = stationMap.get(id);
+        if (st && !usedSt.has(id)) {
+          usedSt.add(id);
+          ordered.push({ ...st, _fypKind: 'station' as const });
+        }
+      } else if (token.startsWith('playlist:')) {
+        const id = token.slice('playlist:'.length);
+        const pl = playlistMap.get(id);
+        if (pl && !usedPl.has(id)) {
+          usedPl.add(id);
+          ordered.push({ ...pl, _fypKind: 'playlist' as const });
+        }
+      } else if (token.startsWith('album:')) {
+        const id = token.slice('album:'.length);
+        const alb = albumMap.get(id);
+        if (alb && !usedAlb.has(id)) {
+          usedAlb.add(id);
+          ordered.push({ ...alb, _fypKind: 'album' as const });
+        }
+      }
+    }
+
+    for (const st of shelf.stations || []) {
+      if (!usedSt.has(st.id)) ordered.push({ ...st, _fypKind: 'station' as const });
+    }
+    for (const pl of shelf.playlists || []) {
+      if (!usedPl.has(pl.id)) ordered.push({ ...pl, _fypKind: 'playlist' as const });
+    }
+    for (const alb of shelf.albums || []) {
+      if (!usedAlb.has(alb.id)) ordered.push({ ...alb, _fypKind: 'album' as const });
+    }
+    return ordered;
+  }
+
   return [
     ...(shelf.stations || []).map((st) => ({ ...st, _fypKind: 'station' as const })),
     ...(shelf.playlists || []).map((pl) => ({ ...pl, _fypKind: 'playlist' as const })),

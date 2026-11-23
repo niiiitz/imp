@@ -1,11 +1,15 @@
 import React, { useEffect, useRef } from 'react';
 import { defaultSimpClient, type SoundCloudComment, type TrackMetadata } from '@simp/client';
 import {
+  cycleVisualizerFpsCap,
+  formatVisualizerFpsCapLabel,
   getSceneDescriptor,
   loadEnabledVisualizerScenes,
   loadVisualizerFpsCap,
+  loadVisualizerPauseUnfocused,
   saveEnabledVisualizerScenes,
   saveVisualizerFpsCap,
+  saveVisualizerPauseUnfocused,
   VISUALIZER_ENGINES,
   VISUALIZER_MODES,
   VISUALIZER_SCENES,
@@ -53,11 +57,15 @@ import { renderArcadeCrossfireScene } from './visualizers/scenes/arcadeCrossfire
 import { renderAvsV2Scene } from './visualizers/scenes/avsV2Scene';
 
 export {
+  cycleVisualizerFpsCap,
+  formatVisualizerFpsCapLabel,
   getSceneDescriptor,
   loadEnabledVisualizerScenes,
   loadVisualizerFpsCap,
+  loadVisualizerPauseUnfocused,
   saveEnabledVisualizerScenes,
   saveVisualizerFpsCap,
+  saveVisualizerPauseUnfocused,
   VISUALIZER_ENGINES,
   VISUALIZER_MODES,
   VISUALIZER_SCENES,
@@ -97,6 +105,7 @@ interface Props {
   mode: VisualizerMode;
   enabledScenes?: VisualizerEngine[];
   fpsCap?: VisualizerFpsCap;
+  pauseWhenUnfocused?: boolean;
   preferredScene?: VisualizerEngine | null;
   onActiveEngineChange?: (engine: VisualizerEngine) => void;
   isPlaying: boolean;
@@ -119,6 +128,7 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   mode,
   enabledScenes,
   fpsCap,
+  pauseWhenUnfocused = false,
   preferredScene = null,
   onActiveEngineChange,
   isPlaying,
@@ -148,6 +158,11 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
   modeRef.current = mode;
   const fpsCapRef = useRef<VisualizerFpsCap>(fpsCap ?? loadVisualizerFpsCap());
   fpsCapRef.current = fpsCap ?? loadVisualizerFpsCap();
+  const pauseWhenUnfocusedRef = useRef<boolean>(pauseWhenUnfocused);
+  pauseWhenUnfocusedRef.current = pauseWhenUnfocused;
+  const windowFocusedRef = useRef<boolean>(
+    typeof document !== 'undefined' ? document.hasFocus() : true,
+  );
   const enabledScenesRef = useRef<VisualizerEngine[]>(
     enabledScenes && enabledScenes.length > 0 ? enabledScenes : VISUALIZER_ENGINES,
   );
@@ -737,28 +752,68 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
     cycleIndexRef.current = sharedCycleIndex;
 
     let rafId = 0;
+    let timerId: number | null = null;
     let frameCount = 0;
     let lastFramePerf = performance.now();
+    let disposed = false;
     const glyphBitmaps = getGlyphBitmaps();
 
-    const renderFrame = (nowPerf: number) => {
-      const playing = isPlayingRef.current;
-      if (playing) {
-        rafId = requestAnimationFrame(renderFrame);
-      }
+    const shouldSuspend = () =>
+      disposed ||
+      document.visibilityState === 'hidden' ||
+      hiddenRef.current ||
+      modeRef.current === 'off' ||
+      (pauseWhenUnfocusedRef.current && !windowFocusedRef.current);
 
-      if (document.visibilityState === 'hidden' || hiddenRef.current || modeRef.current === 'off') {
+    const clearScheduled = () => {
+      if (rafId !== 0) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+
+    const scheduleNext = () => {
+      if (disposed || !isPlayingRef.current || shouldSuspend()) {
+        return;
+      }
+      const cap = fpsCapRef.current;
+      if (cap === 0) {
+        // Uncapped native display refresh
+        rafId = requestAnimationFrame(renderFrame);
+      } else {
+        // Refresh-divisible timer pacing (20 / 30 / 40 FPS) so WebView2/Chromium does NOT wake
+        // on every 240Hz vsync just to discard 7 out of 8 frames while gaming.
+        const targetMs = Math.max(16, Math.round(1000 / cap));
+        timerId = window.setTimeout(() => {
+          timerId = null;
+          if (!disposed) {
+            renderFrame(performance.now());
+          }
+        }, targetMs);
+      }
+    };
+
+    const renderFrame = (nowPerf: number) => {
+      rafId = 0;
+      if (shouldSuspend()) {
         return;
       }
 
+      const playing = isPlayingRef.current;
       // Frame rate governor:
-      // - 60 FPS default (~15.0ms budget for clean 60Hz lock) or 30 FPS Eco (~32.0ms) when playing
-      // - 0 FPS complete freeze when paused (at most 1 static preview frame if mode changed while paused)
+      // - 20 / 30 (default, divides 60/90/120/240Hz cleanly) / 40 FPS timer-paced, or 0 = Uncapped rAF
+      // - 0 FPS complete freeze when paused, hidden, or (pauseWhenUnfocused && unfocused)
       let dt = 0;
       if (playing) {
         const elapsedMs = nowPerf - lastFramePerf;
-        const minFrameMs = fpsCapRef.current === 30 ? 32.0 : 15.0;
-        if (elapsedMs < minFrameMs) {
+        const cap = fpsCapRef.current;
+        const minFrameMs = cap === 0 ? 4.0 : Math.max(12.0, 1000 / cap - 3.0);
+        if (cap === 0 && elapsedMs < minFrameMs) {
+          scheduleNext();
           return;
         }
         frameCount++;
@@ -768,6 +823,10 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
         sharedSimTimeSec = simTimeSecRef.current;
       } else {
         lastFramePerf = nowPerf;
+      }
+
+      if (playing) {
+        scheduleNext();
       }
 
       const timeSec = simTimeSecRef.current;
@@ -901,8 +960,8 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       }
 
       // Periodic organic mutation & micro-glitch (rate-normalized across 30/60 FPS)
-      const glitchMask = fpsCapRef.current === 30 ? 7 : 15;
-      const mutMask = fpsCapRef.current === 30 ? 63 : 127;
+      const glitchMask = fpsCapRef.current > 0 && fpsCapRef.current <= 30 ? 7 : 15;
+      const mutMask = fpsCapRef.current > 0 && fpsCapRef.current <= 30 ? 63 : 127;
       if (highEnergy > 0.56 && glitchTimerRef.current <= 0.05 && (frameCount & glitchMask) === 0) {
         triggerGlitchBurst(0.48);
       } else if ((frameCount & mutMask) === 0 && isPlayingRef.current) {
@@ -1183,11 +1242,62 @@ export const PlayerBackgroundVisualizer: React.FC<Props> = ({
       renderScene(sceneCtx, rtCtx);
     };
 
-    rafId = requestAnimationFrame(renderFrame);
-    return () => {
-      cancelAnimationFrame(rafId);
+    const wakeIfNeeded = () => {
+      if (disposed) return;
+      if (shouldSuspend()) {
+        clearScheduled();
+        return;
+      }
+      if (rafId === 0 && timerId === null) {
+        lastFramePerf = performance.now();
+        renderFrame(lastFramePerf);
+      }
     };
-  }, [mode, isPlaying, hidden]);
+
+    const onWindowFocus = () => {
+      windowFocusedRef.current = true;
+      wakeIfNeeded();
+    };
+    const onWindowBlur = () => {
+      windowFocusedRef.current = false;
+      if (pauseWhenUnfocusedRef.current) {
+        clearScheduled();
+      }
+    };
+    const onWindowActiveCustom = (ev: Event) => {
+      const active = Boolean((ev as CustomEvent<{ active?: boolean }>)?.detail?.active);
+      windowFocusedRef.current = active;
+      if (active) {
+        wakeIfNeeded();
+      } else if (pauseWhenUnfocusedRef.current) {
+        clearScheduled();
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearScheduled();
+      } else {
+        wakeIfNeeded();
+      }
+    };
+
+    window.addEventListener('focus', onWindowFocus);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('imp-window-active', onWindowActiveCustom);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    if (!shouldSuspend()) {
+      rafId = requestAnimationFrame(renderFrame);
+    }
+    return () => {
+      disposed = true;
+      clearScheduled();
+      window.removeEventListener('focus', onWindowFocus);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('imp-window-active', onWindowActiveCustom);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [mode, isPlaying, hidden, fpsCap, pauseWhenUnfocused]);
 
   if (mode === 'off') {
     return null;

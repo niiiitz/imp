@@ -12,12 +12,15 @@ import {
   fetchAppleLibraryRecentlyAdded,
   fetchAppleNewFeed,
   fetchAppleRadioAndForYou,
+  fetchAppleRecentPlayedPage,
+  fetchAppleRecentPlayedTracksPage,
 } from "../../../drivers/AppleMusicDriver";
 import {
   AlphaBucket,
   type BrowseHubTarget,
   tileGridStyle,
 } from "../libraryHelpers";
+import { HorizontalShelfRail } from "../HorizontalShelfRail";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { FilterTriggerButton, PinnableSectionHeader } from "../PinnableSectionHeader";
 import {
@@ -27,6 +30,154 @@ import {
   TTL_CATALOG_FEED_SEC,
   TTL_FAST_FEED_SEC,
 } from "../../../api/servicesCacheApi";
+
+function ensureShelfOrderTokens(shelf: AppleRecommendationShelf): string[] {
+  if (shelf.item_order && shelf.item_order.length > 0) {
+    return shelf.item_order;
+  }
+  return [
+    ...shelf.stations.map((s) => `station:${s.id}`),
+    ...shelf.playlists.map((p) => `playlist:${p.id}`),
+    ...shelf.albums.map((a) => `album:${a.id}`),
+  ];
+}
+
+function mergeAppleShelfRecords(
+  primary: AppleRecommendationShelf,
+  incoming: AppleRecommendationShelf
+): AppleRecommendationShelf {
+  const seenSt = new Set(primary.stations.map((s) => s.id));
+  const seenPl = new Set(primary.playlists.map((p) => p.id));
+  const seenAlb = new Set(primary.albums.map((a) => a.id));
+  const nextOrder = [...ensureShelfOrderTokens(primary)];
+  const seenTokens = new Set(nextOrder);
+
+  const stMap = new Map(incoming.stations.map((s) => [s.id, s]));
+  const plMap = new Map(incoming.playlists.map((p) => [p.id, p]));
+  const albMap = new Map(incoming.albums.map((a) => [a.id, a]));
+
+  const nextStations = [...primary.stations];
+  const nextPlaylists = [...primary.playlists];
+  const nextAlbums = [...primary.albums];
+
+  for (const token of ensureShelfOrderTokens(incoming)) {
+    if (token.startsWith("station:")) {
+      const id = token.slice("station:".length);
+      const st = stMap.get(id);
+      if (st && !seenSt.has(id)) {
+        seenSt.add(id);
+        nextStations.push(st);
+        if (!seenTokens.has(token)) {
+          seenTokens.add(token);
+          nextOrder.push(token);
+        }
+      }
+    } else if (token.startsWith("playlist:")) {
+      const id = token.slice("playlist:".length);
+      const pl = plMap.get(id);
+      if (pl && !seenPl.has(id)) {
+        seenPl.add(id);
+        nextPlaylists.push(pl);
+        if (!seenTokens.has(token)) {
+          seenTokens.add(token);
+          nextOrder.push(token);
+        }
+      }
+    } else if (token.startsWith("album:")) {
+      const id = token.slice("album:".length);
+      const alb = albMap.get(id);
+      if (alb && !seenAlb.has(id)) {
+        seenAlb.add(id);
+        nextAlbums.push(alb);
+        if (!seenTokens.has(token)) {
+          seenTokens.add(token);
+          nextOrder.push(token);
+        }
+      }
+    }
+  }
+
+  return {
+    ...primary,
+    stations: nextStations,
+    playlists: nextPlaylists,
+    albums: nextAlbums,
+    item_order: nextOrder,
+  };
+}
+
+function mergeRecentAppleShelves(
+  shelves: AppleRecommendationShelf[]
+): AppleRecommendationShelf[] {
+  if (shelves.length <= 1) return shelves;
+  const sorted = [...shelves].sort((a, b) => {
+    if (a.id === "recently-played-items") return -1;
+    if (b.id === "recently-played-items") return 1;
+    return 0;
+  });
+  let merged = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    merged = mergeAppleShelfRecords(merged, sorted[i]);
+  }
+  return [merged];
+}
+
+function renderOrderedAppleShelfItems(
+  shelf: AppleRecommendationShelf,
+  renderStationCard: (st: AppleRadioStationSummary) => React.ReactNode,
+  renderCloudPlaylistCard: (pl: AppleCloudPlaylistSummary) => React.ReactNode,
+  renderCloudAlbumCard: (alb: AppleCloudAlbumSummary) => React.ReactNode
+): React.ReactNode[] {
+  if (!shelf.item_order || shelf.item_order.length === 0) {
+    return [
+      ...shelf.stations.map(renderStationCard),
+      ...shelf.playlists.map(renderCloudPlaylistCard),
+      ...shelf.albums.map(renderCloudAlbumCard),
+    ];
+  }
+  const stMap = new Map(shelf.stations.map((s) => [s.id, s]));
+  const plMap = new Map(shelf.playlists.map((p) => [p.id, p]));
+  const albMap = new Map(shelf.albums.map((a) => [a.id, a]));
+  const usedSt = new Set<string>();
+  const usedPl = new Set<string>();
+  const usedAlb = new Set<string>();
+  const out: React.ReactNode[] = [];
+
+  for (const token of shelf.item_order) {
+    if (token.startsWith("station:")) {
+      const id = token.slice("station:".length);
+      const st = stMap.get(id);
+      if (st && !usedSt.has(id)) {
+        usedSt.add(id);
+        out.push(renderStationCard(st));
+      }
+    } else if (token.startsWith("playlist:")) {
+      const id = token.slice("playlist:".length);
+      const pl = plMap.get(id);
+      if (pl && !usedPl.has(id)) {
+        usedPl.add(id);
+        out.push(renderCloudPlaylistCard(pl));
+      }
+    } else if (token.startsWith("album:")) {
+      const id = token.slice("album:".length);
+      const alb = albMap.get(id);
+      if (alb && !usedAlb.has(id)) {
+        usedAlb.add(id);
+        out.push(renderCloudAlbumCard(alb));
+      }
+    }
+  }
+  for (const st of shelf.stations) {
+    if (!usedSt.has(st.id)) out.push(renderStationCard(st));
+  }
+  for (const pl of shelf.playlists) {
+    if (!usedPl.has(pl.id)) out.push(renderCloudPlaylistCard(pl));
+  }
+  for (const alb of shelf.albums) {
+    if (!usedAlb.has(alb.id)) out.push(renderCloudAlbumCard(alb));
+  }
+  return out;
+}
 
 export interface AppleMusicDiscoverPaneProps {
   appleRadioFilter: "all" | "genre" | "live" | "shows" | "mixes";
@@ -142,6 +293,15 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
   setRecentlyAddedCloudAlbums,
   snap,
 }) => {
+  const [recentItemsNextOffset, setRecentItemsNextOffset] = React.useState<
+    number | null | undefined
+  >(undefined);
+  const [recentItemsLoadingMore, setRecentItemsLoadingMore] = React.useState(false);
+  const [recentTracksNextOffset, setRecentTracksNextOffset] = React.useState<
+    number | null | undefined
+  >(undefined);
+  const [recentTracksLoadingMore, setRecentTracksLoadingMore] = React.useState(false);
+
   return (
     <>
                 {/* ---------------------------------------------------------
@@ -264,13 +424,16 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                   snap?.apple_authenticated && (
                   <>
                     {(() => {
-                      const recentShelves = forYouShelves.filter(
+                      const rawRecentShelves = forYouShelves.filter(
                         (s) =>
+                          s.id === 'recently-played-items' ||
                           s.id === 'recently-played' ||
                           s.title.toLowerCase().includes('recent')
                       );
+                      const recentShelves = mergeRecentAppleShelves(rawRecentShelves);
                       const otherShelves = forYouShelves.filter(
                         (s) =>
+                          s.id !== 'recently-played-items' &&
                           s.id !== 'recently-played' &&
                           !s.title.toLowerCase().includes('recent') &&
                           !s.title.toLowerCase().includes('new release')
@@ -286,6 +449,98 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                         forYouNewReleases.length > 0
                           ? forYouNewReleases
                           : newFeedRecentReleases;
+                      const effectiveRecentItemsOffset =
+                        recentItemsNextOffset !== undefined
+                          ? recentItemsNextOffset
+                          : recentShelfCount >= 10
+                            ? recentShelfCount
+                            : null;
+                      const effectiveRecentTracksOffset =
+                        recentTracksNextOffset !== undefined
+                          ? recentTracksNextOffset
+                          : appleRecentlyPlayedTracks.length >= 20
+                            ? appleRecentlyPlayedTracks.length
+                            : null;
+
+                      const handleLoadMoreRecentItems = async () => {
+                        if (
+                          recentItemsLoadingMore ||
+                          effectiveRecentItemsOffset === null
+                        ) {
+                          return;
+                        }
+                        setRecentItemsLoadingMore(true);
+                        try {
+                          const res = await fetchAppleRecentPlayedPage(
+                            effectiveRecentItemsOffset
+                          );
+                          let addedNew = false;
+                          setForYouShelves?.((prev: AppleRecommendationShelf[]) => {
+                            const targetIdx = prev.findIndex(
+                              (s) =>
+                                s.id === 'recently-played-items' ||
+                                s.id === 'recently-played' ||
+                                s.title.toLowerCase().includes('recent')
+                            );
+                            if (targetIdx === -1) return prev;
+                            const before = prev[targetIdx];
+                            const merged = mergeAppleShelfRecords(before, res.shelf);
+                            addedNew =
+                              merged.stations.length > before.stations.length ||
+                              merged.playlists.length > before.playlists.length ||
+                              merged.albums.length > before.albums.length;
+                            const next = [...prev];
+                            next[targetIdx] = merged;
+                            return next;
+                          });
+                          setRecentItemsNextOffset(
+                            res.next_offset !== null &&
+                              res.next_offset > effectiveRecentItemsOffset &&
+                              addedNew
+                              ? res.next_offset
+                              : res.next_offset !== null && addedNew
+                                ? res.next_offset
+                                : null
+                          );
+                        } catch {
+                          setRecentItemsNextOffset(null);
+                        } finally {
+                          setRecentItemsLoadingMore(false);
+                        }
+                      };
+
+                      const handleLoadMoreRecentTracks = async () => {
+                        if (
+                          recentTracksLoadingMore ||
+                          effectiveRecentTracksOffset === null
+                        ) {
+                          return;
+                        }
+                        setRecentTracksLoadingMore(true);
+                        try {
+                          const res = await fetchAppleRecentPlayedTracksPage(
+                            effectiveRecentTracksOffset
+                          );
+                          let addedCount = 0;
+                          setAppleRecentlyPlayedTracks?.((prev: TrackMetadata[]) => {
+                            const seen = new Set(prev.map((t) => t.uri));
+                            const fresh = res.tracks.filter(
+                              (t) => !seen.has(t.uri)
+                            );
+                            addedCount = fresh.length;
+                            return fresh.length > 0 ? [...prev, ...fresh] : prev;
+                          });
+                          setRecentTracksNextOffset(
+                            res.next_offset !== null && addedCount > 0
+                              ? res.next_offset
+                              : null
+                          );
+                        } catch {
+                          setRecentTracksNextOffset(null);
+                        } finally {
+                          setRecentTracksLoadingMore(false);
+                        }
+                      };
 
                       return (
                         <>
@@ -332,6 +587,8 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   data-right-filter-pill="true"
                                   onClick={() => {
                                     setCloudLoading(true);
+                                    setRecentItemsNextOffset(undefined);
+                                    setRecentTracksNextOffset(undefined);
                                     Promise.all([
                                       fetchAppleRadioAndForYou()
                                         .then((res) => {
@@ -399,9 +656,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={personalRadioStations}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={personalRadioStations.length}>
                                   {personalRadioStations.map(renderStationCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -430,9 +687,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={effectiveNewReleases}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={effectiveNewReleases.length}>
                                   {effectiveNewReleases.map(renderCloudAlbumCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -475,11 +732,23 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                         }}
                                         liveItems={mapAppleShelfToFypItems(shelf)}
                                       />
-                                      <div style={tileGridStyle}>
-                                        {shelf.stations.map(renderStationCard)}
-                                        {shelf.playlists.map(renderCloudPlaylistCard)}
-                                        {shelf.albums.map(renderCloudAlbumCard)}
-                                      </div>
+                                      <HorizontalShelfRail
+                                        variant="tiles"
+                                        itemCount={totalItems}
+                                        shelfId={`apple:for_you:shelf:${shelf.id}`}
+                                        shelfTitle={`🕒 ${shelf.title.toUpperCase()}`}
+                                        accentColor="#fda4af"
+                                        hasMore={effectiveRecentItemsOffset !== null}
+                                        loadingMore={recentItemsLoadingMore}
+                                        onLoadMore={handleLoadMoreRecentItems}
+                                      >
+                                        {renderOrderedAppleShelfItems(
+                                          shelf,
+                                          renderStationCard,
+                                          renderCloudPlaylistCard,
+                                          renderCloudAlbumCard
+                                        )}
+                                      </HorizontalShelfRail>
                                     </section>
                                   );
                                 })}
@@ -508,26 +777,43 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                       }}
                                       liveItems={appleRecentlyPlayedTracks}
                                     />
-                                    <div
-                                      style={{
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: 6,
-                                      }}
-                                    >
-                                      {appleRecentlyPlayedTracks
-                                        .slice(
-                                          0,
-                                          forYouFilter === 'recently_played' ? 40 : 12
-                                        )
-                                        .map((s) =>
+                                    {forYouFilter === 'recently_played' ? (
+                                      <div
+                                        style={{
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: 6,
+                                        }}
+                                      >
+                                        {appleRecentlyPlayedTracks.map((s) =>
                                           renderSingleSongRow(
                                             s,
                                             appleRecentlyPlayedTracks,
                                             'for_you_recent'
                                           )
                                         )}
-                                    </div>
+                                      </div>
+                                    ) : (
+                                      <HorizontalShelfRail
+                                        variant="tracks"
+                                        itemCount={appleRecentlyPlayedTracks.length}
+                                        shelfId="apple:for_you:recently_played"
+                                        shelfTitle="🎵 RECENTLY PLAYED TRACKS"
+                                        accentColor="#fda4af"
+                                        hasMore={effectiveRecentTracksOffset !== null}
+                                        loadingMore={recentTracksLoadingMore}
+                                        onLoadMore={handleLoadMoreRecentTracks}
+                                      >
+                                        {appleRecentlyPlayedTracks.map((s) =>
+                                          renderSingleSongRow(
+                                            s,
+                                            appleRecentlyPlayedTracks,
+                                            'for_you_recent',
+                                            true
+                                          )
+                                        )}
+                                      </HorizontalShelfRail>
+                                    )}
                                   </section>
                                 )}
                               </>
@@ -558,9 +844,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={recentlyAddedCloudAlbums}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={recentlyAddedCloudAlbums.length}>
                                   {recentlyAddedCloudAlbums.map(renderCloudAlbumCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -629,11 +915,14 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                           }}
                                           liveItems={mapAppleShelfToFypItems(shelf)}
                                         />
-                                        <div style={tileGridStyle}>
-                                          {shelf.stations.map(renderStationCard)}
-                                          {shelf.playlists.map(renderCloudPlaylistCard)}
-                                          {shelf.albums.map(renderCloudAlbumCard)}
-                                        </div>
+                                        <HorizontalShelfRail variant="tiles" itemCount={totalItems}>
+                                          {renderOrderedAppleShelfItems(
+                                            shelf,
+                                            renderStationCard,
+                                            renderCloudPlaylistCard,
+                                            renderCloudAlbumCard
+                                          )}
+                                        </HorizontalShelfRail>
                                       </section>
                                     );
                                   })}
@@ -664,9 +953,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                       }}
                                       liveItems={forYouPlaylists}
                                     />
-                                    <div style={tileGridStyle}>
+                                    <HorizontalShelfRail variant="tiles" itemCount={forYouPlaylists.length}>
                                       {forYouPlaylists.map(renderCloudPlaylistCard)}
-                                    </div>
+                                    </HorizontalShelfRail>
                                   </section>
                                 )}
 
@@ -694,9 +983,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                       }}
                                       liveItems={forYouAlbums}
                                     />
-                                    <div style={tileGridStyle}>
+                                    <HorizontalShelfRail variant="tiles" itemCount={forYouAlbums.length}>
                                       {forYouAlbums.map(renderCloudAlbumCard)}
-                                    </div>
+                                    </HorizontalShelfRail>
                                   </section>
                                 )}
                               </>
@@ -815,9 +1104,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={recentReleasesForYou}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={recentReleasesForYou.length}>
                                   {recentReleasesForYou.map(renderCloudAlbumCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -846,9 +1135,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={newFeedAlbums}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={newFeedAlbums.length}>
                                   {newFeedAlbums.map(renderCloudAlbumCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -877,9 +1166,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={newFeedPlaylists}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={newFeedPlaylists.length}>
                                   {newFeedPlaylists.map(renderCloudPlaylistCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -908,13 +1197,21 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={newFeedSongs}
                                 />
-                                <div
-                                  style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
-                                >
-                                  {newFeedSongs.map((s) =>
-                                    renderSingleSongRow(s, newFeedSongs, 'new')
-                                  )}
-                                </div>
+                                {newFilter === 'songs' ? (
+                                  <div
+                                    style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
+                                  >
+                                    {newFeedSongs.map((s) =>
+                                      renderSingleSongRow(s, newFeedSongs, 'new')
+                                    )}
+                                  </div>
+                                ) : (
+                                  <HorizontalShelfRail variant="tracks" itemCount={newFeedSongs.length}>
+                                    {newFeedSongs.map((s) =>
+                                      renderSingleSongRow(s, newFeedSongs, 'new', true)
+                                    )}
+                                  </HorizontalShelfRail>
+                                )}
                               </section>
                             )}
                         </>
@@ -1055,9 +1352,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={personalRadioStations}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={personalRadioStations.length}>
                                   {personalRadioStations.map(renderStationCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -1086,9 +1383,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={stationsToDisplay}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={stationsToDisplay.length}>
                                   {stationsToDisplay.map(renderStationCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -1117,9 +1414,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={artistRadioShows}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={artistRadioShows.length}>
                                   {artistRadioShows.map(renderCloudPlaylistCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -1148,9 +1445,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={clubMixes}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={clubMixes.length}>
                                   {clubMixes.map(renderCloudPlaylistCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 
@@ -1181,9 +1478,9 @@ export const AppleMusicDiscoverPane: React.FC<AppleMusicDiscoverPaneProps> = ({
                                   }}
                                   liveItems={filteredGenreStations}
                                 />
-                                <div style={tileGridStyle}>
+                                <HorizontalShelfRail variant="tiles" itemCount={filteredGenreStations.length}>
                                   {filteredGenreStations.map(renderStationCard)}
-                                </div>
+                                </HorizontalShelfRail>
                               </section>
                             )}
 

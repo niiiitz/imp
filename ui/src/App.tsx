@@ -49,7 +49,8 @@ import {
 import { OskTargetKind, useGamepadNavigation } from './hooks/useGamepadNavigation';
 import { BrowserTarget, isUiVideoTrack, PlayerView } from './views/PlayerView';
 import { LibraryBrowserView } from './views/LibraryBrowserView';
-import { SettingsModal, SimpUpdateStatus, SourceVisibilityPrefs } from './views/SettingsModal';
+import { XmbUnifiedMenu } from './components/XmbUnifiedMenu';
+import type { SimpUpdateStatus, SourceVisibilityPrefs } from './menu/menuCorpus';
 import { QuickHelpModal } from './components/QuickHelpModal';
 import { TrackPropertiesModal, TrackPropertiesTarget } from './components/TrackPropertiesModal';
 import { ImpIcon } from './components/icons/ImpIcon';
@@ -58,6 +59,7 @@ import { HybridPlaylistPickerModal } from './components/HybridPlaylistPickerModa
 import { FolderDropModal } from './components/FolderDropModal';
 import { AppOnScreenKeyboardBar } from './components/AppOnScreenKeyboardBar';
 import { applySkinPackToDocument, loadActiveSkinPackId } from './theme/skinPacks';
+import { applyUiScaleToDocument } from './theme/uiScale';
 import {
   readProviderCachedShelves,
   refreshFypFromDb,
@@ -86,6 +88,10 @@ const DedicatedAppleWorkerApp: React.FC = () => {
 export const App: React.FC = () => {
   useEffect(() => {
     applySkinPackToDocument(loadActiveSkinPackId());
+    applyUiScaleToDocument();
+    const onResize = () => applyUiScaleToDocument();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
   if (isDedicatedAppleWorkerRoute) {
     return <DedicatedAppleWorkerApp />;
@@ -551,14 +557,33 @@ const ConsoleMainApp: React.FC = () => {
     setDesktopScreensaverActive(true);
   }, [desktopMode]);
 
-  const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>({ channel: 'stable' });
-  const updateChannelRef = useRef<string>('stable');
-  const notifiedUpdateTagRef = useRef<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>(() => {
+    try {
+      const saved = window.localStorage.getItem('imp_update_channel_v1');
+      if (saved === 'alpha' || saved === 'off' || saved === 'stable') {
+        return { channel: saved };
+      }
+    } catch {}
+    return { channel: 'stable' };
+  });
+  const updateChannelRef = useRef<string>(updateStatus.channel || 'stable');
+  const notifiedUpdateTagRef = useRef<string | null>(
+    (() => {
+      try {
+        return window.localStorage.getItem('imp_notified_update_tag_v1');
+      } catch {
+        return null;
+      }
+    })()
+  );
   const startupUpdateCheckedRef = useRef(false);
 
   useEffect(() => {
     if (updateStatus.channel) {
       updateChannelRef.current = updateStatus.channel;
+      try {
+        window.localStorage.setItem('imp_update_channel_v1', updateStatus.channel);
+      } catch {}
     }
   }, [updateStatus.channel]);
 
@@ -610,6 +635,16 @@ const ConsoleMainApp: React.FC = () => {
   }, []);
 
   const checkSimpUpdates = useCallback(async (_silent = false) => {
+    if (_silent) {
+      let cachedCh = updateChannelRef.current;
+      try {
+        const stored = window.localStorage.getItem('imp_update_channel_v1');
+        if (stored) cachedCh = stored;
+      } catch {}
+      if (cachedCh.toLowerCase() === 'off') {
+        return;
+      }
+    }
     setUpdateStatus((prev) => ({ ...prev, checking: true, error: undefined }));
     const base = resolveDaemonBaseUrl();
     const maybeNotifyAvailableUpdate = (
@@ -619,6 +654,9 @@ const ConsoleMainApp: React.FC = () => {
     ) => {
       if (!available || !tag || notifiedUpdateTagRef.current === tag) return;
       notifiedUpdateTagRef.current = tag;
+      try {
+        window.localStorage.setItem('imp_notified_update_tag_v1', tag);
+      } catch {}
       const chLabel = channelName.toLowerCase() === 'alpha' ? 'Alpha' : 'Stable';
       showToast(`✨ IMP ${tag} available (${chLabel}) — open Settings to update`);
     };
@@ -746,11 +784,29 @@ const ConsoleMainApp: React.FC = () => {
   useEffect(() => {
     if (isDeckyEmbedded || startupUpdateCheckedRef.current) return;
     startupUpdateCheckedRef.current = true;
-    const tid = window.setTimeout(() => {
+    const tid = window.setTimeout(async () => {
+      const base = resolveDaemonBaseUrl();
+      try {
+        const pResp = await fetch(`${base}/api/settings/privacy`, { cache: 'no-store' });
+        if (pResp.ok) {
+          const pData = await pResp.json();
+          if (typeof pData?.update_channel === 'string') {
+            const ch = pData.update_channel.toLowerCase();
+            updateChannelRef.current = ch;
+            setUpdateStatus((prev) => ({ ...prev, channel: ch }));
+            try {
+              window.localStorage.setItem('imp_update_channel_v1', ch);
+            } catch {}
+            if (ch === 'off') return;
+          }
+        }
+      } catch {
+        // fallback cleanly to checkSimpUpdates local guard
+      }
       checkSimpUpdates(true);
     }, 3500);
     return () => window.clearTimeout(tid);
-  }, [isDeckyEmbedded, checkSimpUpdates]);
+  }, [isDeckyEmbedded, resolveDaemonBaseUrl, checkSimpUpdates]);
 
   const applySimpUpdate = useCallback(async () => {
     setUpdateStatus((prev) => ({ ...prev, applying: true, error: undefined }));
@@ -2695,7 +2751,7 @@ const ConsoleMainApp: React.FC = () => {
 
   const handleRemoveFolder = (mountRoot: string, label: string) => {
     defaultSimpClient.removeLibraryPath(mountRoot);
-    showToast(`Removed mount: ${label}`);
+    showToast(`Removed folder: ${label}`);
     window.setTimeout(() => refreshLibraryData(), 350);
   };
 
@@ -2727,8 +2783,11 @@ const ConsoleMainApp: React.FC = () => {
         maxHeight: '100vh',
         boxSizing: 'border-box',
         overflow: 'hidden',
-        background: '#000000',
-        color: '#d4d4dc',
+        background:
+          isDimmed || isSleeping || desktopScreensaverActive
+            ? '#000000'
+            : 'var(--imp-bg-canvas, #121418)',
+        color: 'var(--imp-text-primary, #eef0f4)',
         display: 'flex',
         flexDirection: 'column',
         opacity: activeOpacity,
@@ -2747,9 +2806,9 @@ const ConsoleMainApp: React.FC = () => {
         select:focus, select:focus-visible,
         [data-focusable="true"]:focus, [data-focusable="true"]:focus-visible,
         .simp-gpfocus, [data-simp-active-focus="true"] {
-          outline: 2px solid var(--imp-accent-primary, #2aa3c4) !important;
+          outline: 2px solid var(--imp-focus-ring, #e8b86d) !important;
           outline-offset: 2px !important;
-          box-shadow: 0 0 0 3px var(--imp-accent-glow, rgba(42, 163, 196, 0.28)) !important;
+          box-shadow: 0 0 0 3px var(--imp-focus-glow, rgba(232, 184, 109, 0.26)) !important;
         }
         html[data-simp-input="pointer"] .simp-gp-badge {
           display: none !important;
@@ -2837,18 +2896,18 @@ const ConsoleMainApp: React.FC = () => {
             bottom: 22,
             left: '50%',
             transform: 'translateX(-50%)',
-            background: '#0d0d14',
-            border: '1px solid #2aa3c4',
-            color: '#d4d4dc',
-            padding: '10px 18px',
-            borderRadius: 99,
-            fontSize: 13,
+            background: 'var(--imp-surface-elevated, #21252f)',
+            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+            color: 'var(--imp-text-primary, #eef0f4)',
+            padding: '8px 14px',
+            borderRadius: 8,
+            fontSize: 12.5,
             fontWeight: 700,
             zIndex: 90,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.75)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.65)',
           }}
         >
-          ✨ {toastMsg}
+          {toastMsg}
         </div>
       )}
 
@@ -3044,23 +3103,25 @@ const ConsoleMainApp: React.FC = () => {
         handleRemoveFolder={handleRemoveFolder}
       />
 
-      {/* Unified Top-Left Hamburger (☰ / START) Nested Settings Drawer */}
+      {/* Unified Top-Right 3-Column XMB START Menu */}
       {(sourceModalOpen || powerModalOpen) && (
-        <SettingsModal
+        <XmbUnifiedMenu
           snap={snap}
           customFolderPath={customFolderPath}
           setCustomFolderPath={setCustomFolderPath}
           setOskTarget={setOskTarget}
           handleAddFolder={handleAddFolder}
           handleRemoveFolder={handleRemoveFolder}
-          setView={setView}
           setSourceModalOpen={setSourceModalOpen}
           setPowerModalOpen={setPowerModalOpen}
           setIsSleeping={setIsSleeping}
           dismissConsole={dismissConsole}
           brightnessPct={brightnessPct}
           setBrightnessPct={setBrightnessPct}
+          idleTimerSec={desktopVizIdleSec}
+          onChangeIdleTimerSec={handleChangeDesktopVizIdleSec}
           updateStatus={updateStatus}
+          setUpdateStatus={setUpdateStatus}
           checkSimpUpdates={checkSimpUpdates}
           applySimpUpdate={applySimpUpdate}
           confirmHardReset={confirmHardReset}
@@ -3071,8 +3132,6 @@ const ConsoleMainApp: React.FC = () => {
           cdScanning={cdScanning}
           handleScanOpticalDisc={handleScanOpticalDisc}
           handleEjectOpticalDisc={handleEjectOpticalDisc}
-          setBrowserTarget={setBrowserTarget}
-          setBrowserTracks={setBrowserTracks}
           appleAuthCfg={appleAuthCfg}
           setAppleAuthCfg={setAppleAuthCfg}
           appleBusy={appleBusy}
@@ -3081,13 +3140,13 @@ const ConsoleMainApp: React.FC = () => {
           setSoundcloudAuthCfg={setSoundcloudAuthCfg}
           soundcloudBusy={soundcloudBusy}
           setSoundcloudBusy={setSoundcloudBusy}
-          setBrowserSourceFilter={setBrowserSourceFilter}
-          setAppleSubTab={setAppleSubTab}
-          setSoundCloudSubTab={setSoundCloudSubTab}
           refreshLibraryData={refreshLibraryData}
           applyFocusMarker={applyFocusMarker}
           showToast={showToast}
           initialOpenFoldersAccounts={initialOpenFoldersAccounts}
+          isDeckyEmbedded={isDeckyEmbedded}
+          desktopMode={desktopMode}
+          onToggleDesktopMode={handleToggleDesktopMode}
           onOpenQuickHelp={() => {
             setInitialOpenFoldersAccounts(false);
             setQuickHelpOpen(true);

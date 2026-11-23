@@ -9,11 +9,69 @@ use std::io::Read;
 use std::os::unix::io::AsRawFd;
 #[cfg(target_os = "linux")]
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 #[cfg(target_os = "linux")]
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
+
+/// Daemon hardware gamepad broadcast policy:
+/// - `0` (`focused_only`, default): emit only while an IMP UI window reports focus (prevents
+///   Gamescope and Steam Frame VR background windows from stealing inputs from foreground games).
+/// - `1` (`always`): legacy opt-in always-on broadcast (e.g. headless overlay without window focus).
+/// - `2` (`off`): disable daemon hardware polling broadcasts completely (rely on browser Gamepad API).
+const GAMEPAD_POLICY_FOCUSED_ONLY: u8 = 0;
+const GAMEPAD_POLICY_ALWAYS: u8 = 1;
+const GAMEPAD_POLICY_OFF: u8 = 2;
+
+static UI_WINDOW_FOCUSED: AtomicBool = AtomicBool::new(false);
+static GAMEPAD_POLICY: AtomicU8 = AtomicU8::new(GAMEPAD_POLICY_FOCUSED_ONLY);
+
+pub fn set_ui_window_focused(focused: bool) {
+    UI_WINDOW_FOCUSED.store(focused, Ordering::SeqCst);
+}
+
+pub fn is_ui_window_focused() -> bool {
+    UI_WINDOW_FOCUSED.load(Ordering::SeqCst)
+}
+
+pub fn set_gamepad_focus_policy(policy: &str) -> &'static str {
+    let code = match policy.trim().to_ascii_lowercase().as_str() {
+        "always" => GAMEPAD_POLICY_ALWAYS,
+        "off" | "disabled" => GAMEPAD_POLICY_OFF,
+        _ => GAMEPAD_POLICY_FOCUSED_ONLY,
+    };
+    GAMEPAD_POLICY.store(code, Ordering::SeqCst);
+    gamepad_focus_policy()
+}
+
+pub fn gamepad_focus_policy() -> &'static str {
+    match GAMEPAD_POLICY.load(Ordering::SeqCst) {
+        GAMEPAD_POLICY_ALWAYS => "always",
+        GAMEPAD_POLICY_OFF => "off",
+        _ => "focused_only",
+    }
+}
+
+pub fn should_emit_daemon_gamepad_input() -> bool {
+    match GAMEPAD_POLICY.load(Ordering::SeqCst) {
+        GAMEPAD_POLICY_OFF => false,
+        GAMEPAD_POLICY_ALWAYS => true,
+        _ => UI_WINDOW_FOCUSED.load(Ordering::SeqCst),
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+fn emit_daemon_gamepad_action(broadcast_tx: &broadcast::Sender<PlaybackEvent>, action: &str) {
+    // Always let `dir_release` pass through so a held direction never gets stuck on window blur
+    if action != "dir_release" && !should_emit_daemon_gamepad_input() {
+        return;
+    }
+    let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
+        action: action.to_string(),
+    });
+}
 
 /// Linux `joydev` ioctl `JSIOCGBTNMAP` (`_IOR('j', 0x34, __u16[KEY_MAX - BTN_MISC + 1])`)
 /// Queries the exact kernel `BTN_*` keycode mapped to each `js_event.number` button index.
@@ -331,9 +389,7 @@ fn read_joystick_loop(idx: usize, dev_path: &str, broadcast_tx: broadcast::Sende
     let mut last_vol_tick = Instant::now() - Duration::from_secs(1);
 
     let emit = |action: &str| {
-        let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-            action: action.to_string(),
-        });
+        emit_daemon_gamepad_action(&broadcast_tx, action);
     };
 
     while file.read_exact(&mut buf).is_ok() {
@@ -515,9 +571,7 @@ fn read_evdev_loop(idx: usize, dev_path: &str, broadcast_tx: broadcast::Sender<P
     let mut last_vol_tick = Instant::now() - Duration::from_secs(1);
 
     let emit = |action: &str| {
-        let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-            action: action.to_string(),
-        });
+        emit_daemon_gamepad_action(&broadcast_tx, action);
     };
 
     while file.read_exact(&mut buf).is_ok() {
@@ -912,16 +966,12 @@ fn read_steam_deck_hidraw_loop(
             ];
             for &(now_pressed, was_pressed, action) in edges {
                 if now_pressed && !was_pressed {
-                    let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-                        action: action.to_string(),
-                    });
+                    emit_daemon_gamepad_action(&broadcast_tx, action);
                 } else if !now_pressed
                     && was_pressed
                     && matches!(action, "up" | "down" | "left" | "right")
                 {
-                    let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-                        action: "dir_release".to_string(),
-                    });
+                    emit_daemon_gamepad_action(&broadcast_tx, "dir_release");
                 }
             }
             prev = cur;
@@ -1059,9 +1109,7 @@ mod macos_iokit {
                 let pressed = raw_val > 0;
                 let prev = st.button_states.insert((usage_page, usage), pressed).unwrap_or(false);
                 if pressed && !prev {
-                    let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                        action: action.to_string(),
-                    });
+                    super::emit_daemon_gamepad_action(&st.broadcast_tx, action);
                 }
                 return;
             }
@@ -1077,15 +1125,11 @@ mod macos_iokit {
                 st.hat_dir = (nx, ny);
                 if nx != px && nx != 0 {
                     let act = if nx < 0 { "left" } else { "right" };
-                    let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                        action: act.to_string(),
-                    });
+                    super::emit_daemon_gamepad_action(&st.broadcast_tx, act);
                 }
                 if ny != py && ny != 0 {
                     let act = if ny < 0 { "up" } else { "down" };
-                    let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                        action: act.to_string(),
-                    });
+                    super::emit_daemon_gamepad_action(&st.broadcast_tx, act);
                 }
                 return;
             }
@@ -1107,13 +1151,9 @@ mod macos_iokit {
                     if next_dir != st.stick_x_dir {
                         st.stick_x_dir = next_dir;
                         if next_dir < 0 {
-                            let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                action: "left".to_string(),
-                            });
+                            super::emit_daemon_gamepad_action(&st.broadcast_tx, "left");
                         } else if next_dir > 0 {
-                            let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                action: "right".to_string(),
-                            });
+                            super::emit_daemon_gamepad_action(&st.broadcast_tx, "right");
                         }
                     }
                 } else {
@@ -1129,13 +1169,9 @@ mod macos_iokit {
                     if next_dir != st.stick_y_dir {
                         st.stick_y_dir = next_dir;
                         if next_dir < 0 {
-                            let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                action: "up".to_string(),
-                            });
+                            super::emit_daemon_gamepad_action(&st.broadcast_tx, "up");
                         } else if next_dir > 0 {
-                            let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                action: "down".to_string(),
-                            });
+                            super::emit_daemon_gamepad_action(&st.broadcast_tx, "down");
                         }
                     }
                 }
@@ -1148,9 +1184,7 @@ mod macos_iokit {
                 if (usage_page == 0x01 && usage == 0x32) || (usage_page == 0x02 && usage == 0xC5) {
                     if ratio > 0.65 && !st.lt_pressed {
                         st.lt_pressed = true;
-                        let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                            action: "l2".to_string(),
-                        });
+                        super::emit_daemon_gamepad_action(&st.broadcast_tx, "l2");
                     } else if ratio < 0.30 {
                         st.lt_pressed = false;
                     }
@@ -1159,9 +1193,7 @@ mod macos_iokit {
                 {
                     if ratio > 0.65 && !st.rt_pressed {
                         st.rt_pressed = true;
-                        let _ = st.broadcast_tx.send(PlaybackEvent::GamepadInput {
-                            action: "r2".to_string(),
-                        });
+                        super::emit_daemon_gamepad_action(&st.broadcast_tx, "r2");
                     } else if ratio < 0.30 {
                         st.rt_pressed = false;
                     }
@@ -1512,29 +1544,26 @@ fn spawn_linux_openvr_controller_reader(broadcast_tx: broadcast::Sender<Playback
                                     ];
                                     for &(act, now_on, was_on) in transitions {
                                         if now_on && !was_on {
-                                            let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                                action: act.to_string(),
-                                            });
+                                            emit_daemon_gamepad_action(&broadcast_tx, act);
                                         } else if !now_on
                                             && was_on
                                             && matches!(act, "up" | "down" | "left" | "right")
                                         {
-                                            let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                                action: "dir_release".to_string(),
-                                            });
+                                            emit_daemon_gamepad_action(&broadcast_tx, "dir_release");
                                         }
                                     }
                                     if (cur.volume_up || cur.volume_down)
                                         && last_vol_tick.elapsed() >= Duration::from_millis(90)
                                     {
                                         last_vol_tick = Instant::now();
-                                        let _ = broadcast_tx.send(PlaybackEvent::GamepadInput {
-                                            action: if cur.volume_up {
-                                                "volume_up".to_string()
+                                        emit_daemon_gamepad_action(
+                                            &broadcast_tx,
+                                            if cur.volume_up {
+                                                "volume_up"
                                             } else {
-                                                "volume_down".to_string()
+                                                "volume_down"
                                             },
-                                        });
+                                        );
                                     }
                                     *prev = cur;
                                 }
@@ -1637,5 +1666,53 @@ mod tests {
         assert!(dec_right.right && !dec_right.left);
         assert!(dec_right.activate && dec_right.back && dec_right.r1 && dec_right.power);
         assert!(dec_right.volume_down && !dec_right.volume_up);
+    }
+
+    #[test]
+    fn test_gamepad_focus_policy_and_dir_release_passthrough() {
+        let (tx, mut rx) = broadcast::channel(8);
+
+        // Default policy (`focused_only`): blocks inputs when UI window is unfocused
+        set_gamepad_focus_policy("focused_only");
+        set_ui_window_focused(false);
+        assert!(!should_emit_daemon_gamepad_input());
+        emit_daemon_gamepad_action(&tx, "activate");
+        assert!(rx.try_recv().is_err());
+
+        // `dir_release` always passes through so held directions never get stuck on blur
+        emit_daemon_gamepad_action(&tx, "dir_release");
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(PlaybackEvent::GamepadInput { action }) if action == "dir_release"
+        ));
+
+        // Focusing the IMP UI window enables emissions
+        set_ui_window_focused(true);
+        assert!(should_emit_daemon_gamepad_input());
+        emit_daemon_gamepad_action(&tx, "activate");
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(PlaybackEvent::GamepadInput { action }) if action == "activate"
+        ));
+
+        // `off` blocks even while focused
+        set_gamepad_focus_policy("off");
+        assert!(!should_emit_daemon_gamepad_input());
+        emit_daemon_gamepad_action(&tx, "back");
+        assert!(rx.try_recv().is_err());
+
+        // `always` permits emissions regardless of focus
+        set_ui_window_focused(false);
+        set_gamepad_focus_policy("always");
+        assert!(should_emit_daemon_gamepad_input());
+        emit_daemon_gamepad_action(&tx, "power");
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(PlaybackEvent::GamepadInput { action }) if action == "power"
+        ));
+
+        // Reset to safe default
+        set_gamepad_focus_policy("focused_only");
+        set_ui_window_focused(false);
     }
 }

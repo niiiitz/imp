@@ -11,6 +11,7 @@ export interface ResilientTileArtworkProps {
   playlistCoverId?: string;
   playlistKind?: string;
   onResolvedCover?: (url: string) => void;
+  square?: boolean;
 }
 
 export const ResilientTileArtwork: React.FC<ResilientTileArtworkProps> = ({
@@ -21,6 +22,7 @@ export const ResilientTileArtwork: React.FC<ResilientTileArtworkProps> = ({
   playlistCoverId,
   playlistKind,
   onResolvedCover,
+  square = false,
 }) => {
   const cachedOverride = playlistCoverId
     ? resolvedPlaylistCoverMemoryCache.get(playlistCoverId)
@@ -84,32 +86,61 @@ export const ResilientTileArtwork: React.FC<ResilientTileArtworkProps> = ({
         loading="lazy"
         decoding="async"
         onError={handleImgError}
-        style={{
-          width: 56,
-          height: 56,
-          borderRadius: 10,
-          objectFit: 'cover',
-          border: '1px solid #262632',
-          flexShrink: 0,
-        }}
+        style={
+          square
+            ? {
+                width: '100%',
+                height: '100%',
+                aspectRatio: '1 / 1',
+                borderRadius: 7,
+                objectFit: 'cover',
+                display: 'block',
+                flexShrink: 0,
+              }
+            : {
+                width: 56,
+                height: 56,
+                borderRadius: 10,
+                objectFit: 'cover',
+                border: '1px solid #262632',
+                flexShrink: 0,
+              }
+        }
       />
     );
   }
 
   return (
     <div
-      style={{
-        width: 56,
-        height: 56,
-        borderRadius: 10,
-        background: bg,
-        border,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 22,
-        flexShrink: 0,
-      }}
+      style={
+        square
+          ? {
+              width: '100%',
+              height: '100%',
+              aspectRatio: '1 / 1',
+              borderRadius: 7,
+              background: bg,
+              border,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 32,
+              flexShrink: 0,
+              boxSizing: 'border-box',
+            }
+          : {
+              width: 56,
+              height: 56,
+              borderRadius: 10,
+              background: bg,
+              border,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 22,
+              flexShrink: 0,
+            }
+      }
     >
       {fallbackIcon}
     </div>

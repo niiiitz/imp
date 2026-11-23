@@ -136,14 +136,14 @@ export const FolderChooserModal: React.FC<FolderChooserModalProps> = ({
         style={{
           width: 'min(760px, 95vw)',
           height: 'min(540px, 86vh)',
-          borderRadius: 16,
-          background: 'linear-gradient(180deg, rgba(15, 23, 36, 0.99), rgba(9, 13, 22, 0.99))',
-          border: '1px solid rgba(52, 211, 153, 0.42)',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75), 0 0 30px rgba(52, 211, 153, 0.14)',
+          borderRadius: 10,
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.85)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          color: '#f1f5f9',
+          color: 'var(--imp-text-primary, #eef0f4)',
         }}
       >
         {/* Top Bar */}

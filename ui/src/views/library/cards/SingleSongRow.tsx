@@ -100,16 +100,18 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
         });
       }}
       style={{
-        minHeight: compact ? 46 : 54,
-        padding: compact ? '5px 8px' : '6px 10px',
-        borderRadius: compact ? 10 : 12,
-        background: track?.uri === s.uri ? '#0d1b22' : '#0a0a0e',
-        border: track?.uri === s.uri ? '1px solid #2aa3c4' : '1px solid #181822',
+        width: '100%',
+        minHeight: compact ? 50 : 54,
+        padding: compact ? '6px 8px' : '6px 10px',
+        borderRadius: compact ? 9 : 12,
+        background: track?.uri === s.uri ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+        border: track?.uri === s.uri ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         gap: compact ? 6 : 8,
         minWidth: 0,
+        overflow: 'hidden',
         boxSizing: 'border-box',
       }}
     >
@@ -166,8 +168,8 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
             alt=""
             loading="lazy"
             style={{
-              width: compact ? 34 : 40,
-              height: compact ? 34 : 40,
+              width: 40,
+              height: 40,
               borderRadius: compact ? 6 : 8,
               objectFit: 'cover',
               border: '1px solid #262632',
@@ -177,8 +179,8 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
         ) : (
           <div
             style={{
-              width: compact ? 34 : 40,
-              height: compact ? 34 : 40,
+              width: 40,
+              height: 40,
               borderRadius: compact ? 6 : 8,
               background: '#161622',
               display: 'flex',
@@ -439,9 +441,9 @@ export const SingleSongRow: React.FC<SingleSongRowProps> = ({
           style={{
             padding: compact ? '4px 8px' : '5px 9px',
             borderRadius: 8,
-            background: '#0f222a',
-            border: '1px solid #2aa3c4',
-            color: '#67e8f9',
+            background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+            color: 'var(--imp-accent-active-text, #f5e1be)',
             fontSize: compact ? 11 : 12,
             fontWeight: 800,
             cursor: 'pointer',

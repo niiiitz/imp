@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#000000" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="256x256" href="/simp-icon-256.png?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="128x128" href="/simp-icon-128.png?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="32x32" href="/simp-icon-32.png?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="16x16" href="/simp-icon-16.png?v=1.0.3" />
-    <link rel="icon" type="image/png" sizes="1024x1024" href="/simp-icon-dark.png?v=1.0.3" />
-    <link rel="apple-touch-icon" href="/simp-icon-macos-squircle.png?v=1.0.3" />
+    <meta name="theme-color" content="#121418" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="256x256" href="/simp-icon-256.png?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="128x128" href="/simp-icon-128.png?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/simp-icon-32.png?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/simp-icon-16.png?v=1.1.0-alpha.1" />
+    <link rel="icon" type="image/png" sizes="1024x1024" href="/simp-icon-dark.png?v=1.1.0-alpha.1" />
+    <link rel="apple-touch-icon" href="/simp-icon-macos-squircle.png?v=1.1.0-alpha.1" />
     <title>IMP — Interactive Media Player</title>
     <script>
       if (
@@ -32,7 +32,7 @@
         padding: 0;
         overflow: hidden;
         background: #000000;
-        color: #d4d4dc;
+        color: var(--imp-text-primary, #eef0f4);
         font-family: system-ui, -apple-system, sans-serif;
         user-select: none;
       }
@@ -46,9 +46,9 @@
       input:focus,
       select:focus,
       [data-focusable="true"]:focus {
-        outline: 2px solid #2aa3c4 !important;
+        outline: 2px solid var(--imp-focus-ring, #e8b86d) !important;
         outline-offset: 2px !important;
-        box-shadow: 0 0 0 3px rgba(42, 163, 196, 0.35) !important;
+        box-shadow: 0 0 0 3px var(--imp-focus-glow, rgba(232, 184, 109, 0.26)) !important;
       }
     </style>
   </head>

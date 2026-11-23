@@ -1,8 +1,17 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { defaultSimpClient } from '@simp/client';
+import './themeTokens.css';
 import { App } from './App';
 import { AppleMusicDriver } from './drivers/AppleMusicDriver';
+
+if (
+  typeof window !== 'undefined' &&
+  typeof document !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('sanitized') === '1'
+) {
+  document.documentElement.dataset.sanitized = '1';
+}
 
 const isDedicatedAppleWorker =
   typeof window !== 'undefined' &&
