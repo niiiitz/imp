@@ -46,13 +46,13 @@ jobs:
       - name: Run workspace clippy (locked)
         run: cargo clippy --workspace --all-targets --locked
 
-      - name: Run offline dependency & secret guard
-        run: ./scripts/audit-deps.sh --offline --strict
-
       - name: Run cargo-deny & cargo-audit
         run: |
           cargo deny check licenses bans sources
           cargo audit
+
+      - name: Run offline dependency & secret guard
+        run: ./scripts/audit-deps.sh --offline --strict
 
   ui:
     name: Web UI, Client & Decky Build + npm Audit

@@ -254,7 +254,11 @@ PY
 # 4. cargo-audit / cargo-deny / npm audit
 if command -v cargo-audit >/dev/null 2>&1; then
   if [[ "${OFFLINE}" -eq 1 ]]; then
-    cargo audit --no-fetch || [[ "${STRICT}" -eq 0 ]]
+    if [[ -d "${CARGO_HOME:-${HOME}/.cargo}/advisory-db/crates" ]]; then
+      cargo audit --no-fetch || [[ "${STRICT}" -eq 0 ]]
+    else
+      echo "ℹ Offline mode: local advisory-db not cached; skipping cargo audit --no-fetch"
+    fi
   else
     cargo audit
   fi
