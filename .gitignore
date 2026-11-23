@@ -16,7 +16,7 @@ AGENTS.md
 # Rust / Cargo / Tauri
 target/
 **/*.rs.bk
-Cargo.lock
+crates/imp-desktop/Cargo.lock
 
 # Node / Frontend
 node_modules/

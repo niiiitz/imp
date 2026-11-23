@@ -49,7 +49,6 @@ FORBIDDEN_PATTERNS=(
   '*.key'
   '*.pem'
   'AGENTS.md'
-  'Cargo.lock'
   'crates/imp-desktop/Cargo.lock'
   'dist/'
   'reference_documentation/'
