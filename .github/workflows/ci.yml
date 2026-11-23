@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust Tests, Clippy & Supply Chain Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux audio & D-Bus headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libdbus-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: Run workspace unit tests (locked)
+        run: cargo test --workspace --locked
+
+      - name: Run workspace clippy (locked)
+        run: cargo clippy --workspace --all-targets --locked
+
+      - name: Run cargo-deny & cargo-audit
+        run: |
+          cargo deny check licenses bans sources
+          cargo audit
+
+      - name: Run offline dependency & secret guard
+        run: ./scripts/audit-deps.sh --offline --strict
+
+  ui:
+    name: Web UI, Client & Decky Build + npm Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies (ignore-scripts enforced by .npmrc)
+        run: npm ci
+
+      - name: Build UI & Decky workspaces
+        run: npm run build:all
+
+      - name: Audit runtime npm dependencies
+        run: npm audit --omit=dev

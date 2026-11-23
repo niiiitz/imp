@@ -95,6 +95,7 @@ fi
 
 # 1. Create userland directories
 mkdir -p "${BIN_DEST}" "${UI_DEST}" "${INSTALL_ROOT}/lib" "${LOCAL_BIN}" "${SYSTEMD_USER_DIR}" "${APPLICATIONS_DIR}"
+chmod 0700 "${INSTALL_ROOT}"
 if [[ -d "${SCRIPT_DIR}/lib" ]]; then
   cp -f "${SCRIPT_DIR}/lib/"* "${INSTALL_ROOT}/lib/" >/dev/null 2>&1 || true
 fi
@@ -323,6 +324,7 @@ fi
 
 # 6. Install and start systemd user service
 cp "${SERVICE_SRC}" "${SYSTEMD_USER_DIR}/imp.service"
+chmod 0644 "${SYSTEMD_USER_DIR}/imp.service"
 
 # Ensure all userland directories and files belong to REAL_USER (even if script was run with `sudo`)
 if [[ "${EUID:-$(id -u)}" -eq 0 && "${REAL_USER}" != "root" ]]; then

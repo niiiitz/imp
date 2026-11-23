@@ -1,0 +1,114 @@
+name: Weekly Dependency Refresh
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      base_branch:
+        description: Target branch for the refresh PR
+        required: true
+        default: develop
+        type: string
+      cooldown_days:
+        description: Minimum release age in days before accepting updates
+        required: true
+        default: "14"
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dep-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  refresh-and-verify:
+    name: Refresh Dependencies (14d Cooldown + Full Gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base_branch || 'develop' }}
+          fetch-depth: 0
+
+      - name: Install Linux audio & D-Bus headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev libdbus-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: Install current npm tree (respecting .npmrc ignore-scripts)
+        run: npm ci
+
+      - name: Refresh lockfiles with cooldown filter
+        env:
+          COOLDOWN_DAYS: ${{ inputs.cooldown_days || '14' }}
+        run: |
+          python3 scripts/refresh-deps.py \
+            --cooldown-days "${COOLDOWN_DAYS}" \
+            --summary-out /tmp/dep-refresh-summary.md
+
+      - name: Check whether lockfiles changed
+        id: diff_check
+        run: |
+          if git diff --quiet Cargo.lock package-lock.json; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "No eligible dependency updates passed the cooldown filter."
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Run full verification & audit gate before opening PR
+        if: steps.diff_check.outputs.changed == 'true'
+        env:
+          IMP_DEP_COOLDOWN_DAYS: ${{ inputs.cooldown_days || '14' }}
+        run: |
+          ./scripts/audit-deps.sh --strict
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked
+          cargo deny check licenses bans sources
+          cargo audit
+          npm ci
+          npm run build:all
+          npm audit --omit=dev
+
+      - name: Create or update weekly dependency refresh PR
+        if: steps.diff_check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ inputs.base_branch || 'develop' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B chore/weekly-deps
+          git add Cargo.lock package-lock.json
+          git commit -m "chore(deps): weekly cooldown-gated dependency refresh"
+          git push --force origin chore/weekly-deps
+
+          EXISTING_PR="$(gh pr list --head chore/weekly-deps --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "${EXISTING_PR}" ]]; then
+            gh pr edit "${EXISTING_PR}" --title "chore(deps): weekly dependency refresh" --body-file /tmp/dep-refresh-summary.md
+          else
+            gh pr create \
+              --base "${BASE_BRANCH}" \
+              --head chore/weekly-deps \
+              --title "chore(deps): weekly dependency refresh" \
+              --body-file /tmp/dep-refresh-summary.md
+          fi
