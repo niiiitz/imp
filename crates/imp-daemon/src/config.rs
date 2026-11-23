@@ -92,6 +92,28 @@ mod tests {
         );
         assert!(parsed.library.initial_scan_completed);
         assert!(!parsed.library.scan_steam_osts);
+        assert!(parsed.provisioning.fetch_lyrics_online);
+        assert!(parsed.provisioning.fetch_artwork_online);
+        assert!(parsed.provisioning.fetch_factoids_online);
+        assert!(parsed.provisioning.fetch_disc_metadata_online);
+        assert!(parsed.provisioning.fetch_sc_comments_online);
+
+        cfg.provisioning.fetch_lyrics_online = false;
+        cfg.provisioning.fetch_artwork_online = false;
+        cfg.provisioning.fetch_factoids_online = false;
+        cfg.provisioning.fetch_disc_metadata_online = false;
+        cfg.provisioning.fetch_sc_comments_online = false;
+        cfg.provisioning.update_channel = "off".to_string();
+        let privacy_vdf = keyvalues_serde::to_string_with_key(&cfg, "SimpSettings")
+            .expect("serialize settings.vdf with privacy policy");
+        let parsed_privacy: SimpSettings =
+            keyvalues_serde::from_str(&privacy_vdf).expect("deserialize privacy settings");
+        assert!(!parsed_privacy.provisioning.fetch_lyrics_online);
+        assert!(!parsed_privacy.provisioning.fetch_artwork_online);
+        assert!(!parsed_privacy.provisioning.fetch_factoids_online);
+        assert!(!parsed_privacy.provisioning.fetch_disc_metadata_online);
+        assert!(!parsed_privacy.provisioning.fetch_sc_comments_online);
+        assert_eq!(parsed_privacy.provisioning.update_channel, "off");
     }
 }
 

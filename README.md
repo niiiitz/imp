@@ -5,14 +5,14 @@
 
   **A lightweight, controller-first & desktop-native audio and video player for SteamOS, Linux, macOS, Windows, and SteamVR.**
 
-  [![Status: v1.0.3](https://img.shields.io/badge/status-v1.0.3-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
+  [![Status: v1.1.0-alpha.1](https://img.shields.io/badge/status-v1.1.0--alpha.1-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
   [![Platforms: SteamOS | Linux | macOS | Windows | SteamVR](https://img.shields.io/badge/platforms-SteamOS%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20SteamVR-000000?style=flat-square)](#installation)
   [![Backend: 100% Native Rust](https://img.shields.io/badge/backend-Native%20Rust-dea584?style=flat-square)](#development--building-from-source)
 </div>
 
 ---
 
-## ⬇️ Download IMP (`v1.0.3`)
+## ⬇️ Download IMP (`v1.1.0-alpha.1`)
 
 Grab the ready-to-run installer or portable bundle for your platform directly below (or browse **[All Releases](https://github.com/niiiitz/imp/releases)**):
 
@@ -32,11 +32,11 @@ Playing your own music, soundtracks, and video across a Steam Deck, desktop, liv
 
 **IMP** pairs a tiny native Rust media daemon with a high-contrast, OLED-friendly interface built for gamepads, VR pointers, and mouse & keyboard alike.
 
-| <a href="docs/screenshots/library_queue.png"><img src="docs/screenshots/library_queue.png" alt="IMP Unified Library and Hybrid Playlists" width="100%" /></a> | <a href="docs/screenshots/lyrics_viz.png"><img src="docs/screenshots/lyrics_viz.png" alt="IMP Audio Visualizers and Live Synced Lyrics" width="100%" /></a> |
+| <a href="docs/screenshots/library_queue.png"><img src="docs/screenshots/library_queue.png" alt="IMP Unified Library and Horizontal Shelves" width="100%" /></a> | <a href="docs/screenshots/lyrics_viz.png"><img src="docs/screenshots/lyrics_viz.png" alt="IMP Audio Visualizers and Live Synced Lyrics" width="100%" /></a> |
 | :---: | :---: |
-| **Unified Library & Hybrid Playlists**<br><sub>Local media, Steam OSTs, Apple Music, SoundCloud, Internet Archive & Optical Discs</sub> | **Audio Visualizers & Synced Lyrics (`LRCLIB`)**<br><sub>12 built-in High-DPI reactive visualizers (`Glyph`, `AVS`, `64K`, `Vertigo`, `Trapper`, `Rhythm Stage`, `Midnight Mountain`, `Cosmic Warp`, `Coral Reef`, `Retro Arcade`, `Vaporwave`, `Dark Fantasy Sanctum`)</sub> |
-| <a href="docs/screenshots/video_theatre.png"><img src="docs/screenshots/video_theatre.png" alt="IMP Video Theatre Mode" width="100%" /></a> | <a href="docs/screenshots/player_with_select_overlay.png"><img src="docs/screenshots/player_with_select_overlay.png" alt="IMP SELECT Quick Menu and Track Actions" width="100%" /></a> |
-| **Card & Full-Viewport Video Theatre**<br><sub>Stream quality & subtitle switching with auto-hiding HUD</sub> | **`SELECT` Quick Menu & Track Actions**<br><sub>Queue next, route to Hybrid Playlists, jump to album/artist, and toggle visualizers & lyrics</sub> |
+| **Studio Graphite Library & `See All ›` Grids**<br><sub>Local media, Steam OSTs, Apple Music, SoundCloud, Internet Archive & Optical Discs</sub> | **Audio Visualizers & Synced Lyrics (`LRCLIB`)**<br><sub>12 High-DPI scenes (20/30/40/Uncapped FPS pacing) with Stats HUD and OLED black floors</sub> |
+| <a href="docs/screenshots/player_with_select_overlay.png"><img src="docs/screenshots/player_with_select_overlay.png" alt="IMP 3-Column XMB START Menu" width="100%" /></a> | <a href="docs/screenshots/settings_sources.png"><img src="docs/screenshots/settings_sources.png" alt="IMP Networked Retrieval Privacy Controls" width="100%" /></a> |
+| **3-Column XMB `START` Menu & `UI Scale`**<br><sub>Unified Display, Audio & Sources, and System & Network navigation with `100%–175%` scaling</sub> | **Granular Privacy & Account Controls**<br><sub>5 independent `Networked Retrieval` toggles (Lyrics, Artwork, Factoids, Track Data, Comments)</sub> |
 
 ---
 
@@ -44,11 +44,11 @@ Playing your own music, soundtracks, and video across a Steam Deck, desktop, liv
 
 <img src="docs/imp-mascot-slouched.png" align="right" width="220" alt="IMP Mascot" />
 
-* **One Queue for Audio & Video (`★ Hybrid Playlists`):** Mix local music & video files, **Steam Soundtracks**, **Apple Music**, **SoundCloud** tracks & DJ mixes, **Internet Archive** films & live concerts, and physical **Audio CDs / DVDs** inside a single playlist.
-* **12 Reactive High-DPI Visualizers & Live Synced Lyrics (`LRCLIB`):** Cycle through 12 built-in real-time visualizers (**`Glyph`**, **`AVS`**, **`64K`**, **`Vertigo`**, **`Trapper`**, **`Rhythm Stage`**, **`Midnight Mountain`**, **`Cosmic Warp`**, **`Coral Reef`**, **`Retro Arcade`**, **`Y2K Vaporwave`**, and **`Dark Fantasy Sanctum`**) paired with automatic time-synced lyrics, timed `@username` SoundCloud comments, retro VHS track chyrons, and interactive waveform scrubbing.
+* **One Queue for Audio & Video (`★ Hybrid Playlists`):** Mix local music & video files, **Steam Soundtracks**, **Apple Music**, **SoundCloud** tracks & DJ mixes, **Internet Archive** films & live concerts, and physical **Audio CDs / DVDs** inside a single playlist, browsed via 1-row square-tile shelves with **`See All ›`** grid pop-outs.
+* **12 Reactive Visualizers & Live Synced Lyrics (`LRCLIB`):** Gaming-friendly **30 FPS** default (`20 / 30 / 40 / Uncapped`) with optional unfocused pause, time-synced lyrics, timed `@username` SoundCloud comments, retro VHS track chyrons, interactive waveform scrubbing, and Stats HUD.
 * **Card & Theatre Video Player:** Watch video inside the Now Playing card or expand into full-viewport **Theatre Mode** (`F`) with stream quality and subtitle selection. Flip back to your library (`L1`/`R1`) and audio continues seamlessly.
-* **Pin Only What You Want (`📌`):** Browse cloud catalogs and local folders on demand, and pin individual albums, movies, or playlists into your **IMP Library** for instant access.
-* **Controller-First, Mouse & Keyboard Ready:** Inspired by the PlayStation 3 XrossMediaBar (XMB) for effortless D-Pad navigation, while automatically switching to a clean pointer & keyboard UI (`Space` Play/Pause, `/` search, media keys) when you move a mouse.
+* **Granular Privacy & 3-Column XMB (`START`):** Independently gate outbound network lookups (**Lyrics**, **Artwork**, **Factoids**, **Album/DVD Track Data**, **SoundCloud Comments**), tune **UI Scale** (`Auto / 100%–175%`), and pin only the collections you want.
+* **Controller-First, Focus-Isolated & Desktop Ready:** Neutral Studio Graphite UI with focus-isolated gamepad polling on SteamOS, Gamescope, and SteamVR, switching seamlessly to mouse & keyboard (`Space` Play/Pause, `/` search, media keys).
 * **Tiny Native Rust Daemon:** Runs in the background (`~5 MB` binary) with native OS integration — **Linux `MPRIS2` & System Tray**, **macOS Menu Bar & Control Center (`MPNowPlayingInfoCenter`)**, **Windows System Tray**, and **SteamVR Dashboard Overlay**. Close the window and your media keeps playing.
 
 <br clear="right" />
@@ -66,7 +66,7 @@ Playing your own music, soundtracks, and video across a Steam Deck, desktop, liv
 
 ## Installation
 
-Grab the package for your platform from the **[latest GitHub Release (`v1.0.3`)](https://github.com/niiiitz/imp/releases/latest)**:
+Grab the package for your platform from the **[latest GitHub Release (`v1.1.0-alpha.1`)](https://github.com/niiiitz/imp/releases/latest)**:
 
 ### SteamOS / Bazzite / Linux (`x86_64` & `aarch64`)
 

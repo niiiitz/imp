@@ -2,6 +2,7 @@ import React from 'react';
 import { defaultSimpClient, TrackMetadata } from '@simp/client';
 import { ImpIcon } from './icons/ImpIcon';
 import { StatsHudPill } from './StatsHudPill';
+import { useUiScale } from '../theme/uiScale';
 
 export interface AppTopHeaderBarProps {
   isNavBarHidden: boolean;
@@ -46,11 +47,14 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
   powerModalOpen,
   desktopMode = false,
 }) => {
+  const { scale: uiScale } = useUiScale();
+
   return (
     <>
       <header
         style={{
           height: 56,
+          zoom: uiScale !== 1 ? uiScale : undefined,
           boxSizing: 'border-box',
           padding: '0 20px',
           borderBottom: isNavBarHidden
@@ -78,24 +82,21 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             setVolumePopoverOpen(false);
             setBrightnessPopoverOpen(false);
             setPowerModalOpen(false);
+            if (!track) {
+              setSourceModalOpen((v) => !v);
+              return;
+            }
             setSourceModalOpen(false);
-            if (desktopMode) {
-              if (!track) {
-                window.dispatchEvent(
-                  new CustomEvent('simp-select-category-focus', {
-                    detail: { category: 'interface' },
-                  })
-                );
-              }
-            } else if (view !== 'lock') {
+            if (!desktopMode && view !== 'lock') {
               setView('lock');
             }
             window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
           }}
-          title="Track Options, Visualizer & Active Queue (SELECT)"
+          title={track ? 'Track Options & Queue (SELECT)' : 'Open IMP Menu (START)'}
           style={{
             minHeight: 38,
-            maxWidth: 'clamp(190px, 32vw, 380px)',
+            maxWidth: 'clamp(140px, 26%, 320px)',
+            flexShrink: 1,
             padding: '0 10px',
             borderRadius: 8,
             background: 'var(--imp-surface-card, #1a1d24)',
@@ -316,7 +317,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                 gap: 5,
               }}
             >
-              <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
+              <ImpIcon name={!isPlaying ? 'volume-mute' : 'volume'} size={14} />
               {!isPlaying && (
                 <span style={{ fontSize: 10, letterSpacing: 0.4, color: '#9ca3af' }}>PAUSED</span>
               )}
@@ -470,7 +471,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                 gap: 5,
               }}
             >
-              <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
+              <ImpIcon name={brightnessPct >= 50 ? 'sun' : 'moon'} size={13} />
               <span>{brightnessPct}%</span>
               <span style={{ fontSize: 10, color: '#71717a' }}>▾</span>
             </button>

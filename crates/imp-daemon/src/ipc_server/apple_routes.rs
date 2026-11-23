@@ -417,3 +417,44 @@ pub(super) async fn apple_playlist_create_handler(
     }
 }
 
+pub(super) async fn apple_recent_played_handler(
+    State(state): State<DaemonIpcState>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap().clone();
+    let offset = params
+        .get("offset")
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    let kind = params.get("kind").map(|s| s.as_str()).unwrap_or("items");
+    if kind == "tracks" {
+        let res = tokio::task::spawn_blocking(move || {
+            imp_core::sinks::apple_api::fetch_recent_played_tracks_page(&cfg, offset)
+        })
+        .await;
+        match res {
+            Ok(Ok((tracks, next_offset))) => Json(serde_json::json!({
+                "ok": true,
+                "tracks": tracks,
+                "next_offset": next_offset,
+            })),
+            Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+            Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        }
+    } else {
+        let res = tokio::task::spawn_blocking(move || {
+            imp_core::sinks::apple_api::fetch_recent_played_items_page(&cfg, offset)
+        })
+        .await;
+        match res {
+            Ok(Ok((shelf, next_offset))) => Json(serde_json::json!({
+                "ok": true,
+                "shelf": shelf,
+                "next_offset": next_offset,
+            })),
+            Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+            Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        }
+    }
+}
+

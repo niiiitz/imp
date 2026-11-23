@@ -180,6 +180,10 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/update/check", get(update_check_handler))
         .route("/api/update/channel", post(update_channel_handler))
         .route("/api/update/apply", post(update_apply_handler))
+        .route(
+            "/api/settings/privacy",
+            get(settings_privacy_get_handler).post(settings_privacy_post_handler),
+        )
         .route("/api/v1/transport", post(transport_handler))
         .route("/api/apple/playlists", get(apple_playlists_handler))
         .route("/api/apple/playlist-add-tracks", post(apple_playlist_add_tracks_handler))
@@ -189,6 +193,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/apple/playlist-cover", get(apple_playlist_cover_handler))
         .route("/api/apple/full-album", get(apple_full_album_handler))
         .route("/api/apple/radio", get(apple_radio_handler))
+        .route("/api/apple/recent-played", get(apple_recent_played_handler))
         .route("/api/apple/new", get(apple_new_handler))
         .route("/api/apple/search", get(apple_search_handler))
         .route("/api/apple/artist", get(apple_artist_handler))
@@ -430,7 +435,11 @@ async fn update_check_handler(State(state): State<DaemonIpcState>) -> impl IntoR
             "release_url": status.release_url,
             "published_at": status.published_at,
             "target_arch": status.target_arch,
-            "channel": status.channel,
+            "channel": if channel.trim().eq_ignore_ascii_case("off") {
+                "off".to_string()
+            } else {
+                status.channel
+            },
         })),
         Ok(Err(e)) => Json(serde_json::json!({
             "ok": false,
@@ -458,8 +467,11 @@ async fn update_channel_handler(
     State(state): State<DaemonIpcState>,
     Json(payload): Json<UpdateChannelPayload>,
 ) -> impl IntoResponse {
-    let channel = if payload.channel.trim().eq_ignore_ascii_case("alpha") {
+    let trimmed = payload.channel.trim();
+    let channel = if trimmed.eq_ignore_ascii_case("alpha") {
         "alpha".to_string()
+    } else if trimmed.eq_ignore_ascii_case("off") {
+        "off".to_string()
     } else {
         "stable".to_string()
     };
@@ -533,5 +545,68 @@ async fn update_apply_handler() -> impl IntoResponse {
             "error": e.to_string(),
         })),
     }
+}
+
+async fn settings_privacy_get_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
+    let cfg = state.settings.lock().unwrap();
+    Json(serde_json::json!({
+        "ok": true,
+        "fetch_lyrics_online": cfg.provisioning.fetch_lyrics_online,
+        "fetch_artwork_online": cfg.provisioning.fetch_artwork_online,
+        "fetch_factoids_online": cfg.provisioning.fetch_factoids_online,
+        "fetch_disc_metadata_online": cfg.provisioning.fetch_disc_metadata_online,
+        "fetch_sc_comments_online": cfg.provisioning.fetch_sc_comments_online,
+        "update_channel": cfg.provisioning.update_channel,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct PrivacySettingsPayload {
+    fetch_lyrics_online: Option<bool>,
+    fetch_artwork_online: Option<bool>,
+    fetch_factoids_online: Option<bool>,
+    fetch_disc_metadata_online: Option<bool>,
+    fetch_sc_comments_online: Option<bool>,
+}
+
+async fn settings_privacy_post_handler(
+    State(state): State<DaemonIpcState>,
+    Json(payload): Json<PrivacySettingsPayload>,
+) -> impl IntoResponse {
+    let policy = {
+        let mut cfg = state.settings.lock().unwrap();
+        if let Some(v) = payload.fetch_lyrics_online {
+            cfg.provisioning.fetch_lyrics_online = v;
+        }
+        if let Some(v) = payload.fetch_artwork_online {
+            cfg.provisioning.fetch_artwork_online = v;
+        }
+        if let Some(v) = payload.fetch_factoids_online {
+            cfg.provisioning.fetch_factoids_online = v;
+        }
+        if let Some(v) = payload.fetch_disc_metadata_online {
+            cfg.provisioning.fetch_disc_metadata_online = v;
+        }
+        if let Some(v) = payload.fetch_sc_comments_online {
+            cfg.provisioning.fetch_sc_comments_online = v;
+        }
+        let _ = crate::config::save_settings(&cfg);
+        imp_core::OnlineRetrievalPolicy {
+            lyrics: cfg.provisioning.fetch_lyrics_online,
+            artwork: cfg.provisioning.fetch_artwork_online,
+            factoids: cfg.provisioning.fetch_factoids_online,
+            disc_metadata: cfg.provisioning.fetch_disc_metadata_online,
+            sc_comments: cfg.provisioning.fetch_sc_comments_online,
+        }
+    };
+    imp_core::set_online_retrieval_policy(policy);
+    Json(serde_json::json!({
+        "ok": true,
+        "fetch_lyrics_online": policy.lyrics,
+        "fetch_artwork_online": policy.artwork,
+        "fetch_factoids_online": policy.factoids,
+        "fetch_disc_metadata_online": policy.disc_metadata,
+        "fetch_sc_comments_online": policy.sc_comments,
+    }))
 }
 

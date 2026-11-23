@@ -6,6 +6,7 @@ import {
   TrackMetadata,
 } from '@simp/client';
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
+import { ImpIcon } from '../../components/icons/ImpIcon';
 import { type TrackLyricsResponse } from '../../drivers/appleApi';
 import { type ImpSourceTheme } from '../../theme/sourceTheme';
 
@@ -172,19 +173,19 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
         }}
       >
         <TransportIconButton
-          icon="🔀"
+          icon={<ImpIcon name="shuffle" size={20} />}
           badge="X"
           title={snap?.shuffle ? 'Shuffle: On' : 'Shuffle: Off'}
           active={!!snap?.shuffle}
           onClick={() => defaultSimpClient.setShuffle(!snap?.shuffle)}
         />
         <TransportIconButton
-          icon="⏪"
+          icon={<ImpIcon name="rewind" size={20} />}
           badge="L2"
           onClick={() => defaultSimpClient.seekRelative(-10_000)}
         />
         <TransportIconButton
-          icon="⏮"
+          icon={<ImpIcon name="skip-back" size={20} />}
           badge="◄"
           onClick={() => defaultSimpClient.previous()}
         />
@@ -211,8 +212,15 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
             fontWeight: 900,
           }}
         >
-          <span style={{ fontSize: 28, color: isPlaying ? playerTheme.accent : '#d4d4dc' }}>
-            {isPlaying ? '⏸' : '▶'}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: isPlaying ? playerTheme.accent : '#d4d4dc',
+            }}
+          >
+            <ImpIcon name={isPlaying ? 'pause' : 'play'} size={26} />
           </span>
           <span
             className="simp-gp-badge"
@@ -223,23 +231,27 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
               color: isPlaying ? playerTheme.accent : '#a1a1aa',
               fontSize: 11,
               fontFamily: 'monospace',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
             }}
           >
-            {isPlaying ? 'A • 🔊' : 'A • 🔇'}
+            <span>A •</span>
+            <ImpIcon name={isPlaying ? 'volume' : 'volume-mute'} size={11} />
           </span>
         </button>
         <TransportIconButton
-          icon="⏭"
+          icon={<ImpIcon name="skip-forward" size={20} />}
           badge="►"
           onClick={() => defaultSimpClient.next()}
         />
         <TransportIconButton
-          icon="⏩"
+          icon={<ImpIcon name="fast-forward" size={20} />}
           badge="R2"
           onClick={() => defaultSimpClient.seekRelative(10_000)}
         />
         <TransportIconButton
-          icon="🔁"
+          icon={<ImpIcon name="repeat" size={20} />}
           badge={
             snap?.repeat_mode === 'track'
               ? 'Y•1'
@@ -596,7 +608,7 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
 };
 
 export interface TransportBtnProps {
-  icon: string;
+  icon: React.ReactNode;
   badge: string;
   overlayBadge?: string | null;
   title?: string;

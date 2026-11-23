@@ -11,9 +11,11 @@ import {
 import { ImpIcon } from '../../../components/icons/ImpIcon';
 import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
 import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
-import { SourceVisibilityPrefs } from '../../SettingsModal';
+import type { SourceVisibilityPrefs } from '../../../menu/menuCorpus';
 import type { LibraryContextTarget } from '../../LibraryBrowserView';
+import { HorizontalShelfRail } from '../HorizontalShelfRail';
 import { CollapsibleSectionHeader, FilterTriggerButton } from '../PinnableSectionHeader';
+import { CollectionTileCard } from '../cards/CollectionTileCard';
 
 export interface ImpFypPaneProps {
   browserSourceFilter: 'all' | 'local' | 'apple_music' | 'soundcloud' | 'internet_archive';
@@ -60,7 +62,6 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
   onOpenFilters,
   snap,
   localDiscover,
-  tileGridStyle,
   renderSingleSongRow,
   renderSimpAlbumCard,
   renderSimpPlaylistCard,
@@ -85,24 +86,6 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
     restoreDefaultShelves,
   } = useFypShelves();
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [expandedTrackShelves, setExpandedTrackShelves] = useState<Record<string, boolean>>({});
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [gridCols, setGridCols] = useState<number>(3);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const updateCols = (w: number) => {
-      const next = w >= 620 ? 3 : w >= 400 ? 2 : 1;
-      setGridCols((prev) => (prev === next ? prev : next));
-    };
-    updateCols(el.clientWidth);
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) updateCols(e.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   // Viewport-Lazy Stale-While-Revalidate via IntersectionObserver
   const descriptorsByElRef = useRef<Map<Element, FypShelfDescriptor>>(new Map());
@@ -201,17 +184,8 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
   };
 
   const renderLocalSmartStationCard = (st: LocalSmartStation, shelfUid: string) => {
-    const firstTrack = st.tracks[0];
-    return (
-      <div
-        key={st.id}
-        data-right-tile="true"
-        data-tile-key={`fyp:${shelfUid}:station:${st.id}`}
-        role="button"
-        tabIndex={0}
-        onContextMenu={(e) => {
-          if (!openLibraryContextMenu) return;
-          e.preventDefault();
+    const openCtx = openLibraryContextMenu
+      ? () =>
           openLibraryContextMenu({
             type: 'collection',
             kind: 'local_station',
@@ -221,55 +195,43 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
             art_url: st.art_url,
             source: 'local',
             rawItem: st,
-          });
-        }}
-        onClick={() => onPlayLocalSmartStation(st, false)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            onPlayLocalSmartStation(st, false);
-          }
-        }}
-        style={{
-          position: 'relative',
-          borderRadius: 14,
-          background: 'linear-gradient(155deg, #0d1d1c 0%, #090d14 100%)',
-          border: '1px solid #1e3a38',
-          padding: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          cursor: 'pointer',
-          minWidth: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          {st.art_url ? (
+          })
+      : undefined;
+
+    return (
+      <CollectionTileCard
+        key={st.id}
+        tileKey={`fyp:${shelfUid}:station:${st.id}`}
+        selectedBg="#0f2926"
+        selectedBorder="1px solid #14b8a6"
+        title={st.title}
+        subtitle={`${st.track_count} tracks • ${st.subtitle}`}
+        artwork={
+          st.art_url ? (
             <img
               src={st.art_url}
               alt=""
               loading="lazy"
               style={{
-                width: 52,
-                height: 52,
-                borderRadius: 10,
+                width: '100%',
+                height: '100%',
+                aspectRatio: '1 / 1',
+                borderRadius: 7,
                 objectFit: 'cover',
-                border: '1px solid #2dd4bf',
-                flexShrink: 0,
+                display: 'block',
               }}
             />
           ) : (
             <div
               style={{
-                width: 52,
-                height: 52,
-                borderRadius: 10,
+                width: '100%',
+                height: '100%',
+                aspectRatio: '1 / 1',
+                borderRadius: 7,
                 background: '#112927',
-                border: '1px solid #2dd4bf',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flexShrink: 0,
               }}
             >
               <ImpIcon
@@ -280,95 +242,17 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                       ? 'disc'
                       : 'radio'
                 }
-                size={22}
+                size={28}
                 color="#5eead4"
               />
             </div>
-          )}
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 800,
-                color: '#ecfeff',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {st.title}
-            </div>
-            <div
-              style={{
-                fontSize: 11,
-                color: '#94a3b8',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                marginTop: 2,
-              }}
-            >
-              {st.subtitle}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                fontFamily: 'monospace',
-                color: '#5eead4',
-                marginTop: 3,
-              }}
-            >
-              {st.track_count} tracks
-              {firstTrack ? ` • ${firstTrack.title}` : ''}
-            </div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            data-row-aux="true"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPlayLocalSmartStation(st, false);
-            }}
-            style={{
-              flex: 1,
-              minHeight: 30,
-              borderRadius: 8,
-              background: '#0f2926',
-              border: '1px solid #14b8a6',
-              color: '#ccfbf1',
-              fontSize: 11,
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            ▶ Play Station
-          </button>
-          <button
-            type="button"
-            data-row-aux="true"
-            onClick={(e) => {
-              e.stopPropagation();
-              onPlayLocalSmartStation(st, true);
-            }}
-            title="Shuffle Smart Station"
-            style={{
-              minHeight: 30,
-              padding: '0 10px',
-              borderRadius: 8,
-              background: '#111622',
-              border: '1px solid #263145',
-              color: '#cbd5e1',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            🔀
-          </button>
-        </div>
-      </div>
+          )
+        }
+        badge="Mix"
+        badgeStyle={{ color: '#5eead4' }}
+        onSelect={() => onPlayLocalSmartStation(st, false)}
+        onOpenContextMenu={openCtx}
+      />
     );
   };
 
@@ -401,103 +285,55 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
     switch (descriptor.itemKind) {
       case 'tracks': {
         const tracks = items as TrackMetadata[];
-        const pageCap = 3 * gridCols;
-        const expanded = Boolean(expandedTrackShelves[descriptor.shelfUid]);
-        const hasOverflow = tracks.length > pageCap;
-        const visibleTracks = expanded ? tracks : tracks.slice(0, pageCap);
-        const rowCount = Math.min(3, Math.max(1, Math.ceil(visibleTracks.length / gridCols)));
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div
-              style={
-                !expanded
-                  ? {
-                      display: 'grid',
-                      gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
-                      gridTemplateRows: `repeat(${rowCount}, auto)`,
-                      gridAutoFlow: 'column',
-                      gap: 8,
-                    }
-                  : {
-                      display: 'grid',
-                      gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`,
-                      gap: 8,
-                    }
-              }
-            >
-              {visibleTracks.map((t) =>
-                renderSingleSongRow(t, tracks, `fyp:${descriptor.shelfUid}`, true)
-              )}
-            </div>
-            {hasOverflow && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  data-focusable="true"
-                  onClick={() =>
-                    setExpandedTrackShelves((prev) => ({
-                      ...prev,
-                      [descriptor.shelfUid]: !prev[descriptor.shelfUid],
-                    }))
-                  }
-                  style={{
-                    minHeight: 28,
-                    padding: '0 10px',
-                    borderRadius: 8,
-                    background: '#10141e',
-                    border: '1px solid #263145',
-                    color: '#93c5fd',
-                    fontSize: 11,
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {expanded
-                    ? 'Show Fewer ▴'
-                    : `Browse More (${tracks.length - pageCap} more) ▾`}
-                </button>
-              </div>
+          <HorizontalShelfRail variant="tracks" itemCount={tracks.length}>
+            {tracks.map((t) =>
+              renderSingleSongRow(t, tracks, `fyp:${descriptor.shelfUid}`, true)
             )}
-          </div>
+          </HorizontalShelfRail>
         );
       }
       case 'stations': {
         if (descriptor.provider === 'local') {
           return (
-            <div style={tileGridStyle}>
+            <HorizontalShelfRail variant="tiles" itemCount={items.length}>
               {(items as LocalSmartStation[]).map((st) =>
                 renderLocalSmartStationCard(st, descriptor.shelfUid)
               )}
-            </div>
+            </HorizontalShelfRail>
           );
         }
-        return <div style={tileGridStyle}>{items.map(renderStationCard)}</div>;
+        return (
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
+            {items.map(renderStationCard)}
+          </HorizontalShelfRail>
+        );
       }
       case 'albums': {
         return (
-          <div style={tileGridStyle}>
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
             {descriptor.provider === 'apple_music'
               ? items.map(renderCloudAlbumCard)
               : descriptor.provider === 'soundcloud'
                 ? items.map(renderSoundCloudPlaylistCard)
                 : items.map(renderSimpAlbumCard)}
-          </div>
+          </HorizontalShelfRail>
         );
       }
       case 'playlists': {
         return (
-          <div style={tileGridStyle}>
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
             {descriptor.provider === 'apple_music'
               ? items.map(renderCloudPlaylistCard)
               : descriptor.provider === 'soundcloud'
                 ? items.map(renderSoundCloudPlaylistCard)
                 : items.map(renderSimpPlaylistCard)}
-          </div>
+          </HorizontalShelfRail>
         );
       }
       case 'artists': {
         return (
-          <div style={tileGridStyle}>
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
             {descriptor.provider === 'apple_music'
               ? items.map(renderAppleArtistCard)
               : descriptor.provider === 'soundcloud'
@@ -505,29 +341,32 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 : items.map((item: any) =>
                     renderLocalArtistCard(typeof item === 'string' ? item : item?.name || '')
                   )}
-          </div>
+          </HorizontalShelfRail>
         );
       }
       case 'ia_items':
-        return <div style={tileGridStyle}>{items.map(renderArchiveItemCard)}</div>;
+        return (
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
+            {items.map(renderArchiveItemCard)}
+          </HorizontalShelfRail>
+        );
       case 'mixed':
       default:
         return (
-          <div style={tileGridStyle}>
+          <HorizontalShelfRail variant="tiles" itemCount={items.length}>
             {items.map((item: any) => {
               const kind = item?._fypKind;
               if (kind === 'station') return renderStationCard(item);
               if (kind === 'album' || item?.artist_name) return renderCloudAlbumCard(item);
               return renderCloudPlaylistCard(item);
             })}
-          </div>
+          </HorizontalShelfRail>
         );
     }
   };
 
   return (
     <div
-      ref={containerRef}
       style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0, width: '100%' }}
     >
       {/* Top Imp FYP Header Bar */}

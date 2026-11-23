@@ -370,6 +370,52 @@ export const DEFAULT_STARTER_FYP_DESCRIPTORS: FypShelfDescriptor[] = [
 ];
 
 export function mapAppleShelfToFypItems(shelf: AppleRecommendationShelf): unknown[] {
+  if (shelf.item_order && shelf.item_order.length > 0) {
+    const stationMap = new Map((shelf.stations || []).map((st) => [st.id, st]));
+    const playlistMap = new Map((shelf.playlists || []).map((pl) => [pl.id, pl]));
+    const albumMap = new Map((shelf.albums || []).map((alb) => [alb.id, alb]));
+    const usedSt = new Set<string>();
+    const usedPl = new Set<string>();
+    const usedAlb = new Set<string>();
+    const ordered: unknown[] = [];
+
+    for (const token of shelf.item_order) {
+      if (token.startsWith('station:')) {
+        const id = token.slice('station:'.length);
+        const st = stationMap.get(id);
+        if (st && !usedSt.has(id)) {
+          usedSt.add(id);
+          ordered.push({ ...st, _fypKind: 'station' as const });
+        }
+      } else if (token.startsWith('playlist:')) {
+        const id = token.slice('playlist:'.length);
+        const pl = playlistMap.get(id);
+        if (pl && !usedPl.has(id)) {
+          usedPl.add(id);
+          ordered.push({ ...pl, _fypKind: 'playlist' as const });
+        }
+      } else if (token.startsWith('album:')) {
+        const id = token.slice('album:'.length);
+        const alb = albumMap.get(id);
+        if (alb && !usedAlb.has(id)) {
+          usedAlb.add(id);
+          ordered.push({ ...alb, _fypKind: 'album' as const });
+        }
+      }
+    }
+
+    for (const st of shelf.stations || []) {
+      if (!usedSt.has(st.id)) ordered.push({ ...st, _fypKind: 'station' as const });
+    }
+    for (const pl of shelf.playlists || []) {
+      if (!usedPl.has(pl.id)) ordered.push({ ...pl, _fypKind: 'playlist' as const });
+    }
+    for (const alb of shelf.albums || []) {
+      if (!usedAlb.has(alb.id)) ordered.push({ ...alb, _fypKind: 'album' as const });
+    }
+    return ordered;
+  }
+
   return [
     ...(shelf.stations || []).map((st) => ({ ...st, _fypKind: 'station' as const })),
     ...(shelf.playlists || []).map((pl) => ({ ...pl, _fypKind: 'playlist' as const })),

@@ -9,6 +9,7 @@ import { LibraryContextTarget } from '../../LibraryBrowserView';
 import { iaItemCountCache, iaItemRatingCache } from '../libraryHelpers';
 import { ContentRatingBadge } from '../ContentRatingBadge';
 import { ResilientTileArtwork } from '../ResilientTileArtwork';
+import { CollectionTileCard } from './CollectionTileCard';
 import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
 import { ImpIcon } from '../../../components/icons/ImpIcon';
 
@@ -29,177 +30,48 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
   browserTarget,
   selectSoundCloudPlaylist,
   openLibraryContextMenu,
-  handleAddSoundCloudPlaylistToHybrid,
-  handleDeletePlaylist,
-  handlePinSoundCloudPlaylist,
 }) => {
   const isSelected = browserTarget?.kind === 'soundcloud_playlist' && browserTarget.id === pl.id;
   const isPinned = playlists.some((p) => p.id === `soundcloud:playlist:${pl.id}`);
+  const subtitle = `${pl.track_count ? `${pl.track_count} tracks • ` : ''}${pl.description || 'SoundCloud Set'}`;
+
   return (
-    <button
-      data-right-tile="true"
-      data-tile-key={`soundcloud_playlist:${pl.id}`}
-      onContextMenu={(e) => {
-        e.preventDefault();
+    <CollectionTileCard
+      tileKey={`soundcloud_playlist:${pl.id}`}
+      isSelected={isSelected}
+      selectedBg="#2c140a"
+      selectedBorder="1px solid #ea580c"
+      title={pl.name}
+      subtitle={subtitle}
+      artwork={
+        <ResilientTileArtwork
+          square
+          src={pl.art_url}
+          fallbackIcon={<SoundCloudLogo width={42} color="#fdba74" />}
+          bg="#23120b"
+          border="1px solid rgba(255, 255, 255, 0.08)"
+        />
+      }
+      badge={
+        <>
+          <SoundCloudLogo width={24} color="#fdba74" />
+          {isPinned && <span>★</span>}
+        </>
+      }
+      onSelect={() => selectSoundCloudPlaylist(pl)}
+      onOpenContextMenu={() =>
         openLibraryContextMenu({
           type: 'collection',
           kind: 'sc_playlist',
           id: pl.id,
           title: pl.name,
-          subtitle: `${pl.track_count ? `${pl.track_count} tracks • ` : ''}${pl.description || 'SoundCloud Set'}`,
+          subtitle,
           art_url: pl.art_url,
           source: 'soundcloud',
           rawItem: pl,
-        });
-      }}
-      onClick={() => selectSoundCloudPlaylist(pl)}
-      style={{
-        minWidth: 0,
-        minHeight: 124,
-        padding: 10,
-        borderRadius: 12,
-        background: isSelected ? '#2c140a' : 'var(--imp-surface-card, #1a1d24)',
-        border: isSelected ? '1px solid #ea580c' : '1px solid #181822',
-        color: '#d4d4dc',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 8,
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 6,
-        }}
-      >
-        <ResilientTileArtwork
-          src={pl.art_url}
-          fallbackIcon={<SoundCloudLogo width={30} color="#fdba74" />}
-          bg="#23120b"
-          border="1px solid #7c2d12"
-        />
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: 4,
-            flexShrink: 0,
-            minWidth: 0,
-          }}
-        >
-          <span
-            style={{
-              padding: '3px 6px',
-              borderRadius: 6,
-              background: '#2c140a',
-              border: '1px solid #7c2d12',
-              color: '#fdba74',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              lineHeight: 1,
-            }}
-          >
-            <SoundCloudLogo width={30} color="#ffffff" />
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-tile-select="true"
-              title="Add set tracks to active ★ Imp Hybrid Playlist"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddSoundCloudPlaylistToHybrid(pl);
-              }}
-              style={{
-                padding: '2px 6px',
-                borderRadius: 6,
-                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
-                border: '1px solid var(--imp-focus-ring, #e8b86d)',
-                color: 'var(--imp-accent-active-text, #f5e1be)',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              +
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-tile-y="true"
-              title={isPinned ? 'Unpin Set from Imp (Y)' : 'Pin Set to Imp (Y)'}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isPinned) {
-                  handleDeletePlaylist(`soundcloud:playlist:${pl.id}`, pl.name);
-                } else {
-                  handlePinSoundCloudPlaylist(pl);
-                }
-              }}
-              style={{
-                padding: '3px 6px',
-                borderRadius: 6,
-                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#2c140a',
-                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #7c2d12',
-                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74'} />
-            </span>
-          </div>
-        </div>
-      </div>
-      <div style={{ minWidth: 0, width: '100%' }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            lineHeight: 1.3,
-            color: '#e4e4ec',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {pl.name}
-        </div>
-        <div
-          style={{
-            fontSize: 11,
-            lineHeight: 1.35,
-            color: '#8e8e99',
-            marginTop: 4,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {pl.track_count ? `${pl.track_count} tracks • ` : ''}
-          {pl.description || 'SoundCloud Set'}
-        </div>
-      </div>
-    </button>
+        })
+      }
+    />
   );
 };
 
@@ -217,13 +89,8 @@ export const SoundCloudUserCard: React.FC<SoundCloudUserCardProps> = ({
   openLibraryContextMenu,
 }) => {
   const isSelected = browserTarget?.kind === 'soundcloud_user' && browserTarget.id === user.id;
-  return (
-    <button
-      data-right-tile="true"
-      data-tile-key={`artist:soundcloud:${user.id}`}
-      onContextMenu={(e) => {
-        if (!openLibraryContextMenu) return;
-        e.preventDefault();
+  const openCtx = openLibraryContextMenu
+    ? () =>
         openLibraryContextMenu({
           type: 'collection',
           kind: 'artist',
@@ -234,93 +101,30 @@ export const SoundCloudUserCard: React.FC<SoundCloudUserCardProps> = ({
           artistName: user.username,
           source: 'soundcloud',
           rawItem: user,
-        });
-      }}
-      onClick={() => selectSoundCloudUser(user)}
-      style={{
-        minWidth: 0,
-        minHeight: 124,
-        padding: 10,
-        borderRadius: 12,
-        background: isSelected ? '#2c140a' : 'var(--imp-surface-card, #1a1d24)',
-        border: isSelected ? '1px solid #ea580c' : '1px solid #181822',
-        color: '#d4d4dc',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 8,
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 6,
-        }}
-      >
+        })
+    : undefined;
+
+  return (
+    <CollectionTileCard
+      tileKey={`artist:soundcloud:${user.id}`}
+      isSelected={isSelected}
+      selectedBg="#2c140a"
+      selectedBorder="1px solid #ea580c"
+      title={`@${user.username}`}
+      subtitle={user.description || `${user.track_count} tracks`}
+      artwork={
         <ResilientTileArtwork
+          square
           src={user.avatar_url}
-          fallbackIcon="👤"
+          fallbackIcon={<SoundCloudLogo width={42} color="#fdba74" />}
           bg="#23120b"
-          border="1px solid #7c2d12"
+          border="1px solid rgba(255, 255, 255, 0.08)"
         />
-        <span
-          style={{
-            padding: '2px 6px',
-            borderRadius: 6,
-            background: '#2c140a',
-            border: '1px solid #7c2d12',
-            color: '#fdba74',
-            fontSize: 10,
-            fontFamily: 'monospace',
-            fontWeight: 800,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          👥 {user.track_count} Trk
-        </span>
-      </div>
-      <div style={{ minWidth: 0, width: '100%' }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            lineHeight: 1.3,
-            color: '#e4e4ec',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          @{user.username}
-        </div>
-        <div
-          style={{
-            fontSize: 11,
-            lineHeight: 1.35,
-            color: '#8e8e99',
-            marginTop: 4,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {user.description || `${user.track_count} tracks`}
-        </div>
-      </div>
-    </button>
+      }
+      badge={`${user.track_count} Trk`}
+      onSelect={() => selectSoundCloudUser(user)}
+      onOpenContextMenu={openCtx}
+    />
   );
 };
 
@@ -345,9 +149,6 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
   iaResolvedRatings,
   openIaItem,
   openLibraryContextMenu,
-  handleAddArchiveItemToHybrid,
-  handleDeletePlaylist,
-  handlePinArchiveItem,
 }) => {
   const isVideo = item.mediatype === 'movies';
   const isSelected = browserTarget?.kind === 'ia_item' && browserTarget.id === item.identifier;
@@ -360,175 +161,24 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
     count !== undefined && count > 0
       ? isVideo
         ? count === 1
-          ? '🎬 1 Film'
-          : `🎬 ${count} Ep`
+          ? 'Film'
+          : `${count} Ep`
         : count === 1
-        ? '🎵 1 Audio'
-        : `🎵 ${count} Trk`
+        ? 'Audio'
+        : `${count} Trk`
       : isVideo
-      ? '🎬 VIDEO'
-      : '🎵 AUDIO';
+      ? 'Video'
+      : 'Audio';
+
   return (
-    <button
-      data-right-tile="true"
-      data-tile-key={`ia_item:${item.identifier}`}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        openLibraryContextMenu({
-          type: 'collection',
-          kind: 'ia_item',
-          id: item.identifier,
-          title: item.title,
-          subtitle: `${item.creator}${item.year ? ` • ${item.year}` : ''}`,
-          art_url: item.art_url,
-          artistName: item.creator,
-          source: 'internet_archive',
-          rawItem: item,
-        });
-      }}
-      onClick={() => openIaItem(item, false)}
-      style={{
-        minWidth: 0,
-        minHeight: 124,
-        padding: 10,
-        borderRadius: 12,
-        background: isSelected ? '#261a0b' : 'var(--imp-surface-card, #1a1d24)',
-        border: isSelected ? '1px solid #f59e0b' : '1px solid #181822',
-        color: '#d4d4dc',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        gap: 8,
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        style={{
-          width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: 6,
-        }}
-      >
-        <ResilientTileArtwork
-          src={item.art_url}
-          fallbackIcon={isVideo ? '🎬' : '🏛️'}
-          bg="#1f160b"
-          border="1px solid #78350f"
-        />
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: 4,
-            flexShrink: 0,
-            minWidth: 0,
-          }}
-        >
-          <span
-            style={{
-              padding: '2px 6px',
-              borderRadius: 6,
-              background: '#261a0b',
-              border: '1px solid #78350f',
-              color: '#fde68a',
-              fontSize: 10,
-              fontFamily: 'monospace',
-              fontWeight: 800,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {badgeLabel}
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-tile-select="true"
-              title="Add to active ★ Imp Hybrid Playlist"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleAddArchiveItemToHybrid(item);
-              }}
-              style={{
-                padding: '2px 6px',
-                borderRadius: 6,
-                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
-                border: '1px solid var(--imp-focus-ring, #e8b86d)',
-                color: 'var(--imp-accent-active-text, #f5e1be)',
-                fontSize: 10,
-                fontWeight: 800,
-                cursor: 'pointer',
-              }}
-            >
-              +
-            </span>
-            <span
-              role="button"
-              data-tile-aux="true"
-              data-tile-y="true"
-              title={isPinned ? 'Unpin from Imp (Y)' : 'Pin to Imp (Y)'}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (isPinned) {
-                  handleDeletePlaylist(`archive:item:${item.identifier}`, item.title);
-                } else {
-                  handlePinArchiveItem(item);
-                }
-              }}
-              style={{
-                padding: '3px 6px',
-                borderRadius: 6,
-                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#261a0b',
-                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #78350f',
-                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a'} />
-            </span>
-          </div>
-        </div>
-      </div>
-      <div style={{ minWidth: 0, width: '100%' }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 800,
-            lineHeight: 1.3,
-            color: '#e4e4ec',
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {item.title}
-        </div>
-        <div
-          style={{
-            fontSize: 11,
-            lineHeight: 1.35,
-            color: '#8e8e99',
-            marginTop: 4,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            overflowWrap: 'anywhere',
-          }}
-        >
+    <CollectionTileCard
+      tileKey={`ia_item:${item.identifier}`}
+      isSelected={isSelected}
+      selectedBg="#261a0b"
+      selectedBorder="1px solid #f59e0b"
+      title={item.title}
+      subtitle={
+        <>
           <ContentRatingBadge
             rating={
               item.content_rating ||
@@ -539,8 +189,40 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
           />
           {item.creator}
           {item.year ? ` • ${item.year}` : ''}
-        </div>
-      </div>
-    </button>
+        </>
+      }
+      artwork={
+        <ResilientTileArtwork
+          square
+          src={item.art_url}
+          fallbackIcon={<ImpIcon name="archive" size={28} color="#fde68a" />}
+          bg="#1f160b"
+          border="1px solid rgba(255, 255, 255, 0.08)"
+        />
+      }
+      badge={
+        <>
+          <ImpIcon name="archive" size={11} color="#fde68a" />
+          <span>
+            {isPinned ? '★ ' : ''}
+            {badgeLabel}
+          </span>
+        </>
+      }
+      onSelect={() => openIaItem(item, false)}
+      onOpenContextMenu={() =>
+        openLibraryContextMenu({
+          type: 'collection',
+          kind: 'ia_item',
+          id: item.identifier,
+          title: item.title,
+          subtitle: `${item.creator}${item.year ? ` • ${item.year}` : ''}`,
+          art_url: item.art_url,
+          artistName: item.creator,
+          source: 'internet_archive',
+          rawItem: item,
+        })
+      }
+    />
   );
 };

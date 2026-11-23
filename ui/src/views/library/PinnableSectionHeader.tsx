@@ -6,6 +6,7 @@ import {
 } from '../../api/servicesCacheApi';
 import { ImpIcon } from '../../components/icons/ImpIcon';
 import { useCollapsedSections } from './libraryHelpers';
+import { useExpandedShelf } from './ExpandedShelfContext';
 
 export interface FilterTriggerButtonProps {
   summary?: string;
@@ -65,6 +66,7 @@ export const CollapsibleSectionHeader: React.FC<CollapsibleSectionHeaderProps> =
   trailing,
 }) => {
   const { isCollapsed, toggle } = useCollapsedSections();
+  const { isShelfExpandable, openShelf } = useExpandedShelf();
   const collapsed = isCollapsed(sectionKey);
 
   if (collapsed) {
@@ -115,6 +117,7 @@ export const CollapsibleSectionHeader: React.FC<CollapsibleSectionHeaderProps> =
   return (
     <div
       data-section-shelf-uid={sectionKey}
+      data-section-accent={accentColor}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -151,10 +154,37 @@ export const CollapsibleSectionHeader: React.FC<CollapsibleSectionHeaderProps> =
         }}
       >
         <span style={{ opacity: 0.75 }}>▾</span>
-        {title}
+        <span data-section-title-text="true">{title}</span>
       </button>
-      {trailing && (
+      {(trailing || isShelfExpandable(sectionKey)) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {isShelfExpandable(sectionKey) && (
+            <button
+              type="button"
+              tabIndex={-1}
+              data-no-dpad-focus="true"
+              data-right-filter-pill="true"
+              data-shelf-see-all-header={sectionKey}
+              onClick={() => openShelf(sectionKey)}
+              title="Expand shelf to full grid"
+              style={{
+                minHeight: 26,
+                padding: '0 9px',
+                borderRadius: 7,
+                background: '#12151d',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                color: accentColor,
+                fontSize: 10.5,
+                fontWeight: 800,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                cursor: 'pointer',
+              }}
+            >
+              <span>See All ›</span>
+            </button>
+          )}
           {trailing}
         </div>
       )}

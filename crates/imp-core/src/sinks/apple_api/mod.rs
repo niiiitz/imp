@@ -89,6 +89,8 @@ pub struct AppleRecommendationShelf {
     pub albums: Vec<AppleCloudAlbumSummary>,
     #[serde(default)]
     pub stations: Vec<AppleRadioStationSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

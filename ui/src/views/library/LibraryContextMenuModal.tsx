@@ -205,11 +205,11 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
           width: 'min(440px, 94vw)',
           maxHeight: '86vh',
           overflowY: 'auto',
-          borderRadius: 16,
-          background: '#0b0c13',
-          border: '1px solid var(--imp-focus-ring, #e8b86d)',
+          borderRadius: 10,
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
           boxShadow: '0 22px 55px rgba(0, 0, 0, 0.85)',
-          padding: 16,
+          padding: 14,
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
@@ -760,10 +760,10 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       onOpenMount(mountRoot);
                     }}
                     style={{
-                      minHeight: 40,
-                      padding: '8px 12px',
-                      borderRadius: 10,
-                      background: '#0b241c',
+                      minHeight: 36,
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      background: 'var(--imp-surface-card, #1a1d24)',
                       border: '1px solid #34d399',
                       color: '#6ee7b7',
                       fontSize: 12,
@@ -772,7 +772,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       cursor: 'pointer',
                     }}
                   >
-                    📂 Open Folder &amp; Browse Subfolders
+                    Browse
                   </button>
                 )}
                 {onRescanMount && (
@@ -784,19 +784,19 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       onRescanMount(id, title);
                     }}
                     style={{
-                      minHeight: 40,
-                      padding: '8px 12px',
-                      borderRadius: 10,
-                      background: '#121824',
-                      border: '1px solid #26354d',
-                      color: '#bae6fd',
+                      minHeight: 36,
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      background: 'var(--imp-surface-card, #1a1d24)',
+                      border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
+                      color: 'var(--imp-accent-active-text, #f5e1be)',
                       fontSize: 12,
                       fontWeight: 800,
                       textAlign: 'left',
                       cursor: 'pointer',
                     }}
                   >
-                    🔄 Rescan Folder
+                    Rescan Folder
                   </button>
                 )}
               </>
@@ -814,10 +814,10 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                         onOpenOpticalDisc();
                       }}
                       style={{
-                        minHeight: 40,
-                        padding: '8px 12px',
-                        borderRadius: 10,
-                        background: '#1f160d',
+                        minHeight: 36,
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        background: 'var(--imp-surface-card, #1a1d24)',
                         border: '1px solid #f59e0b',
                         color: '#fde68a',
                         fontSize: 12,
@@ -826,7 +826,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                         cursor: 'pointer',
                       }}
                     >
-                      💿 Open Disc Tracklist
+                      Browse Disc
                     </button>
                   )}
                 {onScanOpticalDisc && (
@@ -843,11 +843,11 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       onScanOpticalDisc();
                     }}
                     style={{
-                      minHeight: 40,
-                      padding: '8px 12px',
-                      borderRadius: 10,
-                      background: '#141622',
-                      border: '1px solid #3f3f52',
+                      minHeight: 36,
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      background: 'var(--imp-surface-card, #1a1d24)',
+                      border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                       color: '#fcd34d',
                       fontSize: 12,
                       fontWeight: 800,
@@ -855,7 +855,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       cursor: 'pointer',
                     }}
                   >
-                    🔄 Rescan Optical Drive
+                    Rescan Drive
                   </button>
                 )}
                 {Boolean((libraryContextTarget.rawItem as OpticalDiscStatus | null)?.drive_present) &&

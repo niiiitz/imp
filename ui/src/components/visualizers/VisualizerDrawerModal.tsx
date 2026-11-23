@@ -86,16 +86,16 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           width: '100%',
           maxWidth: 650,
           maxHeight: '88vh',
-          background: '#0a0b10',
-          border: '2px solid var(--imp-accent, var(--imp-focus-ring, #e8b86d))',
-          borderRadius: 18,
-          padding: 20,
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
+          borderRadius: 10,
+          padding: 16,
           boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.92)',
-          color: '#f1f5f9',
+          gap: 10,
+          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.85)',
+          color: 'var(--imp-text-primary, #eef0f4)',
         }}
       >
         {/* Header */}
@@ -107,15 +107,12 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
             gap: 12,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <ImpIcon name="sparkles" size={20} color="var(--imp-accent, #38bdf8)" />
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: '#f8fafc' }}>
-                Visualizer Scene Queue & Rotation
-              </div>
-              <div style={{ fontSize: 11.5, color: '#94a3b8' }}>
-                Lock a scene or choose which scenes rotate on track change
-              </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
+              Visualizer Scenes
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--imp-text-secondary, #8b92a1)' }}>
+              Toggle rotation on left or click a row to lock scene
             </div>
           </div>
           <button
@@ -123,21 +120,22 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
             data-viz-drawer-close="true"
             onClick={onClose}
             style={{
-              minHeight: 38,
-              padding: '0 12px',
-              borderRadius: 9,
-              background: '#161822',
-              border: '1px solid #2e3244',
-              color: '#e2e8f0',
+              minHeight: 32,
+              padding: '0 10px',
+              borderRadius: 6,
+              background: 'var(--imp-surface-card, #1a1d24)',
+              border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color: 'var(--imp-text-primary, #eef0f4)',
               fontFamily: 'monospace',
               fontWeight: 700,
+              fontSize: 11.5,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
             }}
           >
-            <ImpIcon name="close" size={14} />
+            <ImpIcon name="close" size={13} />
             <span className="simp-gp-badge">B</span>
           </button>
         </div>
@@ -147,7 +145,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-            gap: 8,
+            gap: 6,
           }}
         >
           <button
@@ -155,15 +153,21 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
             data-default-focus={vizMode === 'cycle' ? 'true' : undefined}
             onClick={() => onSelectMode('cycle')}
             style={{
-              minHeight: 40,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: vizMode === 'cycle' ? 'rgba(232, 184, 109, 0.22)' : '#12141e',
+              minHeight: 36,
+              padding: '6px 10px',
+              borderRadius: 6,
+              background:
+                vizMode === 'cycle'
+                  ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                  : 'var(--imp-surface-card, #1a1d24)',
               border:
                 vizMode === 'cycle'
-                  ? '1.5px solid var(--imp-accent, #38bdf8)'
-                  : '1px solid #252838',
-              color: vizMode === 'cycle' ? '#f8fafc' : '#cbd5e1',
+                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color:
+                vizMode === 'cycle'
+                  ? 'var(--imp-accent-active-text, #f5e1be)'
+                  : 'var(--imp-text-secondary, #8b92a1)',
               fontWeight: 800,
               fontSize: 12,
               cursor: 'pointer',
@@ -173,8 +177,12 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
               gap: 6,
             }}
           >
-            <ImpIcon name="refresh" size={14} color={vizMode === 'cycle' ? '#38bdf8' : '#94a3b8'} />
-            <span>Cycle Enabled ({enabledScenes.length})</span>
+            <ImpIcon
+              name="refresh"
+              size={13}
+              color={vizMode === 'cycle' ? 'var(--imp-focus-ring, #e8b86d)' : '#8b92a1'}
+            />
+            <span>Cycle ({enabledScenes.length})</span>
           </button>
 
           <button
@@ -182,15 +190,21 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
             data-default-focus={vizMode === 'shuffle' ? 'true' : undefined}
             onClick={() => onSelectMode('shuffle')}
             style={{
-              minHeight: 40,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: vizMode === 'shuffle' ? 'rgba(232, 184, 109, 0.22)' : '#12141e',
+              minHeight: 36,
+              padding: '6px 10px',
+              borderRadius: 6,
+              background:
+                vizMode === 'shuffle'
+                  ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                  : 'var(--imp-surface-card, #1a1d24)',
               border:
                 vizMode === 'shuffle'
-                  ? '1.5px solid var(--imp-accent, #38bdf8)'
-                  : '1px solid #252838',
-              color: vizMode === 'shuffle' ? '#f8fafc' : '#cbd5e1',
+                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color:
+                vizMode === 'shuffle'
+                  ? 'var(--imp-accent-active-text, #f5e1be)'
+                  : 'var(--imp-text-secondary, #8b92a1)',
               fontWeight: 800,
               fontSize: 12,
               cursor: 'pointer',
@@ -202,10 +216,10 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           >
             <ImpIcon
               name="shuffle"
-              size={14}
-              color={vizMode === 'shuffle' ? '#38bdf8' : '#94a3b8'}
+              size={13}
+              color={vizMode === 'shuffle' ? 'var(--imp-focus-ring, #e8b86d)' : '#8b92a1'}
             />
-            <span>Shuffle Enabled ({enabledScenes.length})</span>
+            <span>Shuffle ({enabledScenes.length})</span>
           </button>
 
           <button
@@ -213,12 +227,15 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
             data-default-focus={vizMode === 'off' ? 'true' : undefined}
             onClick={() => onSelectMode('off')}
             style={{
-              minHeight: 40,
-              padding: '8px 10px',
-              borderRadius: 10,
-              background: vizMode === 'off' ? 'rgba(244, 63, 94, 0.2)' : '#12141e',
-              border: vizMode === 'off' ? '1.5px solid #fb7185' : '1px solid #252838',
-              color: vizMode === 'off' ? '#fecdd3' : '#94a3b8',
+              minHeight: 36,
+              padding: '6px 10px',
+              borderRadius: 6,
+              background: vizMode === 'off' ? 'rgba(244, 63, 94, 0.16)' : 'var(--imp-surface-card, #1a1d24)',
+              border:
+                vizMode === 'off'
+                  ? '1px solid rgba(251, 113, 133, 0.65)'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color: vizMode === 'off' ? '#fecdd3' : 'var(--imp-text-secondary, #8b92a1)',
               fontWeight: 800,
               fontSize: 12,
               cursor: 'pointer',
@@ -228,8 +245,8 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
               gap: 6,
             }}
           >
-            <ImpIcon name="ban" size={14} color={vizMode === 'off' ? '#fb7185' : '#94a3b8'} />
-            <span>Visualizer Off</span>
+            <ImpIcon name="ban" size={13} color={vizMode === 'off' ? '#fb7185' : '#8b92a1'} />
+            <span>Off</span>
           </button>
         </div>
 
@@ -338,12 +355,14 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                   title="Include or exclude this scene when Cycle or Shuffle is active"
                   style={{
                     width: '100%',
-                    minHeight: 50,
-                    borderRadius: 11,
-                    background: isInRotation ? 'rgba(16, 185, 129, 0.14)' : '#12141e',
+                    minHeight: 44,
+                    borderRadius: 6,
+                    background: isInRotation
+                      ? 'rgba(16, 185, 129, 0.14)'
+                      : 'var(--imp-surface-card, #1a1d24)',
                     border: isInRotation
                       ? '1px solid rgba(52, 211, 153, 0.45)'
-                      : '1px solid #222638',
+                      : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                     color: isInRotation ? '#34d399' : '#64748b',
                     fontSize: 11,
                     fontFamily: 'monospace',
@@ -370,18 +389,16 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                   onClick={() => onSelectMode(scene.id)}
                   style={{
                     minWidth: 0,
-                    minHeight: 50,
-                    padding: '7px 12px',
-                    borderRadius: 11,
+                    minHeight: 44,
+                    padding: '6px 12px',
+                    borderRadius: 6,
                     background: isCurrentlyRendering
-                      ? 'rgba(15, 34, 46, 0.92)'
-                      : 'rgba(16, 18, 28, 0.9)',
-                    border: isLockedSingle
-                      ? '1.5px solid var(--imp-accent, #38bdf8)'
-                      : isCurrentlyRendering
-                        ? '1px solid rgba(56, 189, 248, 0.5)'
-                        : '1px solid #222638',
-                    color: '#f1f5f9',
+                      ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                      : 'var(--imp-surface-card, #1a1d24)',
+                    border: isLockedSingle || isCurrentlyRendering
+                      ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                      : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                    color: 'var(--imp-text-primary, #eef0f4)',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
@@ -395,9 +412,11 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
                       <span
                         style={{
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: 800,
-                          color: isCurrentlyRendering ? 'var(--imp-accent-active-text, #f5e1be)' : '#f1f5f9',
+                          color: isCurrentlyRendering
+                            ? 'var(--imp-accent-active-text, #f5e1be)'
+                            : 'var(--imp-text-primary, #eef0f4)',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -413,9 +432,9 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                           padding: '1px 6px',
                           borderRadius: 5,
                           flexShrink: 0,
-                          background: 'rgba(56, 189, 248, 0.14)',
-                          color: '#7dd3fc',
-                          border: '1px solid rgba(56, 189, 248, 0.28)',
+                          background: 'var(--imp-bg-canvas, #121418)',
+                          color: 'var(--imp-text-secondary, #8b92a1)',
+                          border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                         }}
                       >
                         {scene.eraBadge}
@@ -437,7 +456,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                     <div
                       style={{
                         fontSize: 11,
-                        color: '#94a3b8',
+                        color: 'var(--imp-text-secondary, #8b92a1)',
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -452,7 +471,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                       fontFamily: 'monospace',
                       fontSize: 10.5,
                       fontWeight: 800,
-                      color: isLockedSingle ? '#38bdf8' : '#64748b',
+                      color: isLockedSingle ? 'var(--imp-focus-ring, #e8b86d)' : '#64748b',
                       flexShrink: 0,
                     }}
                   >

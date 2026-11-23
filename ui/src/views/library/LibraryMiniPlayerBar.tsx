@@ -232,12 +232,11 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
     setVolumePopoverOpen(false);
     setBrightnessPopoverOpen(false);
     setPowerModalOpen(false);
-    setSourceModalOpen(false);
     if (!track) {
-      window.dispatchEvent(
-        new CustomEvent('simp-select-category-focus', { detail: { category: 'interface' } })
-      );
+      setSourceModalOpen((v) => !v);
+      return;
     }
+    setSourceModalOpen(false);
     window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
   };
 
@@ -385,7 +384,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              ⏮
+              <ImpIcon name="skip-back" size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -406,7 +405,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              {snap?.is_playing ? '⏸' : '▶'}
+              <ImpIcon name={snap?.is_playing ? 'pause' : 'play'} size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -426,7 +425,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              ⏭
+              <ImpIcon name="skip-forward" size={12} />
             </button>
             <button
               data-row-aux="true"
@@ -462,7 +461,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 justifyContent: 'center',
               }}
             >
-              🔁
+              <ImpIcon name="repeat" size={12} />
               {snap?.repeat_mode && snap.repeat_mode !== 'off' && (
                 <span
                   style={{
@@ -548,7 +547,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                   gap: 3,
                 }}
               >
-                <span>{!isPlaying ? '🔇' : volPct < 45 ? '🔉' : '🔊'}</span>
+                <ImpIcon name={!isPlaying ? 'volume-mute' : 'volume'} size={12} />
               </button>
 
               <button
@@ -676,7 +675,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                   gap: 4,
                 }}
               >
-                <span>{brightnessPct >= 75 ? '🔅' : brightnessPct >= 50 ? '🌙' : '🌑'}</span>
+                <ImpIcon name={brightnessPct >= 50 ? 'sun' : 'moon'} size={12} />
                 <span>{brightnessPct}%</span>
                 <span style={{ fontSize: 9, color: '#71717a' }}>▾</span>
               </button>

@@ -362,8 +362,8 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
         position: 'fixed',
         inset: 0,
         zIndex: 9600,
-        background: 'rgba(2, 6, 14, 0.84)',
-        backdropFilter: 'blur(12px)',
+        background: 'rgba(0, 0, 0, 0.78)',
+        backdropFilter: 'blur(8px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -375,15 +375,15 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
           width: 'min(920px, 96vw)',
           maxHeight: '92vh',
           overflowY: 'auto',
-          borderRadius: 16,
-          background: 'linear-gradient(180deg, #0b111e 0%, #060911 100%)',
-          border: '1px solid rgba(56, 189, 248, 0.28)',
+          borderRadius: 10,
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.85)',
-          padding: '18px 22px',
+          padding: '16px 18px',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
-          color: '#f1f5f9',
+          gap: 12,
+          color: 'var(--imp-text-primary, #eef0f4)',
         }}
       >
         {/* Header Row */}
@@ -391,24 +391,24 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div
               style={{
-                width: 34,
-                height: 34,
-                borderRadius: 9,
-                background: 'rgba(56, 189, 248, 0.12)',
-                border: '1px solid rgba(56, 189, 248, 0.35)',
+                width: 32,
+                height: 32,
+                borderRadius: 6,
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              <ImpIcon name="sliders" size={18} color="#38bdf8" />
+              <ImpIcon name="sliders" size={16} color="var(--imp-focus-ring, #e8b86d)" />
             </div>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em', color: '#f8fafc' }}>
-                AUDIO DSP // 10-BAND BIQUAD EQ & VOCAL STAGE
+              <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
+                10-Band Equalizer & Vocal Stage
               </div>
-              <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                Lock-free stereo biquad cascade (32 Hz – 16 kHz) + Band-limited Mid/Side Vocal Isolation (130 Hz – 4.5 kHz)
+              <div style={{ fontSize: 11, color: 'var(--imp-text-secondary, #8b92a1)' }}>
+                Biquad EQ (32 Hz – 16 kHz) + Mid/Side Vocal Isolation
               </div>
             </div>
           </div>
@@ -417,12 +417,14 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
             data-equalizer-close="true"
             onClick={handleCloseModal}
             style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              color: '#cbd5e1',
-              fontSize: 12,
+              minHeight: 30,
+              padding: '0 10px',
+              borderRadius: 6,
+              background: 'var(--imp-surface-card, #1a1d24)',
+              border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color: 'var(--imp-text-primary, #eef0f4)',
+              fontFamily: 'monospace',
+              fontSize: 11.5,
               fontWeight: 700,
               cursor: 'pointer',
               display: 'inline-flex',
@@ -430,8 +432,9 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               gap: 6,
             }}
           >
-            <ImpIcon name="close" size={13} color="#cbd5e1" />
-            <span>Close (B / Esc)</span>
+            <ImpIcon name="close" size={12} color="var(--imp-text-primary, #eef0f4)" />
+            <span>Close</span>
+            <span className="simp-gp-badge">B</span>
           </button>
         </div>
 
@@ -478,30 +481,27 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
         {/* Section 1: Vocal Isolation & 1-Click Karaoke Mode */}
         <div
           style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'rgba(15, 23, 42, 0.72)',
+            padding: '10px 12px',
+            borderRadius: 6,
+            background: 'var(--imp-surface-card, #1a1d24)',
             border:
               dspState.vocal_mode !== 'off'
                 ? '1px solid rgba(52, 211, 153, 0.45)'
-                : '1px solid rgba(255, 255, 255, 0.08)',
+                : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
+            gap: 8,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ImpIcon
                 name={dspState.vocal_mode === 'vocal_remover' ? 'mic-off' : 'mic'}
-                size={15}
-                color={dspState.vocal_mode !== 'off' ? '#34d399' : '#94a3b8'}
+                size={14}
+                color={dspState.vocal_mode !== 'off' ? '#34d399' : '#8b92a1'}
               />
-              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.04em', color: '#e2e8f0' }}>
-                MID/SIDE VOCAL ISOLATION & KARAOKE MODE
-              </span>
-              <span style={{ fontSize: 11, color: '#64748b' }}>
-                (Preserves &lt; 130 Hz center sub-bass/kick &amp; stereo width)
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-text-primary, #eef0f4)' }}>
+                Vocal Stage & Karaoke
               </span>
             </div>
 
@@ -510,14 +510,14 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               data-default-focus="true"
               onClick={() => onToggleKaraokeMode(!isKaraokeActive)}
               style={{
-                padding: '6px 14px',
-                borderRadius: 8,
+                padding: '5px 12px',
+                borderRadius: 6,
                 background: isKaraokeActive
-                  ? 'linear-gradient(90deg, rgba(16, 185, 129, 0.28), rgba(56, 189, 248, 0.24))'
-                  : 'rgba(255, 255, 255, 0.06)',
+                  ? 'rgba(16, 185, 129, 0.2)'
+                  : 'var(--imp-bg-canvas, #121418)',
                 border: isKaraokeActive
                   ? '1px solid #34d399'
-                  : '1px solid rgba(255, 255, 255, 0.16)',
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                 color: isKaraokeActive ? '#6ee7b7' : '#e2e8f0',
                 fontSize: 12,
                 fontWeight: 800,
@@ -547,11 +547,17 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                     key={m.id}
                     onClick={() => onUpdateDsp({ vocal_mode: m.id })}
                     style={{
-                      padding: '6px 12px',
-                      borderRadius: 8,
-                      background: active ? 'rgba(56, 189, 248, 0.18)' : '#090d16',
-                      border: active ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.1)',
-                      color: active ? '#38bdf8' : '#94a3b8',
+                      padding: '5px 10px',
+                      borderRadius: 6,
+                      background: active
+                        ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                        : 'var(--imp-bg-canvas, #121418)',
+                      border: active
+                        ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                        : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                      color: active
+                        ? 'var(--imp-accent-active-text, #f5e1be)'
+                        : 'var(--imp-text-secondary, #8b92a1)',
                       fontSize: 11.5,
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -560,7 +566,11 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                       gap: 6,
                     }}
                   >
-                    <ImpIcon name={m.icon} size={13} color={active ? '#38bdf8' : '#64748b'} />
+                    <ImpIcon
+                      name={m.icon}
+                      size={13}
+                      color={active ? 'var(--imp-focus-ring, #e8b86d)' : '#64748b'}
+                    />
                     <span>{m.label}</span>
                   </button>
                 );
@@ -581,8 +591,8 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 style={{
                   padding: '3px 8px',
                   borderRadius: 6,
-                  background: '#090d16',
-                  border: '1px solid rgba(255,255,255,0.14)',
+                  background: 'var(--imp-bg-canvas, #121418)',
+                  border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                   color: '#cbd5e1',
                   fontSize: 11,
                   fontWeight: 800,
@@ -600,8 +610,8 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 style={{
                   padding: '3px 8px',
                   borderRadius: 6,
-                  background: '#090d16',
-                  border: '1px solid rgba(255,255,255,0.14)',
+                  background: 'var(--imp-bg-canvas, #121418)',
+                  border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                   color: '#cbd5e1',
                   fontSize: 11,
                   fontWeight: 800,
@@ -617,12 +627,12 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
         {/* Section 2: Equalizer Enable + Presets + Live Frequency Curve */}
         <div
           style={{
-            padding: '12px 14px',
-            borderRadius: 12,
-            background: 'rgba(15, 23, 42, 0.72)',
+            padding: '10px 12px',
+            borderRadius: 6,
+            background: 'var(--imp-surface-card, #1a1d24)',
             border: dspState.eq_enabled
-              ? '1px solid rgba(56, 189, 248, 0.4)'
-              : '1px solid rgba(255, 255, 255, 0.08)',
+              ? '1px solid var(--imp-accent-active-border, rgba(232, 184, 109, 0.52))'
+              : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
@@ -634,12 +644,16 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 onClick={() => onUpdateDsp({ eq_enabled: !dspState.eq_enabled })}
                 style={{
                   padding: '5px 12px',
-                  borderRadius: 8,
-                  background: dspState.eq_enabled ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255,255,255,0.06)',
+                  borderRadius: 6,
+                  background: dspState.eq_enabled
+                    ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                    : 'var(--imp-bg-canvas, #121418)',
                   border: dspState.eq_enabled
-                    ? '1px solid #38bdf8'
-                    : '1px solid rgba(255,255,255,0.16)',
-                  color: dspState.eq_enabled ? '#38bdf8' : '#94a3b8',
+                    ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                    : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                  color: dspState.eq_enabled
+                    ? 'var(--imp-accent-active-text, #f5e1be)'
+                    : 'var(--imp-text-secondary, #8b92a1)',
                   fontSize: 12,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -648,8 +662,12 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                   gap: 6,
                 }}
               >
-                <ImpIcon name="sliders" size={13} color={dspState.eq_enabled ? '#38bdf8' : '#64748b'} />
-                <span>10-BAND EQ: {dspState.eq_enabled ? 'ENABLED' : 'BYPASSED'}</span>
+                <ImpIcon
+                  name="sliders"
+                  size={13}
+                  color={dspState.eq_enabled ? 'var(--imp-focus-ring, #e8b86d)' : '#64748b'}
+                />
+                <span>10-Band EQ: {dspState.eq_enabled ? 'On' : 'Off'}</span>
               </button>
 
               {BUILTIN_PRESETS.map((preset) => {
@@ -667,10 +685,16 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                     }
                     style={{
                       padding: '5px 10px',
-                      borderRadius: 7,
-                      background: active ? 'rgba(56, 189, 248, 0.16)' : '#090d16',
-                      border: active ? '1px solid #38bdf8' : '1px solid rgba(255,255,255,0.1)',
-                      color: active ? '#7dd3fc' : '#94a3b8',
+                      borderRadius: 6,
+                      background: active
+                        ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                        : 'var(--imp-bg-canvas, #121418)',
+                      border: active
+                        ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                        : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                      color: active
+                        ? 'var(--imp-accent-active-text, #f5e1be)'
+                        : 'var(--imp-text-secondary, #8b92a1)',
                       fontSize: 11,
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -691,9 +715,9 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                 }
                 style={{
                   padding: '5px 10px',
-                  borderRadius: 7,
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.12)',
+                  borderRadius: 6,
+                  background: 'var(--imp-bg-canvas, #121418)',
+                  border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                   color: '#cbd5e1',
                   fontSize: 11,
                   fontWeight: 700,
@@ -715,8 +739,8 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               viewBox={`0 0 ${svgWidth} ${svgHeight}`}
               style={{
                 borderRadius: 6,
-                background: '#050811',
-                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'var(--imp-bg-canvas, #121418)',
+                border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
               }}
             >
               <line
@@ -729,7 +753,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
               />
               <polyline
                 fill="none"
-                stroke={dspState.eq_enabled ? '#38bdf8' : '#475569'}
+                stroke={dspState.eq_enabled ? 'var(--imp-focus-ring, #e8b86d)' : '#475569'}
                 strokeWidth={3}
                 points={curvePoints}
               />
@@ -788,7 +812,7 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                   : isPreamp
                     ? '#f59e0b'
                     : dspState.eq_enabled
-                      ? '#38bdf8'
+                      ? '#e8b86d'
                       : '#64748b';
 
               return (
@@ -800,13 +824,13 @@ export const EqualizerModal: React.FC<EqualizerModalProps> = ({
                     alignItems: 'center',
                     gap: 5,
                     padding: '6px 4px',
-                    borderRadius: 10,
-                    background: isEngaged ? 'rgba(52, 211, 153, 0.1)' : '#070b13',
+                    borderRadius: 6,
+                    background: isEngaged ? 'rgba(52, 211, 153, 0.1)' : 'var(--imp-bg-canvas, #121418)',
                     border: isEngaged
                       ? '1px solid #34d399'
                       : isPreamp
                         ? '1px solid rgba(245, 158, 11, 0.25)'
-                        : '1px solid rgba(255, 255, 255, 0.07)',
+                        : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
                   }}
                 >
                   {/* dB Readout */}

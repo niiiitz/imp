@@ -166,15 +166,15 @@ export const FolderDropModal: React.FC<FolderDropModalProps> = ({
             onClick={(e) => e.stopPropagation()}
             style={{
               width: 'min(480px, 92vw)',
-              borderRadius: 16,
-              background: 'linear-gradient(180deg, rgba(15, 23, 36, 0.99), rgba(9, 13, 22, 0.99))',
-              border: '1px solid rgba(52, 211, 153, 0.5)',
-              boxShadow: '0 22px 55px rgba(0, 0, 0, 0.75)',
-              padding: 20,
-              color: '#f1f5f9',
+              borderRadius: 10,
+              background: 'var(--imp-surface-panel, #161920)',
+              border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
+              boxShadow: '0 22px 55px rgba(0, 0, 0, 0.8)',
+              padding: 16,
+              color: 'var(--imp-text-primary, #eef0f4)',
               display: 'flex',
               flexDirection: 'column',
-              gap: 14,
+              gap: 12,
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

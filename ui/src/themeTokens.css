@@ -19,4 +19,60 @@
   --imp-accent-active-text: #f5e1be;
   --imp-accent-primary: var(--imp-focus-ring);
   --imp-accent-glow: var(--imp-focus-glow);
+  --imp-ui-scale: 1;
+  --imp-tile-width: clamp(168px, 13.5vw, 204px);
+  --imp-track-col-width: clamp(260px, 22vw, 320px);
+}
+
+/* Unified UI Scale for Modals & Dialogs (excludes fullscreen DVD stage) */
+[data-quick-help-modal="true"],
+[data-filter-modal="true"],
+[data-viz-drawer-modal="true"],
+[data-hybrid-picker-modal="true"],
+[data-library-context-modal="true"],
+[data-track-properties-modal="true"] > div,
+[data-equalizer-modal="true"] > div,
+[data-folder-chooser-modal="true"] > div,
+[data-dropped-folder-modal="true"] > div {
+  zoom: var(--imp-ui-scale, 1);
+  max-height: min(88vh, calc(100vh / var(--imp-ui-scale, 1) - 36px)) !important;
+}
+
+[data-xmb-menu="true"],
+[data-player-actions-modal="true"] {
+  zoom: var(--imp-ui-scale, 1);
+  max-width: calc(100vw / var(--imp-ui-scale, 1) - 32px) !important;
+  max-height: calc(100vh / var(--imp-ui-scale, 1) - 72px) !important;
+}
+
+/* Horizontal Shelf Rails & Fixed-Proportion Square Tiles */
+[data-h-rail="true"] {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+[data-h-rail="true"]::-webkit-scrollbar {
+  display: none;
+}
+
+[data-h-rail="true"][data-h-rail-variant="tiles"] > * {
+  flex: 0 0 var(--imp-tile-width, 184px);
+  width: var(--imp-tile-width, 184px);
+  scroll-margin-inline: 52px;
+}
+
+[data-h-rail="true"][data-h-rail-variant="tracks"] > * {
+  min-width: 0;
+  width: 100%;
+  scroll-margin-inline: 52px;
+}
+
+.imp-tile-hover-menu {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+[data-right-tile="true"]:hover .imp-tile-hover-menu,
+[data-right-tile="true"]:focus-visible .imp-tile-hover-menu {
+  opacity: 1;
 }

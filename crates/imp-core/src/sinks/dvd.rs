@@ -1397,6 +1397,9 @@ fn lookup_or_fetch_dvd_poster(disc: &mut ParsedDvdDisc, force_refresh: bool) {
     let url = format!(
         "https://itunes.apple.com/search?term={encoded}&media=movie&limit=3"
     );
+    if !crate::is_online_disc_metadata_fetch_enabled() {
+        return;
+    }
     if let Ok(bytes) = crate::http_pool::http_get_bytes(&url, &[], None, 5)
     {
         if !bytes.is_empty() {

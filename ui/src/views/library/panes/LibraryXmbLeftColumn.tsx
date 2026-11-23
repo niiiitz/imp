@@ -12,7 +12,7 @@ import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
 import { AppleMusicLogo } from "../../../components/AppleMusicLogo";
 import { OskTargetKind } from "../../../hooks/useGamepadNavigation";
 import { BrowserTarget } from "../../PlayerView";
-import { SourceVisibilityPrefs } from "../../SettingsModal";
+import type { SourceVisibilityPrefs } from "../../../menu/menuCorpus";
 import {
   cleanCollectionTitle,
   type BrowseHubTarget,
@@ -214,11 +214,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
           gap: 4,
         }}
       >
-        {tab.id === 'local' ? (
-          <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
-        ) : (
-          <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
-        )}
+        <ImpIcon name={tab.icon} size={tab.icon === 'soundcloud' ? 10 : 11.5} />
         <span
           style={{
             overflow: 'hidden',
@@ -898,7 +894,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                                 {isApple ? (
                                   <AppleMusicLogo size={11} />
                                 ) : (
-                                  <span style={{ fontSize: 11, lineHeight: 1 }}>💾</span>
+                                  <ImpIcon name="local" size={11} />
                                 )}
                                 <span
                                   style={{
@@ -1120,7 +1116,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       }}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <span>💾</span>
+                        <ImpIcon name="local" size={12} />
                         <span>Local</span>
                       </span>
                       <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#34d399' }}>

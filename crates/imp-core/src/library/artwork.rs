@@ -312,6 +312,10 @@ pub fn fetch_musicbrainz_cover_for_album(
         return MusicBrainzArtOutcome::Found(format!("http://127.0.0.1:18888/art/{filename}"));
     }
 
+    if !crate::is_online_artwork_fetch_enabled() {
+        return MusicBrainzArtOutcome::NotFound;
+    }
+
     let clean_artist = album_artist.trim();
     let primary_artist = extract_primary_artist(clean_artist);
     let has_specific_artist = !primary_artist.is_empty()

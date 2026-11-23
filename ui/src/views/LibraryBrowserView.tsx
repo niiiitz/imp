@@ -53,6 +53,7 @@ import {
   LibraryXmbLeftColumn,
 } from './library/panes/LibraryXmbLeftColumn';
 import { LibraryBrowseRightPane } from './library/panes/LibraryBrowseRightPane';
+import { ExpandedShelfProvider } from './library/ExpandedShelfContext';
 import { LibraryTracklistRightPane } from './library/panes/LibraryTracklistRightPane';
 import {
   cacheAppleRecentLibraryShelf,
@@ -105,7 +106,8 @@ import {
 import { SingleSongRow } from './library/cards/SingleSongRow';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { BrowserTarget, isUiVideoTrack } from './PlayerView';
-import { SourceVisibilityPrefs } from './SettingsModal';
+import type { SourceVisibilityPrefs } from '../menu/menuCorpus';
+import { useUiScale } from '../theme/uiScale';
 
 export interface LibraryShelfAction {
   shelfUid: string;
@@ -328,17 +330,6 @@ export interface LibraryBrowserViewProps {
   sourceModalOpen: boolean;
   powerModalOpen: boolean;
   setPowerModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
-}
-
-function computeLibraryViewportScale(): number {
-  if (typeof window === 'undefined') return 1;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  // Steam Deck / 800p baseline (1280x800) stays at 1.0x
-  if (vw <= 1340 && vh <= 840) return 1;
-  const minRatio = Math.min(vw / 1280, vh / 800);
-  const scaled = 1 + (minRatio - 1) * 0.38;
-  return Math.round(Math.min(1.35, Math.max(1, scaled)) * 100) / 100;
 }
 
 export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
@@ -3911,30 +3902,20 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   );
   const libCssVars = getSourceThemeCssVars(libTheme);
 
-  const [libraryScale, setLibraryScale] = useState<number>(() =>
-    computeLibraryViewportScale()
-  );
-
-  useEffect(() => {
-    const onResize = () => {
-      setLibraryScale(computeLibraryViewportScale());
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  const { scale: libraryScale } = useUiScale();
 
   return (
     <main
       style={{
         flex: 1,
         display: hidden ? 'none' : 'grid',
-        gridTemplateColumns: 'clamp(276px, 24.5%, 360px) minmax(0, 1fr)',
+        gridTemplateColumns: 'clamp(240px, 24.5%, 360px) minmax(0, 1fr)',
         gridTemplateRows: 'auto minmax(0, 1fr)',
         overflow: 'hidden',
         boxSizing: 'border-box',
         width: '100%',
         minWidth: 0,
-        zoom: libraryScale > 1.02 ? libraryScale : undefined,
+        zoom: libraryScale !== 1 ? libraryScale : undefined,
         ...libCssVars,
       }}
     >
@@ -4270,7 +4251,11 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             STATE A: ⊞ 4-COLUMN-MAX VISUAL TILE GRID (My SIMP Library, Apple Playlists, Radio, New, Search)
            ================================================================= */}
         {rightPaneMode === 'browse' ? (
-          <LibraryBrowseRightPane
+          <ExpandedShelfProvider
+            resetKey={`${browseHubTarget}|${appleSubTab}|${soundCloudSubTab}|${iaSubTab}|${localSubTab}|${browserSearch}|${impFypActive}|${activeMountRoot ?? ''}`}
+            applyFocusMarker={applyFocusMarker}
+          >
+            <LibraryBrowseRightPane
             activeHubLabel={activeHubLabel}
             activeMountRoot={activeMountRoot}
             setActiveMountRoot={setActiveMountRoot}
@@ -4439,6 +4424,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             snap={snap}
             soundCloudSubTab={soundCloudSubTab}
           />
+          </ExpandedShelfProvider>
         ) : rightPaneMode === 'artist' && activeArtistProfile ? (
           /* =================================================================
              STATE A.5: 🎤 DEDICATED ARTIST PROFILE & RABBIT HOLE VIEW
@@ -4588,7 +4574,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
               handleRemoveFolder(mountRoot, label);
             } else {
               defaultSimpClient.removeLibraryPath(mountRoot);
-              showToast(`Removed mount: ${label}`);
+              showToast(`Removed folder: ${label}`);
             }
           }}
           onOpenOpticalDisc={openOpticalDiscCollection}

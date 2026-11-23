@@ -49,7 +49,8 @@ import {
 import { OskTargetKind, useGamepadNavigation } from './hooks/useGamepadNavigation';
 import { BrowserTarget, isUiVideoTrack, PlayerView } from './views/PlayerView';
 import { LibraryBrowserView } from './views/LibraryBrowserView';
-import { SettingsModal, SimpUpdateStatus, SourceVisibilityPrefs } from './views/SettingsModal';
+import { XmbUnifiedMenu } from './components/XmbUnifiedMenu';
+import type { SimpUpdateStatus, SourceVisibilityPrefs } from './menu/menuCorpus';
 import { QuickHelpModal } from './components/QuickHelpModal';
 import { TrackPropertiesModal, TrackPropertiesTarget } from './components/TrackPropertiesModal';
 import { ImpIcon } from './components/icons/ImpIcon';
@@ -58,6 +59,7 @@ import { HybridPlaylistPickerModal } from './components/HybridPlaylistPickerModa
 import { FolderDropModal } from './components/FolderDropModal';
 import { AppOnScreenKeyboardBar } from './components/AppOnScreenKeyboardBar';
 import { applySkinPackToDocument, loadActiveSkinPackId } from './theme/skinPacks';
+import { applyUiScaleToDocument } from './theme/uiScale';
 import {
   readProviderCachedShelves,
   refreshFypFromDb,
@@ -86,6 +88,10 @@ const DedicatedAppleWorkerApp: React.FC = () => {
 export const App: React.FC = () => {
   useEffect(() => {
     applySkinPackToDocument(loadActiveSkinPackId());
+    applyUiScaleToDocument();
+    const onResize = () => applyUiScaleToDocument();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
   if (isDedicatedAppleWorkerRoute) {
     return <DedicatedAppleWorkerApp />;
@@ -551,8 +557,16 @@ const ConsoleMainApp: React.FC = () => {
     setDesktopScreensaverActive(true);
   }, [desktopMode]);
 
-  const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>({ channel: 'stable' });
-  const updateChannelRef = useRef<string>('stable');
+  const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>(() => {
+    try {
+      const saved = window.localStorage.getItem('imp_update_channel_v1');
+      if (saved === 'alpha' || saved === 'off' || saved === 'stable') {
+        return { channel: saved };
+      }
+    } catch {}
+    return { channel: 'stable' };
+  });
+  const updateChannelRef = useRef<string>(updateStatus.channel || 'stable');
   const notifiedUpdateTagRef = useRef<string | null>(
     (() => {
       try {
@@ -567,6 +581,9 @@ const ConsoleMainApp: React.FC = () => {
   useEffect(() => {
     if (updateStatus.channel) {
       updateChannelRef.current = updateStatus.channel;
+      try {
+        window.localStorage.setItem('imp_update_channel_v1', updateStatus.channel);
+      } catch {}
     }
   }, [updateStatus.channel]);
 
@@ -618,6 +635,16 @@ const ConsoleMainApp: React.FC = () => {
   }, []);
 
   const checkSimpUpdates = useCallback(async (_silent = false) => {
+    if (_silent) {
+      let cachedCh = updateChannelRef.current;
+      try {
+        const stored = window.localStorage.getItem('imp_update_channel_v1');
+        if (stored) cachedCh = stored;
+      } catch {}
+      if (cachedCh.toLowerCase() === 'off') {
+        return;
+      }
+    }
     setUpdateStatus((prev) => ({ ...prev, checking: true, error: undefined }));
     const base = resolveDaemonBaseUrl();
     const maybeNotifyAvailableUpdate = (
@@ -757,11 +784,29 @@ const ConsoleMainApp: React.FC = () => {
   useEffect(() => {
     if (isDeckyEmbedded || startupUpdateCheckedRef.current) return;
     startupUpdateCheckedRef.current = true;
-    const tid = window.setTimeout(() => {
+    const tid = window.setTimeout(async () => {
+      const base = resolveDaemonBaseUrl();
+      try {
+        const pResp = await fetch(`${base}/api/settings/privacy`, { cache: 'no-store' });
+        if (pResp.ok) {
+          const pData = await pResp.json();
+          if (typeof pData?.update_channel === 'string') {
+            const ch = pData.update_channel.toLowerCase();
+            updateChannelRef.current = ch;
+            setUpdateStatus((prev) => ({ ...prev, channel: ch }));
+            try {
+              window.localStorage.setItem('imp_update_channel_v1', ch);
+            } catch {}
+            if (ch === 'off') return;
+          }
+        }
+      } catch {
+        // fallback cleanly to checkSimpUpdates local guard
+      }
       checkSimpUpdates(true);
     }, 3500);
     return () => window.clearTimeout(tid);
-  }, [isDeckyEmbedded, checkSimpUpdates]);
+  }, [isDeckyEmbedded, resolveDaemonBaseUrl, checkSimpUpdates]);
 
   const applySimpUpdate = useCallback(async () => {
     setUpdateStatus((prev) => ({ ...prev, applying: true, error: undefined }));
@@ -3058,23 +3103,25 @@ const ConsoleMainApp: React.FC = () => {
         handleRemoveFolder={handleRemoveFolder}
       />
 
-      {/* Unified Top-Left Hamburger (☰ / START) Nested Settings Drawer */}
+      {/* Unified Top-Right 3-Column XMB START Menu */}
       {(sourceModalOpen || powerModalOpen) && (
-        <SettingsModal
+        <XmbUnifiedMenu
           snap={snap}
           customFolderPath={customFolderPath}
           setCustomFolderPath={setCustomFolderPath}
           setOskTarget={setOskTarget}
           handleAddFolder={handleAddFolder}
           handleRemoveFolder={handleRemoveFolder}
-          setView={setView}
           setSourceModalOpen={setSourceModalOpen}
           setPowerModalOpen={setPowerModalOpen}
           setIsSleeping={setIsSleeping}
           dismissConsole={dismissConsole}
           brightnessPct={brightnessPct}
           setBrightnessPct={setBrightnessPct}
+          idleTimerSec={desktopVizIdleSec}
+          onChangeIdleTimerSec={handleChangeDesktopVizIdleSec}
           updateStatus={updateStatus}
+          setUpdateStatus={setUpdateStatus}
           checkSimpUpdates={checkSimpUpdates}
           applySimpUpdate={applySimpUpdate}
           confirmHardReset={confirmHardReset}
@@ -3085,8 +3132,6 @@ const ConsoleMainApp: React.FC = () => {
           cdScanning={cdScanning}
           handleScanOpticalDisc={handleScanOpticalDisc}
           handleEjectOpticalDisc={handleEjectOpticalDisc}
-          setBrowserTarget={setBrowserTarget}
-          setBrowserTracks={setBrowserTracks}
           appleAuthCfg={appleAuthCfg}
           setAppleAuthCfg={setAppleAuthCfg}
           appleBusy={appleBusy}
@@ -3095,13 +3140,13 @@ const ConsoleMainApp: React.FC = () => {
           setSoundcloudAuthCfg={setSoundcloudAuthCfg}
           soundcloudBusy={soundcloudBusy}
           setSoundcloudBusy={setSoundcloudBusy}
-          setBrowserSourceFilter={setBrowserSourceFilter}
-          setAppleSubTab={setAppleSubTab}
-          setSoundCloudSubTab={setSoundCloudSubTab}
           refreshLibraryData={refreshLibraryData}
           applyFocusMarker={applyFocusMarker}
           showToast={showToast}
           initialOpenFoldersAccounts={initialOpenFoldersAccounts}
+          isDeckyEmbedded={isDeckyEmbedded}
+          desktopMode={desktopMode}
+          onToggleDesktopMode={handleToggleDesktopMode}
           onOpenQuickHelp={() => {
             setInitialOpenFoldersAccounts(false);
             setQuickHelpOpen(true);

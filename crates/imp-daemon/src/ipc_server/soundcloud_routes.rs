@@ -383,6 +383,9 @@ pub(super) async fn soundcloud_comments_handler(
     State(state): State<DaemonIpcState>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
+    if !imp_core::is_online_sc_comments_fetch_enabled() {
+        return Json(serde_json::json!({ "ok": true, "data": [] }));
+    }
     let cfg = state.settings.lock().unwrap().clone();
     let id = params.get("id").cloned().unwrap_or_default();
     let db = state.db.clone();

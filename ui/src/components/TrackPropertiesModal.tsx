@@ -273,15 +273,15 @@ export const TrackPropertiesModal: React.FC<TrackPropertiesModalProps> = ({
           width: 'min(560px, 94vw)',
           maxHeight: '88vh',
           overflowY: 'auto',
-          borderRadius: 16,
-          background: 'linear-gradient(180deg, rgba(15, 22, 34, 0.98), rgba(9, 13, 21, 0.99))',
-          border: `1px solid ${theme.accentBorder}`,
-          boxShadow: `0 22px 55px rgba(0, 0, 0, 0.7), 0 0 28px ${theme.accentMuted}`,
-          padding: '18px 20px',
-          color: '#f1f5f9',
+          borderRadius: 10,
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))',
+          boxShadow: '0 22px 55px rgba(0, 0, 0, 0.78)',
+          padding: '16px 18px',
+          color: 'var(--imp-text-primary, #eef0f4)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 12,
         }}
       >
         {/* Header */}

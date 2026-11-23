@@ -29,6 +29,8 @@ import {
   tileGridStyle,
   useLibraryLyricsStatus,
 } from "../libraryHelpers";
+import { HorizontalShelfRail } from "../HorizontalShelfRail";
+import { useExpandedShelf } from "../ExpandedShelfContext";
 import { UniversalSearchResultsPane } from "./UniversalSearchResultsPane";
 import { AppleMusicDiscoverPane } from "./AppleMusicDiscoverPane";
 import { SoundCloudDiscoverPane } from "./SoundCloudDiscoverPane";
@@ -37,7 +39,7 @@ import { ImpFypPane } from "./ImpFypPane";
 import { LocalDiscoverPane, type LocalFacetsSummary } from "./LocalDiscoverPane";
 import { ImpIcon } from "../../../components/icons/ImpIcon";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
-import { SourceVisibilityPrefs } from "../../SettingsModal";
+import type { SourceVisibilityPrefs } from "../../../menu/menuCorpus";
 import {
   CollapsibleSectionHeader,
   FilterTriggerButton,
@@ -382,6 +384,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   soundCloudSubTab,
 }) => {
   useLibraryLyricsStatus();
+  const { expandedShelfId, registerPortalHost } = useExpandedShelf();
   const [facetTracks, setFacetTracks] = React.useState<TrackMetadata[]>([]);
   const [facetLoading, setFacetLoading] = React.useState(false);
 
@@ -423,7 +426,27 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   }, [hybridPlaylistsList, pinnedPlaylistsList]);
 
   return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, width: '100%' }}>
+      <div
+        ref={registerPortalHost}
+        data-expanded-shelf-portal="true"
+        style={{
+          display: expandedShelfId ? 'flex' : 'none',
+          flexDirection: 'column',
+          gap: 14,
+          minWidth: 0,
+          width: '100%',
+        }}
+      />
+      <div
+        style={{
+          display: expandedShelfId ? 'none' : 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          minWidth: 0,
+          width: '100%',
+        }}
+      >
             {/* Not Signed In Setup Card (only shown when opening Apple Discover while not authenticated) */}
             {!snap?.apple_authenticated &&
               browseHubTarget === 'apple_discover' &&
@@ -922,20 +945,32 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                             accentColor="var(--imp-focus-ring, #e8b86d)"
                             title={`🕒 RECENTLY PLAYED (${filteredRecentlyPlayed.length})`}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {(simpHubFilter === 'recent'
-                              ? filteredRecentlyPlayed
-                              : filteredRecentlyPlayed.slice(0, 6)
-                            ).map((rTrack) =>
-                              renderSingleSongRow(
-                                rTrack,
-                                isUiVideoTrack(rTrack)
-                                  ? filteredRecentlyPlayed.filter((tr) => isUiVideoTrack(tr))
-                                  : filteredRecentlyPlayed.filter((tr) => !isUiVideoTrack(tr)),
-                                'recent_played'
-                              )
-                            )}
-                          </div>
+                          {simpHubFilter === 'recent' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {filteredRecentlyPlayed.map((rTrack) =>
+                                renderSingleSongRow(
+                                  rTrack,
+                                  isUiVideoTrack(rTrack)
+                                    ? filteredRecentlyPlayed.filter((tr) => isUiVideoTrack(tr))
+                                    : filteredRecentlyPlayed.filter((tr) => !isUiVideoTrack(tr)),
+                                  'recent_played'
+                                )
+                              )}
+                            </div>
+                          ) : (
+                            <HorizontalShelfRail variant="tracks" itemCount={filteredRecentlyPlayed.length}>
+                              {filteredRecentlyPlayed.map((rTrack) =>
+                                renderSingleSongRow(
+                                  rTrack,
+                                  isUiVideoTrack(rTrack)
+                                    ? filteredRecentlyPlayed.filter((tr) => isUiVideoTrack(tr))
+                                    : filteredRecentlyPlayed.filter((tr) => !isUiVideoTrack(tr)),
+                                  'recent_played',
+                                  true
+                                )
+                              )}
+                            </HorizontalShelfRail>
+                          )}
                         </section>
                       )}
 
@@ -966,9 +1001,9 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                           accentColor="var(--imp-focus-ring, #e8b86d)"
                           title={`★ IMP HYBRID PLAYLISTS (${hybridPlaylistsList.length})`}
                         />
-                        <div style={tileGridStyle}>
+                        <HorizontalShelfRail variant="tiles" itemCount={hybridPlaylistsList.length}>
                           {hybridPlaylistsList.map(renderSimpPlaylistCard)}
-                        </div>
+                        </HorizontalShelfRail>
                       </section>
                     )}
 
@@ -989,9 +1024,15 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                               </>
                             }
                           />
-                          <div style={tileGridStyle}>
-                            {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
-                          </div>
+                          {simpHubFilter === 'pinned' ? (
+                            <div style={tileGridStyle}>
+                              {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
+                            </div>
+                          ) : (
+                            <HorizontalShelfRail variant="tiles" itemCount={pinnedPlaylistsList.length}>
+                              {pinnedPlaylistsList.map(renderSimpPlaylistCard)}
+                            </HorizontalShelfRail>
+                          )}
                         </section>
                       )}
 
@@ -1007,9 +1048,15 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                             accentColor="var(--imp-focus-ring, #e8b86d)"
                             title={`💿 ALBUMS & SOUNDTRACKS (${filteredAlbums.length})`}
                           />
-                          <div style={tileGridStyle}>
-                            {filteredAlbums.map(renderSimpAlbumCard)}
-                          </div>
+                          {simpHubFilter === 'albums' ? (
+                            <div style={tileGridStyle}>
+                              {filteredAlbums.map(renderSimpAlbumCard)}
+                            </div>
+                          ) : (
+                            <HorizontalShelfRail variant="tiles" itemCount={filteredAlbums.length}>
+                              {filteredAlbums.map(renderSimpAlbumCard)}
+                            </HorizontalShelfRail>
+                          )}
                         </section>
                       )}
 
@@ -1027,11 +1074,19 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                             accentColor="var(--imp-focus-ring, #e8b86d)"
                             title={`LOCAL VIDEOS (${localVideos.length})`}
                           />
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {localVideos.map((v) =>
-                              renderSingleSongRow(v, localVideos, 'local_video_hub')
-                            )}
-                          </div>
+                          {simpHubFilter === 'videos' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {localVideos.map((v) =>
+                                renderSingleSongRow(v, localVideos, 'local_video_hub')
+                              )}
+                            </div>
+                          ) : (
+                            <HorizontalShelfRail variant="tracks" itemCount={localVideos.length}>
+                              {localVideos.map((v) =>
+                                renderSingleSongRow(v, localVideos, 'local_video_hub', true)
+                              )}
+                            </HorizontalShelfRail>
+                          )}
                         </section>
                       )}
                   </>
@@ -1158,6 +1213,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
               />
               </>
             )}
-          </div>
+      </div>
+    </div>
   );
 };

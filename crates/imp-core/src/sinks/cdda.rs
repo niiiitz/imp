@@ -1002,6 +1002,9 @@ struct MusicBrainzResolvedDisc {
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn fetch_musicbrainz_metadata(disc_id: &str, toc_param: &str) -> Option<MusicBrainzResolvedDisc> {
+    if !crate::is_online_disc_metadata_fetch_enabled() {
+        return None;
+    }
     let url = format!(
         "https://musicbrainz.org/ws/2/discid/{disc_id}?toc={toc_param}&fmt=json&inc=artists+recordings"
     );
