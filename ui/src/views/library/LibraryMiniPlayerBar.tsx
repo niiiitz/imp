@@ -128,13 +128,30 @@ const MiniSpectrumCanvas: React.FC<{
       return;
     }
 
-    let rafId = 0;
-    const tick = () => {
-      drawBars(true);
-      rafId = requestAnimationFrame(tick);
+    // Paced 15 FPS timer (0 FPS when tab/window is hidden) instead of uncapped 240Hz rAF
+    let intervalId: number | null = null;
+    const syncTimer = () => {
+      const active = document.visibilityState !== 'hidden';
+      if (active && intervalId === null) {
+        drawBars(true);
+        intervalId = window.setInterval(() => {
+          if (document.visibilityState !== 'hidden') {
+            drawBars(true);
+          }
+        }, 66);
+      } else if (!active && intervalId !== null) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
     };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
+    syncTimer();
+    document.addEventListener('visibilitychange', syncTimer);
+    return () => {
+      document.removeEventListener('visibilitychange', syncTimer);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
   }, [isPlaying, hidden, accentColor, idleColor]);
 
   return (

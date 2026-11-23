@@ -553,7 +553,15 @@ const ConsoleMainApp: React.FC = () => {
 
   const [updateStatus, setUpdateStatus] = useState<SimpUpdateStatus>({ channel: 'stable' });
   const updateChannelRef = useRef<string>('stable');
-  const notifiedUpdateTagRef = useRef<string | null>(null);
+  const notifiedUpdateTagRef = useRef<string | null>(
+    (() => {
+      try {
+        return window.localStorage.getItem('imp_notified_update_tag_v1');
+      } catch {
+        return null;
+      }
+    })()
+  );
   const startupUpdateCheckedRef = useRef(false);
 
   useEffect(() => {
@@ -619,6 +627,9 @@ const ConsoleMainApp: React.FC = () => {
     ) => {
       if (!available || !tag || notifiedUpdateTagRef.current === tag) return;
       notifiedUpdateTagRef.current = tag;
+      try {
+        window.localStorage.setItem('imp_notified_update_tag_v1', tag);
+      } catch {}
       const chLabel = channelName.toLowerCase() === 'alpha' ? 'Alpha' : 'Stable';
       showToast(`✨ IMP ${tag} available (${chLabel}) — open Settings to update`);
     };

@@ -44,7 +44,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GWL_STYLE, HICON, HWND_TOP, IDC_ARROW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, MSG,
     SM_CXSCREEN, SM_CYSCREEN, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE,
     SWP_NOZORDER, SWP_SHOWWINDOW, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, WINDOWPLACEMENT,
-    WM_APP, WM_CLOSE, WM_DESTROY, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
+    WM_ACTIVATE, WM_APP, WM_CLOSE, WM_DESTROY, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_EX_APPWINDOW,
     WS_EX_CLIENTEDGE, WS_EX_DLGMODALFRAME, WS_EX_NOACTIVATE, WS_EX_STATICEDGE, WS_EX_TOOLWINDOW,
     WS_EX_WINDOWEDGE, WS_MAXIMIZE, WS_MINIMIZE, WS_OVERLAPPEDWINDOW, WS_POPUP,
 };
@@ -319,10 +319,37 @@ unsafe extern "system" fn wnd_proc(
     let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA);
 
     match msg {
+        WM_ACTIVATE => {
+            if ptr != 0 {
+                let state = &*(ptr as *const WindowState);
+                if !state.is_worker {
+                    let active = (w_param.0 & 0xFFFF) != 0;
+                    imp_core::gamepad::set_ui_window_focused(active);
+                    let _ = state.webview.PostWebMessageAsJson(if active {
+                        w!(r#"{"type":"imp_window_active","active":true}"#)
+                    } else {
+                        w!(r#"{"type":"imp_window_active","active":false}"#)
+                    });
+                }
+            }
+            DefWindowProcW(hwnd, msg, w_param, l_param)
+        }
         WM_SIZE => {
             if ptr != 0 {
                 let state = &*(ptr as *const WindowState);
-                sync_controller_bounds(hwnd, &state.controller);
+                // SIZE_MINIMIZED == 1: mark WebView invisible/unfocused to drop DWM/GPU overhead while gaming
+                if !state.is_worker && w_param.0 == 1 {
+                    imp_core::gamepad::set_ui_window_focused(false);
+                    let _ = state
+                        .webview
+                        .PostWebMessageAsJson(w!(r#"{"type":"imp_window_active","active":false}"#));
+                    let _ = state.controller.SetIsVisible(false);
+                } else {
+                    if !state.is_worker {
+                        let _ = state.controller.SetIsVisible(true);
+                    }
+                    sync_controller_bounds(hwnd, &state.controller);
+                }
             }
             LRESULT(0)
         }

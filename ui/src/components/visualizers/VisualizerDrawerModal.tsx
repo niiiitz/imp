@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { ImpIcon } from '../icons/ImpIcon';
 import {
+  formatVisualizerFpsCapLabel,
   VISUALIZER_SCENES,
   type VisualizerEngine,
   type VisualizerFpsCap,
@@ -14,9 +15,11 @@ interface VisualizerDrawerModalProps {
   activeEngine: VisualizerEngine;
   enabledScenes: VisualizerEngine[];
   fpsCap: VisualizerFpsCap;
+  pauseWhenUnfocused?: boolean;
   onSelectMode: (mode: VisualizerMode) => void;
   onToggleSceneInRotation: (engine: VisualizerEngine) => void;
   onToggleFpsCap: () => void;
+  onTogglePauseWhenUnfocused?: () => void;
   onSetAllScenesInRotation?: (engines: VisualizerEngine[]) => void;
 }
 
@@ -27,9 +30,11 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
   activeEngine,
   enabledScenes,
   fpsCap,
+  pauseWhenUnfocused = false,
   onSelectMode,
   onToggleSceneInRotation,
   onToggleFpsCap,
+  onTogglePauseWhenUnfocused,
 }) => {
   useEffect(() => {
     if (!open) return;
@@ -228,12 +233,13 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           </button>
         </div>
 
-        {/* Rotation Legend + 60 FPS / 30 FPS Eco Toggle */}
+        {/* Rotation Legend + Frame Rate Cap + Unfocused Pause Toggle */}
         <div
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
+            flexWrap: 'wrap',
             gap: 8,
             padding: '0 2px',
             fontSize: 11,
@@ -243,31 +249,60 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           <span>
             <strong>Left toggle</strong> = rotation • <strong>Row</strong> = lock scene
           </span>
-          <button
-            type="button"
-            onClick={onToggleFpsCap}
-            title="Switch visualizer frame rate between 60 FPS smooth and 30 FPS Eco battery saver"
-            style={{
-              minHeight: 28,
-              padding: '3px 10px',
-              borderRadius: 8,
-              background:
-                fpsCap === 60 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(16, 185, 129, 0.14)',
-              border:
-                fpsCap === 60
-                  ? '1px solid rgba(56, 189, 248, 0.48)'
-                  : '1px solid rgba(52, 211, 153, 0.45)',
-              color: fpsCap === 60 ? '#7dd3fc' : '#6ee7b7',
-              fontSize: 10.5,
-              fontFamily: 'monospace',
-              fontWeight: 800,
-              cursor: 'pointer',
-              letterSpacing: '0.03em',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {fpsCap === 60 ? '⚡ 60 FPS' : '🔋 30 FPS ECO'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              type="button"
+              onClick={onToggleFpsCap}
+              title="Cycle visualizer frame rate: 20 FPS, 30 FPS (default), 40 FPS, or Uncapped"
+              style={{
+                minHeight: 28,
+                padding: '3px 10px',
+                borderRadius: 8,
+                background:
+                  fpsCap === 0 ? 'rgba(56, 189, 248, 0.16)' : 'rgba(16, 185, 129, 0.14)',
+                border:
+                  fpsCap === 0
+                    ? '1px solid rgba(56, 189, 248, 0.48)'
+                    : '1px solid rgba(52, 211, 153, 0.45)',
+                color: fpsCap === 0 ? '#7dd3fc' : '#6ee7b7',
+                fontSize: 10.5,
+                fontFamily: 'monospace',
+                fontWeight: 800,
+                cursor: 'pointer',
+                letterSpacing: '0.03em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {formatVisualizerFpsCapLabel(fpsCap)}
+            </button>
+            {onTogglePauseWhenUnfocused && (
+              <button
+                type="button"
+                onClick={onTogglePauseWhenUnfocused}
+                title="When enabled, pauses visualizer rendering at 0 FPS whenever IMP is unfocused (keep off for dual-monitor setups)"
+                style={{
+                  minHeight: 28,
+                  padding: '3px 10px',
+                  borderRadius: 8,
+                  background: pauseWhenUnfocused
+                    ? 'rgba(245, 158, 11, 0.16)'
+                    : 'rgba(148, 163, 184, 0.12)',
+                  border: pauseWhenUnfocused
+                    ? '1px solid rgba(245, 158, 11, 0.48)'
+                    : '1px solid rgba(148, 163, 184, 0.32)',
+                  color: pauseWhenUnfocused ? '#fcd34d' : '#cbd5e1',
+                  fontSize: 10.5,
+                  fontFamily: 'monospace',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  letterSpacing: '0.02em',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {pauseWhenUnfocused ? 'Unfocused: Pause' : 'Unfocused: Active'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Scrollable Scene Roster */}

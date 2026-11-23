@@ -174,6 +174,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
 
     let mut app = Router::new()
         .route("/health", get(health_handler))
+        .route("/api/ui/focus", get(ui_focus_get_handler).post(ui_focus_post_handler))
         .route("/api/v1/system/perf", get(system_perf_handler))
         .route("/api/system/perf", get(system_perf_handler))
         .route("/api/update/check", get(update_check_handler))
@@ -351,6 +352,34 @@ async fn health_handler() -> impl IntoResponse {
         "pid": std::process::id(),
         "ui_served": ui_dir.is_some(),
         "ui_dir": ui_dir,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct UiFocusBody {
+    focused: Option<bool>,
+    policy: Option<String>,
+}
+
+async fn ui_focus_get_handler() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "ok": true,
+        "focused": imp_core::gamepad::is_ui_window_focused(),
+        "policy": imp_core::gamepad::gamepad_focus_policy(),
+    }))
+}
+
+async fn ui_focus_post_handler(Json(body): Json<UiFocusBody>) -> impl IntoResponse {
+    if let Some(focused) = body.focused {
+        imp_core::gamepad::set_ui_window_focused(focused);
+    }
+    if let Some(policy) = body.policy.as_deref() {
+        imp_core::gamepad::set_gamepad_focus_policy(policy);
+    }
+    Json(serde_json::json!({
+        "ok": true,
+        "focused": imp_core::gamepad::is_ui_window_focused(),
+        "policy": imp_core::gamepad::gamepad_focus_policy(),
     }))
 }
 

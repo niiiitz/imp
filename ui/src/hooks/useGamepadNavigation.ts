@@ -82,6 +82,19 @@ export function useGamepadNavigation({
   const lastGamepadInputTsRef = useRef<number>(0);
   const lastBrowserFocusRef = useRef<HTMLElement | null>(null);
   const lastBrowserColRef = useRef<string | null>(null);
+  const lastFocusPointRef = useRef<{ x: number; y: number } | null>(null);
+  const windowFocusedRef = useRef<boolean>(
+    typeof document !== 'undefined' ? document.hasFocus() : true
+  );
+  const gamepadFocusPolicyRef = useRef<'focused_only' | 'always' | 'off'>(
+    (() => {
+      try {
+        const raw = window.localStorage.getItem('imp_gamepad_focus_policy_v1');
+        if (raw === 'always' || raw === 'off' || raw === 'focused_only') return raw;
+      } catch {}
+      return 'focused_only';
+    })()
+  );
   const preMuteVolumeRef = useRef<number>(0.85);
   const lastActionTsRef = useRef<Record<string, number>>({});
   const lastActionSourceRef = useRef<Record<string, string>>({});
@@ -172,6 +185,13 @@ export function useGamepadNavigation({
     if (el) {
       el.setAttribute('data-simp-active-focus', 'true');
       el.classList.add('simp-gpfocus');
+      const focusRect = el.getBoundingClientRect();
+      if (focusRect.width > 0 && focusRect.height > 0) {
+        lastFocusPointRef.current = {
+          x: focusRect.left + focusRect.width / 2,
+          y: focusRect.top + focusRect.height / 2,
+        };
+      }
       const navColEl = el.closest<HTMLElement>('[data-nav-col]');
       if (navColEl) {
         lastBrowserFocusRef.current = el;
@@ -208,6 +228,120 @@ export function useGamepadNavigation({
       }
     }
   }, []);
+
+  // Sync window focus & gamepad focus policy to `imp-daemon` (`/api/ui/focus`) so background
+  // Gamescope / Steam Frame / Windows game sessions never have controller inputs hijacked by IMP,
+  // and listen for explicit sibling focus handoffs (`simp-handoff-focus`) when UI rows unmount.
+  useEffect(() => {
+    const resolveFocusUrl = () => {
+      try {
+        if (
+          window.location.protocol === 'http:' &&
+          window.location.hostname &&
+          window.location.hostname !== 'steamloopback.host'
+        ) {
+          const port =
+            window.location.port === '1420' ? '18888' : window.location.port || '18888';
+          return `http://${window.location.hostname}:${port}/api/ui/focus`;
+        }
+      } catch {}
+      return 'http://127.0.0.1:18888/api/ui/focus';
+    };
+
+    const syncDaemonFocus = (focused: boolean, policy = gamepadFocusPolicyRef.current) => {
+      windowFocusedRef.current = focused;
+      const payload = JSON.stringify({ focused, policy });
+      try {
+        fetch(resolveFocusUrl(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      } catch {}
+    };
+
+    const initialFocused = document.visibilityState === 'visible' && document.hasFocus();
+    syncDaemonFocus(initialFocused);
+
+    const onWinFocus = () => {
+      if (document.visibilityState === 'visible') {
+        syncDaemonFocus(true);
+      }
+    };
+    const onWinBlur = () => {
+      syncDaemonFocus(false);
+    };
+    const onVisChange = () => {
+      syncDaemonFocus(document.visibilityState === 'visible' && document.hasFocus());
+    };
+    const onPageHide = () => {
+      windowFocusedRef.current = false;
+      try {
+        const blob = new Blob(
+          [JSON.stringify({ focused: false, policy: gamepadFocusPolicyRef.current })],
+          { type: 'application/json' }
+        );
+        navigator.sendBeacon?.(resolveFocusUrl(), blob);
+      } catch {}
+    };
+    const onPolicyChange = (ev: Event) => {
+      const next = (ev as CustomEvent<{ policy?: string }>)?.detail?.policy;
+      if (next === 'focused_only' || next === 'always' || next === 'off') {
+        gamepadFocusPolicyRef.current = next;
+        try {
+          window.localStorage.setItem('imp_gamepad_focus_policy_v1', next);
+        } catch {}
+        syncDaemonFocus(windowFocusedRef.current, next);
+      }
+    };
+    const onHandoffFocus = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ element?: HTMLElement | null; selector?: string }>)
+        ?.detail;
+      const candidate =
+        (detail?.element && detail.element.isConnected ? detail.element : null) ||
+        (detail?.selector ? document.querySelector<HTMLElement>(detail.selector) : null);
+      if (candidate && candidate.isConnected && !(candidate as HTMLButtonElement).disabled) {
+        applyFocusMarker(candidate);
+      }
+    };
+
+    const webview = (window as unknown as {
+      chrome?: {
+        webview?: {
+          addEventListener?: (type: string, fn: (ev: { data?: unknown }) => void) => void;
+          removeEventListener?: (type: string, fn: (ev: { data?: unknown }) => void) => void;
+        };
+      };
+    }).chrome?.webview;
+    const onWebviewMessage = (ev: { data?: unknown }) => {
+      const data = ev?.data as { type?: string; active?: boolean } | undefined;
+      if (data && data.type === 'imp_window_active' && typeof data.active === 'boolean') {
+        syncDaemonFocus(data.active);
+        window.dispatchEvent(
+          new CustomEvent('imp-window-active', { detail: { active: data.active } })
+        );
+      }
+    };
+
+    window.addEventListener('focus', onWinFocus);
+    window.addEventListener('blur', onWinBlur);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('imp-gamepad-policy-change', onPolicyChange);
+    window.addEventListener('simp-handoff-focus', onHandoffFocus);
+    document.addEventListener('visibilitychange', onVisChange);
+    webview?.addEventListener?.('message', onWebviewMessage);
+
+    return () => {
+      window.removeEventListener('focus', onWinFocus);
+      window.removeEventListener('blur', onWinBlur);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('imp-gamepad-policy-change', onPolicyChange);
+      window.removeEventListener('simp-handoff-focus', onHandoffFocus);
+      document.removeEventListener('visibilitychange', onVisChange);
+      webview?.removeEventListener?.('message', onWebviewMessage);
+    };
+  }, [applyFocusMarker]);
 
   // Automatically place the focus marker on the default focus target when entering Browser (or restore last browser focus) or opening Modals
   useEffect(() => {
@@ -387,21 +521,39 @@ export function useGamepadNavigation({
           (Boolean(active?.closest('[data-nav-col="right"]')) ||
             Boolean(lastBrowserFocusRef.current?.closest('[data-nav-col="right"]')) ||
             lastBrowserColRef.current === 'right');
-        const rightPrimaryNodes = wasInRightCol
+        const rightNodes = wasInRightCol
           ? nodes.filter(
               (n) =>
-                Boolean(n.closest('[data-nav-col="right"]')) &&
-                (n.dataset.rightTile === 'true' ||
-                  n.dataset.singleSongPlay === 'true' ||
-                  n.dataset.rightTrack === 'true') &&
-                n.dataset.loadMore !== 'true'
+                Boolean(n.closest('[data-nav-col="right"]')) && n.dataset.loadMore !== 'true'
             )
           : [];
+        let nearestRightNode: HTMLElement | null = null;
+        if (rightNodes.length > 0) {
+          const anchor = lastFocusPointRef.current;
+          if (anchor) {
+            let bestDist = Infinity;
+            for (const cand of rightNodes) {
+              const r = cand.getBoundingClientRect();
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              const inViewport = r.bottom >= 0 && r.top <= window.innerHeight;
+              const dist = Math.hypot(cx - anchor.x, cy - anchor.y) + (inViewport ? 0 : 10000);
+              if (dist < bestDist) {
+                bestDist = dist;
+                nearestRightNode = cand;
+              }
+            }
+          } else {
+            nearestRightNode =
+              rightNodes.find((n) => {
+                const r = n.getBoundingClientRect();
+                return r.bottom >= 0 && r.top <= window.innerHeight;
+              }) || rightNodes[0];
+          }
+        }
         const preferred =
           hoveredNode ||
-          (rightPrimaryNodes.length > 0
-            ? rightPrimaryNodes[rightPrimaryNodes.length - 1]
-            : null) ||
+          nearestRightNode ||
           nodes.find((el) => el.dataset.defaultFocus === 'true') ||
           nodes[0];
         applyFocusMarker(preferred);
@@ -1803,9 +1955,18 @@ export function useGamepadNavigation({
         return;
       }
       if (window.parent !== window) return;
-      // Only ignore if the browser tab is hidden in the background; in SteamVR Desktop overlay mode,
-      // visible windows (`visibilityState === 'visible'`) often have `document.hasFocus() === false` when using Gamepad mode!
-      if (document.visibilityState === 'hidden') return;
+      const policy = gamepadFocusPolicyRef.current;
+      if (policy === 'off') {
+        daemonHeldDir = null;
+        return;
+      }
+      if (
+        document.visibilityState === 'hidden' ||
+        (policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
+        daemonHeldDir = null;
+        return;
+      }
       const now = performance.now();
       if (now - lastBridgeMsgTsRef.current < 220) {
         return;
@@ -1820,7 +1981,12 @@ export function useGamepadNavigation({
 
     const daemonRepeatTimer = window.setInterval(() => {
       if (!daemonHeldDir) return;
-      if (document.visibilityState === 'hidden') {
+      const policy = gamepadFocusPolicyRef.current;
+      if (
+        policy === 'off' ||
+        document.visibilityState === 'hidden' ||
+        (policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
         daemonHeldDir = null;
         return;
       }
@@ -1916,7 +2082,15 @@ export function useGamepadNavigation({
     window.addEventListener('gamepaddisconnected', onGamepadDisconnected);
 
     const poll = window.setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
+      const policy = gamepadFocusPolicyRef.current;
+      if (
+        policy === 'off' ||
+        document.visibilityState === 'hidden' ||
+        (window.parent === window && policy === 'focused_only' && !windowFocusedRef.current)
+      ) {
+        heldDirByPad.clear();
+        return;
+      }
       const now = performance.now();
       if (!hasConnectedPad) {
         // In browsers that don't fire `gamepadconnected` until a button is pressed, probe once every 1.5s instead of 20Hz

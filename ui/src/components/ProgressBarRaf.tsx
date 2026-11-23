@@ -210,7 +210,7 @@ export const ProgressBarRaf: React.FC<Props> = ({
   const awaitingFirstStreamTickRef = useRef(false);
 
   useEffect(() => {
-    let rafId = 0;
+    let timerId: number | null = null;
     let lastDomPct = -1;
     let lastWaveformStep = -1;
     let lastDomTimeText = '';
@@ -300,20 +300,25 @@ export const ProgressBarRaf: React.FC<Props> = ({
       document.visibilityState !== 'hidden' &&
       (isPlayingRef.current || isDraggingRef.current);
 
+    // Paced timer instead of uncapped 240Hz rAF: 8Hz during playback (~125ms), 30Hz only while dragging,
+    // and 0Hz when hidden/paused — eliminates GPU/DWM wakeups while gaming with Visualizer Off.
     const renderLoop = () => {
-      rafId = 0;
+      timerId = null;
       if (shouldRunLoop()) {
         updateDom();
-        rafId = requestAnimationFrame(renderLoop);
+        const intervalMs = isDraggingRef.current ? 33 : 125;
+        timerId = window.setTimeout(renderLoop, intervalMs);
       }
     };
 
     const ensureLoop = () => {
-      if (shouldRunLoop() && rafId === 0) {
-        rafId = requestAnimationFrame(renderLoop);
-      } else if (!shouldRunLoop() && rafId !== 0) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
+      if (shouldRunLoop() && timerId === null) {
+        updateDom();
+        const intervalMs = isDraggingRef.current ? 33 : 125;
+        timerId = window.setTimeout(renderLoop, intervalMs);
+      } else if (!shouldRunLoop() && timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
       }
     };
     ensureLoopRef.current = ensureLoop;
@@ -392,9 +397,9 @@ export const ProgressBarRaf: React.FC<Props> = ({
     }
     ensureLoop();
     return () => {
-      if (rafId !== 0) {
-        cancelAnimationFrame(rafId);
-        rafId = 0;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       unsub();

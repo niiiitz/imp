@@ -11,11 +11,14 @@ import {
   VideoSubtitleVariant,
 } from '@simp/client';
 import {
+  cycleVisualizerFpsCap,
   loadEnabledVisualizerScenes,
   loadVisualizerFpsCap,
+  loadVisualizerPauseUnfocused,
   PlayerBackgroundVisualizer,
   saveEnabledVisualizerScenes,
   saveVisualizerFpsCap,
+  saveVisualizerPauseUnfocused,
   VISUALIZER_MODES,
   VISUALIZER_ENGINES,
   type VisualizerEngine,
@@ -203,8 +206,18 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   const [vizFpsCap, setVizFpsCap] = useState<VisualizerFpsCap>(() => loadVisualizerFpsCap());
   const handleToggleVizFpsCap = useCallback(() => {
     setVizFpsCap((prev) => {
-      const next: VisualizerFpsCap = prev === 60 ? 30 : 60;
+      const next = cycleVisualizerFpsCap(prev);
       saveVisualizerFpsCap(next);
+      return next;
+    });
+  }, []);
+  const [vizPauseUnfocused, setVizPauseUnfocused] = useState<boolean>(() =>
+    loadVisualizerPauseUnfocused(),
+  );
+  const handleToggleVizPauseUnfocused = useCallback(() => {
+    setVizPauseUnfocused((prev) => {
+      const next = !prev;
+      saveVisualizerPauseUnfocused(next);
       return next;
     });
   }, []);
@@ -1702,6 +1715,7 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
             mode={effectiveVizMode}
             enabledScenes={enabledVizScenes}
             fpsCap={vizFpsCap}
+            pauseWhenUnfocused={vizPauseUnfocused}
             preferredScene={
               (trackPropsState.preferred_viz_mode as VisualizerEngine | null | undefined) || null
             }
@@ -1973,9 +1987,11 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
         activeEngine={activeVizEngine}
         enabledScenes={enabledVizScenes}
         fpsCap={vizFpsCap}
+        pauseWhenUnfocused={vizPauseUnfocused}
         onSelectMode={handleSelectVizMode}
         onToggleSceneInRotation={handleToggleSceneInRotation}
         onToggleFpsCap={handleToggleVizFpsCap}
+        onTogglePauseWhenUnfocused={handleToggleVizPauseUnfocused}
         onSetAllScenesInRotation={handleSetAllScenesInRotation}
       />
 

@@ -663,6 +663,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
           {shelves.map((rec, idx) => (
             <div
               key={rec.shelf_uid}
+              data-fyp-manage-row={rec.shelf_uid}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -693,12 +694,31 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 <button
                   type="button"
                   data-focusable="true"
+                  data-fyp-action="move-up"
                   disabled={idx === 0}
-                  onClick={() => {
+                  onClick={(e) => {
                     if (idx === 0) return;
+                    const uid = rec.shelf_uid;
+                    const becomingFirst = idx === 1;
                     const next = [...shelves];
                     [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
                     saveAllShelves(next);
+                    const btn = e.currentTarget;
+                    window.requestAnimationFrame(() => {
+                      const target = becomingFirst
+                        ? document.querySelector<HTMLElement>(
+                            `[data-fyp-manage-row="${CSS.escape(uid)}"] [data-fyp-action="move-down"]:not([disabled])`
+                          ) ||
+                          document.querySelector<HTMLElement>(
+                            `[data-fyp-manage-row="${CSS.escape(uid)}"] [data-fyp-action="toggle"]:not([disabled])`
+                          )
+                        : btn;
+                      if (target) {
+                        window.dispatchEvent(
+                          new CustomEvent('simp-handoff-focus', { detail: { element: target } })
+                        );
+                      }
+                    });
                   }}
                   title="Move shelf up"
                   style={{
@@ -717,12 +737,31 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 <button
                   type="button"
                   data-focusable="true"
+                  data-fyp-action="move-down"
                   disabled={idx === shelves.length - 1}
-                  onClick={() => {
+                  onClick={(e) => {
                     if (idx >= shelves.length - 1) return;
+                    const uid = rec.shelf_uid;
+                    const becomingLast = idx === shelves.length - 2;
                     const next = [...shelves];
                     [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
                     saveAllShelves(next);
+                    const btn = e.currentTarget;
+                    window.requestAnimationFrame(() => {
+                      const target = becomingLast
+                        ? document.querySelector<HTMLElement>(
+                            `[data-fyp-manage-row="${CSS.escape(uid)}"] [data-fyp-action="move-up"]:not([disabled])`
+                          ) ||
+                          document.querySelector<HTMLElement>(
+                            `[data-fyp-manage-row="${CSS.escape(uid)}"] [data-fyp-action="toggle"]:not([disabled])`
+                          )
+                        : btn;
+                      if (target) {
+                        window.dispatchEvent(
+                          new CustomEvent('simp-handoff-focus', { detail: { element: target } })
+                        );
+                      }
+                    });
                   }}
                   title="Move shelf down"
                   style={{
@@ -741,11 +780,20 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 <button
                   type="button"
                   data-focusable="true"
-                  onClick={() => {
+                  data-fyp-action="toggle"
+                  onClick={(e) => {
+                    const btn = e.currentTarget;
                     const next = shelves.map((s) =>
                       s.shelf_uid === rec.shelf_uid ? { ...s, enabled: !s.enabled } : s
                     );
                     saveAllShelves(next);
+                    window.requestAnimationFrame(() => {
+                      if (btn.isConnected) {
+                        window.dispatchEvent(
+                          new CustomEvent('simp-handoff-focus', { detail: { element: btn } })
+                        );
+                      }
+                    });
                   }}
                   style={{
                     minHeight: 26,
@@ -764,7 +812,30 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 <button
                   type="button"
                   data-focusable="true"
-                  onClick={() => unpinShelf(rec.shelf_uid)}
+                  data-fyp-action="remove"
+                  onClick={() => {
+                    const nextUid = shelves[idx + 1]?.shelf_uid ?? shelves[idx - 1]?.shelf_uid ?? null;
+                    unpinShelf(rec.shelf_uid);
+                    window.requestAnimationFrame(() => {
+                      const fallback =
+                        (nextUid
+                          ? document.querySelector<HTMLElement>(
+                              `[data-fyp-manage-row="${CSS.escape(nextUid)}"] [data-fyp-action="remove"]:not([disabled])`
+                            ) ||
+                            document.querySelector<HTMLElement>(
+                              `[data-fyp-manage-row="${CSS.escape(nextUid)}"] [data-fyp-action="toggle"]:not([disabled])`
+                            )
+                          : null) ||
+                        document.querySelector<HTMLElement>(
+                          '[data-nav-col="right"] button:not([disabled])'
+                        );
+                      if (fallback) {
+                        window.dispatchEvent(
+                          new CustomEvent('simp-handoff-focus', { detail: { element: fallback } })
+                        );
+                      }
+                    });
+                  }}
                   title="Remove shelf from Imp FYP"
                   style={{
                     minHeight: 26,
