@@ -81,9 +81,12 @@ strict = os.environ.get("STRICT") == "1"
 cooldown_days = int(os.environ.get("COOLDOWN_DAYS", "14"))
 now_utc = datetime.now(timezone.utc)
 
-# --- Lockfile source verification (workspace + imp-desktop) ---
+# --- Lockfile source verification (workspace + imp-desktop when present) ---
 cargo_versions = {}
-for lock_path in ["Cargo.lock", os.path.join("crates", "imp-desktop", "Cargo.lock")]:
+lock_candidates = ["Cargo.lock"]
+if os.path.isfile(os.path.join("crates", "imp-desktop", "Cargo.toml")):
+    lock_candidates.append(os.path.join("crates", "imp-desktop", "Cargo.lock"))
+for lock_path in lock_candidates:
     if not os.path.isfile(lock_path):
         continue
     src = open(lock_path, "r", encoding="utf-8").read()
