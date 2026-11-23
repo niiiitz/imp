@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { defaultSimpClient } from '@simp/client';
+import { defaultSimpClient } from '@imp/client';
 import {
   AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,

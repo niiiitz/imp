@@ -2,7 +2,7 @@ import React from "react";
 import {
   SimpStateSnapshot,
   TrackMetadata,
-} from "@simp/client";
+} from "@imp/client";
 import {
   AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,

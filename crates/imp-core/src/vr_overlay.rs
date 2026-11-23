@@ -26,8 +26,8 @@ pub fn build_vrmanifest_json(bin_path: &Path, icon_path: &Path) -> String {
                 "image_path": icon_path.to_string_lossy(),
                 "strings": {
                     "en_us": {
-                        "name": "IMP Media Player",
-                        "description": "Integrated Media Player — Native Console & SteamVR Audio Hub"
+                        "name": "Imp Media Player",
+                        "description": "Interactive Media Player — Native Console & SteamVR Audio Hub"
                     }
                 }
             }
@@ -521,7 +521,7 @@ fn openvr_bridge_loop(state: Arc<Mutex<OrchestratorSnapshot>>) {
                     if let Some(ov) = overlay_fns {
                         let _ = (ov.create_overlay)(
                             c"org.imp.player.status".as_ptr(),
-                            c"IMP Media Player".as_ptr(),
+                            c"Imp Media Player".as_ptr(),
                             &mut overlay_handle,
                         );
                     }
@@ -533,12 +533,12 @@ fn openvr_bridge_loop(state: Arc<Mutex<OrchestratorSnapshot>>) {
                                 let label = if let Ok(s) = state.lock() {
                                     if let Some(ref trk) = s.current_track {
                                         let icon = if s.is_playing { "▶" } else { "⏸" };
-                                        format!("IMP • {icon} {}", trk.title)
+                                        format!("Imp • {icon} {}", trk.title)
                                     } else {
-                                        "IMP Media Player".to_string()
+                                        "Imp Media Player".to_string()
                                     }
                                 } else {
-                                    "IMP Media Player".to_string()
+                                    "Imp Media Player".to_string()
                                 };
                                 if label != last_label {
                                     if let Ok(c_lbl) = CString::new(label.as_bytes()) {

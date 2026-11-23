@@ -5,7 +5,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>IMP</string>
+  <string>Imp</string>
   <key>CFBundleExecutable</key>
   <string>imp</string>
   <key>CFBundleIconFile</key>
@@ -27,7 +27,7 @@
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>IMP uses local audio loopback to apply its 10-band Equalizer, Vocal Isolation DSP, and real-time 16-band spectrum visualizer to Apple Music playback.</string>
+  <string>Imp uses local audio loopback to apply its 10-band Equalizer, Vocal Isolation DSP, and real-time 16-band spectrum visualizer to Apple Music playback.</string>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
   <key>NSAppTransportSecurity</key>

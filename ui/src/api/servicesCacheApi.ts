@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlbumRecord, ArchiveItemSummary, TrackMetadata } from '@simp/client';
+import { AlbumRecord, ArchiveItemSummary, TrackMetadata } from '@imp/client';
 import {
   AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,

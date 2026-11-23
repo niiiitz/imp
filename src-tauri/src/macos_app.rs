@@ -261,7 +261,7 @@ extern "C" fn create_popup_webview(
         );
         let _: () = msg_send![popup_win, setReleasedWhenClosed: NO];
         popup_win.center();
-        popup_win.setTitle_(ns_string("IMP — Sign In"));
+        popup_win.setTitle_(ns_string("Imp — Sign In"));
 
         let dark_appearance: id = msg_send![
             class!(NSAppearance),
@@ -434,7 +434,7 @@ unsafe fn setup_macos_main_menubar(delegate: id) {
     let app_menu = NSMenu::new(nil).autorelease();
     let show_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("Show / Hide IMP Window"),
+            ns_string("Show / Hide Imp Window"),
             sel!(onMenuToggleWindow:),
             ns_string("0"),
         )
@@ -455,7 +455,7 @@ unsafe fn setup_macos_main_menubar(delegate: id) {
 
     let quit_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("Quit IMP"),
+            ns_string("Quit Imp"),
             sel!(onMenuQuitSimp:),
             ns_string("q"),
         )
@@ -501,7 +501,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
         } else {
             let _: () = msg_send![button, setTitle: ns_string("🎵")];
         }
-        let _: () = msg_send![button, setToolTip: ns_string("IMP Media Player — Left-click to toggle window, Right-click for menu")];
+        let _: () = msg_send![button, setToolTip: ns_string("Imp Media Player — Left-click to toggle window, Right-click for menu")];
         let _: () = msg_send![button, setTarget: delegate];
         let _: () = msg_send![button, setAction: sel!(onStatusBarClick:)];
         let _: () = msg_send![
@@ -510,9 +510,9 @@ unsafe fn setup_status_bar_tray(delegate: id) {
         ];
     }
 
-    let menu = NSMenu::alloc(nil).initWithTitle_(ns_string("IMP"));
+    let menu = NSMenu::alloc(nil).initWithTitle_(ns_string("Imp"));
     let header_item = NSMenuItem::new(nil);
-    let _: () = msg_send![header_item, setTitle: ns_string("🎵 IMP Media Player")];
+    let _: () = msg_send![header_item, setTitle: ns_string("🎵 Imp Media Player")];
     let _: () = msg_send![header_item, setEnabled: NO];
     STATUS_HEADER_ITEM_PTR.store(header_item as usize, Ordering::SeqCst);
     menu.addItem_(header_item);
@@ -534,7 +534,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
 
     let toggle_win_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("↗ Show / Hide IMP Window"),
+            ns_string("↗ Show / Hide Imp Window"),
             sel!(onMenuToggleWindow:),
             ns_string(""),
         )
@@ -544,7 +544,7 @@ unsafe fn setup_status_bar_tray(delegate: id) {
 
     let quit_item = NSMenuItem::alloc(nil)
         .initWithTitle_action_keyEquivalent_(
-            ns_string("⏻ Quit IMP"),
+            ns_string("⏻ Quit Imp"),
             sel!(onMenuQuitSimp:),
             ns_string("q"),
         )
@@ -621,7 +621,7 @@ pub fn run_macos_native_app(ui_url: &str) {
         let _: () = msg_send![window, setReleasedWhenClosed: NO];
         let _: () = msg_send![window, setDelegate: delegate];
         window.center();
-        window.setTitle_(ns_string("IMP"));
+        window.setTitle_(ns_string("Imp"));
 
         // Apply Dark Aqua appearance and #08080c background color so startup never flashes white
         let dark_appearance: id = msg_send![

@@ -536,9 +536,9 @@ fn run_webview2_window(url: &str, is_worker: bool) -> Result<(), String> {
         IMP_NATIVE_UI_CLASS
     };
     let window_title = if is_worker {
-        "IMP Headless Audio Worker"
+        "Imp Headless Audio Worker"
     } else {
-        "IMP — Interactive Media Player"
+        "Imp — Interactive Media Player"
     };
 
     let class_w = to_wide(class_name);

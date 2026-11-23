@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { defaultSimpClient, type SoundCloudComment, type TrackMetadata } from '@simp/client';
+import { defaultSimpClient, type SoundCloudComment, type TrackMetadata } from '@imp/client';
 import {
   cycleVisualizerFpsCap,
   formatVisualizerFpsCapLabel,

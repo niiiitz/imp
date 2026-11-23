@@ -256,7 +256,7 @@ def generate_svg() -> str:
     <path d="M 152 86 C 149 86, 147 84, 147 81.5 C 147 79.2, 148.8 77.4, 151 77.2 C 151.8 74.8, 154 73, 156.8 73 C 160.2 73, 163 75.8, 163 79.2 C 164.8 79.6, 166 81.2, 166 83 C 166 84.7, 164.7 86, 163 86 Z"
           fill="#e4e4ec"/>
     <text x="173" y="87" fill="#f4f4f8" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="13" font-weight="800">IMP — Interactive Media</text>
+          font-size="13" font-weight="800">Imp — Interactive Media</text>
 
     <!-- Top-Center Segmented Pill: [ Player | Library & Queue ] -->
     <rect x="496" y="60" width="288" height="46" rx="14" fill="#090910" stroke="#1c1c28" stroke-width="1.2"/>
@@ -310,8 +310,8 @@ def generate_svg() -> str:
          =================================================================== -->
     <text x="104" y="168" fill="#ffffff"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
-          font-size="34" font-weight="900" letter-spacing="-0.4">IMP</text>
-    <text x="180" y="167" fill="#cbd5e1"
+          font-size="34" font-weight="900" letter-spacing="-0.4">Imp</text>
+    <text x="174" y="167" fill="#cbd5e1"
           font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif"
           font-size="20" font-weight="700">— Interactive Media Player</text>
 

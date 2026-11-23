@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { SimpStateSnapshot, TrackMetadata } from '@simp/client';
+import { SimpStateSnapshot, TrackMetadata } from '@imp/client';
 import {
   FypShelfDescriptor,
   FypShelfRecord,

@@ -7,7 +7,7 @@ import socket
 import subprocess
 
 SERVICE_UNIT_TEMPLATE = """[Unit]
-Description=IMP (Integrated Media Player) Background Audio & UI Daemon
+Description=Imp (Interactive Media Player) Background Audio & UI Daemon
 After=pipewire.service pipewire-pulse.service graphical-session.target
 Wants=pipewire.service
 

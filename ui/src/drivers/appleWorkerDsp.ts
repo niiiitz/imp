@@ -1,4 +1,4 @@
-import type { DspConfigEventPayload } from '@simp/client';
+import type { DspConfigEventPayload } from '@imp/client';
 
 const EQ_BAND_FREQS_HZ = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000] as const;
 const EME_TAINTED_SESSION_KEY = 'imp_webaudio_eme_tainted';

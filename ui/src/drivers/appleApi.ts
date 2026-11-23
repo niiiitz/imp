@@ -3,7 +3,7 @@ import {
   defaultSimpClient,
   PlaylistRecord,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import { markTrackLyricsStatus } from '../views/library/libraryHelpers';
 
 declare global {
@@ -264,7 +264,7 @@ export async function ensureMusicKitConfigured(
       ...(musicUserToken ? { musicUserToken } : {}),
       suppressErrorDialog: true,
       app: {
-        name: 'IMP Media Player',
+        name: 'Imp Media Player',
         build: '0.1.0-alpha',
       },
     });
@@ -343,7 +343,7 @@ export async function authorizeAppleMusic(
 
   defaultSimpClient.setAppleMusicUserToken(userToken);
   defaultSimpClient.reportAppleWorkerEvent('authorized', 0, null, null);
-  onToast?.('Apple Music connected! Browse Cloud Playlists, Radio, or Search to Pin to IMP.');
+  onToast?.('Apple Music connected! Browse Cloud Playlists, Radio, or Search to Pin to Imp.');
   return true;
 }
 
@@ -484,7 +484,7 @@ export async function pinApplePlaylistToSimp(
     playlist: record,
     tracks,
   });
-  onToast?.(`Pinned "${pl.name}" (${tracks.length} tracks) to IMP!`);
+  onToast?.(`Pinned "${pl.name}" (${tracks.length} tracks) to Imp!`);
   return record;
 }
 
@@ -527,7 +527,7 @@ export async function pinAppleAlbumToSimp(
     album: record,
     tracks: tracks.map((t) => ({ ...t, album_id: albId })),
   });
-  onToast?.(`Pinned full album "${album.title}" (${tracks.length} tracks) to IMP!`);
+  onToast?.(`Pinned full album "${album.title}" (${tracks.length} tracks) to Imp!`);
   return record;
 }
 

@@ -101,7 +101,7 @@ mod linux_sni {
             } else {
                 track.artists.join(", ")
             };
-            let title = format!("IMP — {}", track.title);
+            let title = format!("Imp — {}", track.title);
             let body = if track.album.is_empty() {
                 format!("{}\n{}", artists, status_line)
             } else {
@@ -112,7 +112,7 @@ mod linux_sni {
             (
                 "org.imp.player".to_string(),
                 Vec::new(),
-                "IMP — Integrated Media Player".to_string(),
+                "Imp — Interactive Media Player".to_string(),
                 status_line,
             )
         }
@@ -126,7 +126,7 @@ mod linux_sni {
             let prefix = if is_playing { "🎵" } else { "🔇" };
             (format!("{} {} — {}", prefix, track.title, artist), is_playing)
         } else {
-            ("🎵 IMP Ready (Idle)".to_string(), is_playing)
+            ("🎵 Imp Ready (Idle)".to_string(), is_playing)
         }
     }
 
@@ -337,7 +337,7 @@ mod linux_sni {
                             6 => {
                                 map.insert(
                                     "label".to_string(),
-                                    Variant(Box::new("↗ Open IMP".to_string()) as Box<dyn RefArg>),
+                                    Variant(Box::new("↗ Open Imp".to_string()) as Box<dyn RefArg>),
                                 );
                                 map.insert(
                                     "enabled".to_string(),
@@ -413,7 +413,7 @@ mod linux_sni {
                             make_menu_item(3, "⏭ Next Track", true, false),
                             make_menu_item(4, "⏮ Previous Track", true, false),
                             make_menu_item(5, "", true, true),
-                            make_menu_item(6, "↗ Open IMP", true, false),
+                            make_menu_item(6, "↗ Open Imp", true, false),
                             make_menu_item(7, "🔄 Reset Service", true, false),
                             make_menu_item(8, "⏻ Quit", true, false),
                         ]
@@ -883,9 +883,9 @@ mod win32_tray {
             } else {
                 track.artists.join(", ")
             };
-            format!("IMP — {}\n{} ({} • {}%)", track.title, artist, state_str, vol_pct)
+            format!("Imp — {}\n{} ({} • {}%)", track.title, artist, state_str, vol_pct)
         } else {
-            format!("IMP Media Player ({} • Vol {}%)", state_str, vol_pct)
+            format!("Imp Media Player ({} • Vol {}%)", state_str, vol_pct)
         }
     }
 
@@ -898,10 +898,10 @@ mod win32_tray {
         let (header_label, is_playing) = {
             let st = global.state.lock().unwrap();
             if let Some(ref t) = st.current_track {
-                let artist = t.artists.first().cloned().unwrap_or_else(|| "IMP".to_string());
+                let artist = t.artists.first().cloned().unwrap_or_else(|| "Imp".to_string());
                 (format!("🎵 {} — {}", t.title, artist), st.is_playing)
             } else {
-                ("🎵 IMP — Idle".to_string(), st.is_playing)
+                ("🎵 Imp — Idle".to_string(), st.is_playing)
             }
         };
 
@@ -918,7 +918,7 @@ mod win32_tray {
         });
         let next_w = to_wide("⏭ Next Track");
         let prev_w = to_wide("⏮ Previous Track");
-        let open_w = to_wide("↗ Open IMP");
+        let open_w = to_wide("↗ Open Imp");
         let quit_w = to_wide("⏻ Quit");
 
         AppendMenuW(hmenu, MF_STRING | MF_GRAYED, 0, header_w.as_ptr());
@@ -1074,7 +1074,7 @@ mod win32_tray {
             };
             RegisterClassExW(&wnd_class);
 
-            let win_title = to_wide("IMP Background Audio Service");
+            let win_title = to_wide("Imp Background Audio Service");
             let hwnd = CreateWindowExW(
                 0,
                 class_name.as_ptr(),
@@ -1116,7 +1116,7 @@ mod win32_tray {
             // Attach Windows 10/11 System Media Transport Controls (SMTC) via `souvlaki` using our hidden `hwnd`
             let mut smtc_controls = MediaControls::new(PlatformConfig {
                 dbus_name: "org.imp.player",
-                display_name: "IMP Media Player",
+                display_name: "Imp Media Player",
                 hwnd: Some(hwnd),
             })
             .ok();

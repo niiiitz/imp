@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { defaultSimpClient, type DspConfigEventPayload } from '@simp/client';
+import { defaultSimpClient, type DspConfigEventPayload } from '@imp/client';
 import {
   checkWidevineDrm,
   ensureMusicKitConfigured,

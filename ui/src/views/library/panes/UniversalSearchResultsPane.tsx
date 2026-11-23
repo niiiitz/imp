@@ -5,7 +5,7 @@ import {
   PlaylistRecord,
   SimpStateSnapshot,
   TrackMetadata,
-} from "@simp/client";
+} from "@imp/client";
 import {
   AppleCatalogSearchResults,
   AppleCloudAlbumSummary,
@@ -118,7 +118,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                   <>
                     <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                       <ImpIcon name="imp" size={11} color="var(--imp-focus-ring, #e8b86d)" />
-                      <span>MATCHING IMP & PINNED PLAYLISTS ({searchMatchedPlaylists.length})</span>
+                      <span>MATCHING Imp & PINNED PLAYLISTS ({searchMatchedPlaylists.length})</span>
                     </div>
                     <div style={tileGridStyle}>
                       {searchMatchedPlaylists.map(renderSimpPlaylistCard)}
@@ -226,7 +226,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           {filteredAlbums.length > 0 && (
                             <>
                               <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)' }}>
-                                💿 MATCHING IMP LIBRARY ALBUMS ({filteredAlbums.length})
+                                💿 MATCHING Imp LIBRARY ALBUMS ({filteredAlbums.length})
                               </div>
                               <div style={tileGridStyle}>
                                 {filteredAlbums.slice(0, 24).map(renderSimpAlbumCard)}

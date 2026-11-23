@@ -296,7 +296,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
               <button
                 type="button"
                 onClick={onTogglePauseWhenUnfocused}
-                title="When enabled, pauses visualizer rendering at 0 FPS whenever IMP is unfocused (keep off for dual-monitor setups)"
+                title="When enabled, pauses visualizer rendering at 0 FPS whenever Imp is unfocused (keep off for dual-monitor setups)"
                 style={{
                   minHeight: 28,
                   padding: '3px 10px',

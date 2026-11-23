@@ -3,7 +3,7 @@ import {
   defaultSimpClient,
   SimpStateSnapshot,
   TrackMetadata,
-} from "@simp/client";
+} from "@imp/client";
 import {
   fetchSoundCloudDiscover,
   fetchSoundCloudFollowings,
@@ -402,7 +402,7 @@ export const SoundCloudDiscoverPane: React.FC<SoundCloudDiscoverPaneProps> = ({
                         return (
                           <>
                             <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#fdba74' }}>
-                              🕒 LISTENING HISTORY IN IMP ({scHist.length})
+                              🕒 LISTENING HISTORY IN Imp ({scHist.length})
                             </div>
                             <HorizontalShelfRail variant="tracks" itemCount={scHist.length}>
                               {scHist.map((s) =>

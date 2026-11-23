@@ -5,7 +5,7 @@ import {
   OpticalDiscStatus,
   SimpStateSnapshot,
   SoundCloudAuthConfig,
-} from '@simp/client';
+} from '@imp/client';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { FolderChooserModal } from './FolderChooserModal';
 import { resolveDaemonUrl } from '../api/servicesCacheApi';
@@ -793,7 +793,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
                 letterSpacing: '0.02em',
               }}
             >
-              IMP Menu<span className="simp-gp-badge"> (START)</span>
+              Imp Menu<span className="simp-gp-badge"> (START)</span>
             </strong>
             <button
               type="button"

@@ -5,7 +5,7 @@ import {
   TrackMetadata,
   VideoQualityVariant,
   VideoSubtitleVariant,
-} from '@simp/client';
+} from '@imp/client';
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { type VisualizerMode } from '../../components/PlayerBackgroundVisualizer';
 import { SoundCloudAttributionLink } from '../../components/SoundCloudLogo';
@@ -679,7 +679,7 @@ export const PlayerVideoStage: React.FC<PlayerVideoStageProps> = ({
           ) : (
             <img
               src="/simp-icon-dark.png?v=0.3.0-alpha.1"
-              alt="IMP"
+              alt="Imp"
               style={{
                 width: '100%',
                 height: '100%',

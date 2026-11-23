@@ -3,7 +3,7 @@ import {
   PlaylistRecord,
   SoundCloudComment,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 
 export type { SoundCloudComment };
 
@@ -575,7 +575,7 @@ export async function pinSoundCloudPlaylistToSimp(
   preloadedTracks?: TrackMetadata[],
   onToast?: (msg: string) => void
 ): Promise<number> {
-  onToast?.(`Pinning "${playlist.name}" to IMP...`);
+  onToast?.(`Pinning "${playlist.name}" to Imp...`);
   let tracks =
     preloadedTracks && preloadedTracks.length > 0
       ? preloadedTracks
@@ -611,7 +611,7 @@ export async function pinSoundCloudPlaylistToSimp(
   // Also sync as a Liked Set on SoundCloud (`POST /likes/playlists/{id}`) if signed in
   setSoundCloudPlaylistLiked(playlist.id, true).catch(() => {});
 
-  onToast?.(`📌 Pinned "${playlist.name}" (${tracks.length} tracks) to IMP Library`);
+  onToast?.(`📌 Pinned "${playlist.name}" (${tracks.length} tracks) to Imp Library`);
   return tracks.length;
 }
 

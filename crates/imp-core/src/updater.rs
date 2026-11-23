@@ -499,7 +499,7 @@ pub fn spawn_delayed_daemon_restart() {
                  if exist \"{pid_old_str}\" del /F /Q \"{pid_old_str}\" >nul 2>&1\r\n\
                  if exist \"{legacy_old_str}\" del /F /Q \"{legacy_old_str}\" >nul 2>&1\r\n\
                  if exist \"{ico_str}\" del /F /Q \"{ico_str}\" >nul 2>&1\r\n\
-                 start \"IMP\" \"{target_str}\" --daemon\r\n\
+                 start \"Imp\" \"{target_str}\" --daemon\r\n\
                  del /F /Q \"%~f0\" >nul 2>&1\r\n"
             );
             if std::fs::write(&bat_path, bat_contents).is_ok() {
@@ -1151,13 +1151,13 @@ pub fn apply_self_update(
 
     let decky_staged_only = decky_env_present && !decky_updated;
     let msg = if decky_updated && plugin_loader_restarted {
-        format!("Updated IMP ({arch} Daemon + UI + Decky QAM) to v{target_ver}")
+        format!("Updated Imp ({arch} Daemon + UI + Decky QAM) to v{target_ver}")
     } else if decky_updated {
-        format!("Updated IMP ({arch} Daemon + UI + Decky QAM) to v{target_ver} (restart Decky/Steam or run 'sudo systemctl restart plugin_loader' to reload QAM)")
+        format!("Updated Imp ({arch} Daemon + UI + Decky QAM) to v{target_ver} (restart Decky/Steam or run 'sudo systemctl restart plugin_loader' to reload QAM)")
     } else if decky_staged_only {
-        format!("Updated IMP ({arch} Daemon + UI) to v{target_ver} — Decky QAM staged at ~/.local/share/imp/decky-staged (needs sudo to install into ~/homebrew/plugins/imp-decky)")
+        format!("Updated Imp ({arch} Daemon + UI) to v{target_ver} — Decky QAM staged at ~/.local/share/imp/decky-staged (needs sudo to install into ~/homebrew/plugins/imp-decky)")
     } else {
-        format!("Updated IMP ({arch} Daemon + UI) to v{target_ver}")
+        format!("Updated Imp ({arch} Daemon + UI) to v{target_ver}")
     };
 
     Ok(UpdateApplyResult {
@@ -1271,7 +1271,7 @@ fn install_linux_icons_and_desktop_entries(
         ] {
             let alias_path = apps_dir.join(format!("{alias_id}.desktop"));
             let content = format!(
-                "[Desktop Entry]\nType=Application\nName=IMP\nExec={bin_str}\nIcon=org.imp.player\nNoDisplay=true\nStartupWMClass={alias_id}\n"
+                "[Desktop Entry]\nType=Application\nName=Imp\nExec={bin_str}\nIcon=org.imp.player\nNoDisplay=true\nStartupWMClass={alias_id}\n"
             );
             if std::fs::write(&alias_path, content).is_ok() {
                 let _ = std::fs::set_permissions(&alias_path, std::fs::Permissions::from_mode(0o644));
@@ -1305,7 +1305,7 @@ fn apply_windows_self_update(
         .context("Could not determine running Imp.exe path")?;
     let install_dir = current_exe
         .parent()
-        .ok_or_else(|| anyhow!("Could not determine IMP install directory"))?
+        .ok_or_else(|| anyhow!("Could not determine Imp install directory"))?
         .to_path_buf();
 
     let tmp_dir = std::env::temp_dir().join(format!("imp-windows-update-{}", std::process::id()));
@@ -1496,7 +1496,7 @@ fn apply_windows_self_update(
         decky_updated: false,
         decky_staged_only: false,
         message: format!(
-            "Updated IMP Portable ({}) to v{target_ver}",
+            "Updated Imp Portable ({}) to v{target_ver}",
             install_dir.display()
         ),
     })

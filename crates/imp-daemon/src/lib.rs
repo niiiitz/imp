@@ -20,7 +20,7 @@ pub async fn run_daemon() -> anyhow::Result<()> {
         .try_init();
 
     tracing::info!(
-        "Starting IMP v{} (Integrated Media Player) headless daemon...",
+        "Starting Imp v{} (Interactive Media Player) headless daemon...",
         env!("CARGO_PKG_VERSION")
     );
 

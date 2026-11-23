@@ -400,7 +400,7 @@ export function buildMenuCorpus(ctx: BuildMenuCorpusContext): MenuColumnDescript
     { id: 'sep_n2', label: '', kind: 'separator' },
     {
       id: 'quit_imp',
-      label: 'Quit IMP',
+      label: 'Quit Imp',
       kind: 'action',
       danger: true,
     },

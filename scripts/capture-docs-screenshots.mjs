@@ -409,7 +409,7 @@ const INITIAL_SNAPSHOT = {
   soundcloud_authenticated: false,
   internet_archive_authenticated: true,
   brightness_pct: 100,
-  daemon_version: '1.1.0',
+  daemon_version: '1.1.1',
 };
 
 // -----------------------------------------------------------------------------
@@ -592,7 +592,7 @@ function startMockServer() {
         const bars = Array.from({ length: 180 }, (_, i) => Math.round(28 + 56 * Math.abs(Math.sin(i * 0.21)) + 16 * Math.cos(i * 0.67)));
         res.end(JSON.stringify({ ok: true, bars }));
       } else if (pathname === '/api/update/check') {
-        res.end(JSON.stringify({ ok: true, update_available: false, channel: 'stable', current_version: '1.1.0', latest_version: '1.1.0' }));
+        res.end(JSON.stringify({ ok: true, update_available: false, channel: 'stable', current_version: '1.1.1', latest_version: '1.1.1' }));
       } else if (pathname === '/api/factoids') {
         res.end(JSON.stringify({ ok: true, found: false, factoids: [], track_summary: null, artist_bio: null }));
       } else if (pathname === '/api/auth/probe') {

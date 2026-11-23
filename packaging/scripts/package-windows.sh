@@ -151,7 +151,7 @@ elif [[ -n "${WINDOWS_PFX_PATH:-}" && -f "${WINDOWS_PFX_PATH}" ]]; then
     osslsigncode sign \
       -pkcs12 "${WINDOWS_PFX_PATH}" \
       -pass "${WINDOWS_PFX_PASSWORD:-}" \
-      -n "IMP (Integrated Media Player)" \
+      -n "Imp (Interactive Media Player)" \
       -i "https://github.com/niiiitz/imp" \
       -h sha256 \
       -t "${WINDOWS_TIMESTAMP_URL}" \
@@ -169,19 +169,19 @@ elif [[ -n "${WINDOWS_PFX_PATH:-}" && -f "${WINDOWS_PFX_PATH}" ]]; then
 fi
 
 cat > "${OUT_DIR}/portable.txt" <<'EOF'
-IMP Portable Mode Marker
+Imp Portable Mode Marker
 ========================
-Keeping this file (portable.txt) next to Imp.exe tells IMP to store all
+Keeping this file (portable.txt) next to Imp.exe tells Imp to store all
 library databases (data\library.db), settings (data\settings.vdf), cached
 cover art (data\art\), and chromeless window state (data\window-profile\)
 self-contained inside this folder.
 
-Delete portable.txt if you prefer IMP to store data in %LOCALAPPDATA%\imp.
+Delete portable.txt if you prefer Imp to store data in %LOCALAPPDATA%\imp.
 EOF
 
 cat > "${OUT_DIR}/Stop-IMP-Background-Audio.bat" <<'EOF'
 @echo off
-echo Stopping IMP headless background audio service (Imp.exe)...
+echo Stopping Imp headless background audio service (Imp.exe)...
 taskkill /F /IM Imp.exe >nul 2>&1
 taskkill /F /IM simp.exe >nul 2>&1
 echo Done.
@@ -189,26 +189,26 @@ EOF
 
 cat > "${OUT_DIR}/README-WINDOWS.txt" <<'EOF'
 ======================================================================
- IMP (Integrated Media Player) — Windows Portable Edition
+ Imp (Interactive Media Player) — Windows Portable Edition
 ======================================================================
 
 1. HOW TO LAUNCH
    Double-click `Imp.exe`.
    - Starts the ultra-lightweight headless Rust audio daemon (`Imp.exe --daemon`)
      in the background (~0.1% CPU, native Windows WASAPI audio).
-   - Places the IMP Portal Icon in the Windows System Tray (Notification Area).
-   - Opens the chromeless IMP Console window via built-in Embedded Edge WebView2
+   - Places the Imp Portal Icon in the Windows System Tray (Notification Area).
+   - Opens the chromeless Imp Console window via built-in Embedded Edge WebView2
      (with automatic fallback to Microsoft Edge / Brave / Chrome `--app` if
      WebView2 Runtime is unavailable or `IMP_USE_EXTERNAL_BROWSER=1` is set).
 
 2. HEADLESS BACKGROUND PLAYBACK & SYSTEM TRAY
-   - Closing the IMP window keeps your music playing in the background with
+   - Closing the Imp window keeps your music playing in the background with
      zero taskbar clutter.
-   - Left-click the IMP System Tray icon in the bottom-right Notification Area
-     to re-open the IMP Console window at any time.
+   - Left-click the Imp System Tray icon in the bottom-right Notification Area
+     to re-open the Imp Console window at any time.
    - Middle-click the System Tray icon to toggle Play / Pause.
    - Right-click the System Tray icon for Now Playing status, Play/Pause,
-     Next, Previous, Open IMP Console, or Quit IMP.
+     Next, Previous, Open Imp Console, or Quit Imp.
    - Hardware keyboard Media Keys (Play/Pause, Next, Previous) and the
      Windows 10/11 Volume Flyout work automatically while in-game.
 
@@ -219,9 +219,9 @@ cat > "${OUT_DIR}/README-WINDOWS.txt" <<'EOF'
      (including an external SSD or USB drive).
 
 4. IN-PLACE SELF-UPDATE & AUTHENTICODE SIGNING
-   - Open Settings -> Updates inside IMP (or run `Imp.exe update` from
+   - Open Settings -> Updates inside Imp (or run `Imp.exe update` from
      PowerShell / Command Prompt) to check GitHub and self-update in-place.
-   - IMP downloads `imp-windows-portable-x86_64.zip`, renames the running
+   - Imp downloads `imp-windows-portable-x86_64.zip`, renames the running
      `Imp.exe` -> `Imp.exe.old` (cleaned up automatically on next startup),
      updates `Imp.exe` and `ui\` in place while preserving your `data\`
      folder, and restarts the background audio daemon automatically.

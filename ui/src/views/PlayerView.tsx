@@ -9,7 +9,7 @@ import {
   TrackMetadata,
   VideoQualityVariant,
   VideoSubtitleVariant,
-} from '@simp/client';
+} from '@imp/client';
 import {
   cycleVisualizerFpsCap,
   loadEnabledVisualizerScenes,

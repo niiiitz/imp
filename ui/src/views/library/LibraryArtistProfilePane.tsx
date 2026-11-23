@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlbumRecord, defaultSimpClient, TrackMetadata } from '@simp/client';
+import { AlbumRecord, defaultSimpClient, TrackMetadata } from '@imp/client';
 import {
   AppleArtistProfileResponse,
   AppleArtistSummary,

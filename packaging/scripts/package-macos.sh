@@ -46,7 +46,7 @@ raw_ver = os.environ.get("TARGET_VERSION", "").strip().lstrip("v")
 if not raw_ver:
     raw_ver = pkg.get("version", "0.1.0-alpha").lstrip("v")
 
-for p_path in ["decky-plugin/package.json", "package.json", "ui/package.json", "packages/simp-client/package.json"]:
+for p_path in ["decky-plugin/package.json", "package.json", "ui/package.json", "packages/imp-client/package.json"]:
     if os.path.isfile(p_path):
         with open(p_path, "r", encoding="utf-8") as f:
             p_data = json.load(f)
@@ -107,8 +107,8 @@ if os.path.isfile(readme_path):
         readme_src,
     )
     readme_next = re.sub(
-        r"## ⬇️ Download (?:IMP|SIMP) \(`v[^`]+`([^)]*)\)",
-        f"## ⬇️ Download IMP (`v{raw_ver}`\\1)",
+        r"## ⬇️ Download (?:Imp|IMP|SIMP) \(`v[^`]+`([^)]*)\)",
+        f"## ⬇️ Download Imp (`v{raw_ver}`\\1)",
         readme_next,
     )
     readme_next = re.sub(

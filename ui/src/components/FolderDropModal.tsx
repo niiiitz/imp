@@ -182,7 +182,7 @@ export const FolderDropModal: React.FC<FolderDropModalProps> = ({
               <div style={{ fontSize: 15, fontWeight: 800 }}>Add Folder to Local Folders?</div>
             </div>
             <div style={{ fontSize: 12.5, color: '#cbd5e1', lineHeight: 1.45 }}>
-              Index this folder into your local IMP library so its albums, tracks, artwork, and `.lrc` lyrics are available across all views:
+              Index this folder into your local Imp library so its albums, tracks, artwork, and `.lrc` lyrics are available across all views:
             </div>
             <div
               style={{

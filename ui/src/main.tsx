@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
-import { defaultSimpClient } from '@simp/client';
+import { defaultSimpClient } from '@imp/client';
 import './themeTokens.css';
 import { App } from './App';
 import { AppleMusicDriver } from './drivers/AppleMusicDriver';
@@ -19,12 +19,12 @@ const isDedicatedAppleWorker =
     window.location.pathname.startsWith('/apple-worker'));
 
 if (isDedicatedAppleWorker && typeof document !== 'undefined') {
-  document.title = 'IMP Headless Audio Worker';
+  document.title = 'Imp Headless Audio Worker';
 }
 
 const HeadlessAppleWorker: React.FC = () => {
   useEffect(() => {
-    document.title = 'IMP Headless Audio Worker';
+    document.title = 'Imp Headless Audio Worker';
     defaultSimpClient.connect();
   }, []);
   return <AppleMusicDriver />;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { TrackMetadata } from '@simp/client';
+import { TrackMetadata } from '@imp/client';
 import {
   matchTrackOnSoundCloud,
   openSoundCloudPermalink,

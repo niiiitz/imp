@@ -6,7 +6,7 @@ import {
   PlaylistRecord,
   SimpStateSnapshot,
   TrackMetadata,
-} from "@simp/client";
+} from "@imp/client";
 import {
   AppleCatalogSearchResults,
   AppleCloudAlbumSummary,
@@ -886,7 +886,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                         <input
                           type="text"
                           data-osk-input="playlist"
-                          placeholder="Name your new IMP Hybrid Playlist (Local + Apple + SoundCloud)..."
+                          placeholder="Name your new Imp Hybrid Playlist (Local + Apple + SoundCloud)..."
                           value={newPlaylistName}
                           onChange={(e) => setNewPlaylistName(e.target.value)}
                           onClick={(e) => {
@@ -999,7 +999,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                         <CollapsibleSectionHeader
                           sectionKey="imp_lib:hybrid"
                           accentColor="var(--imp-focus-ring, #e8b86d)"
-                          title={`★ IMP HYBRID PLAYLISTS (${hybridPlaylistsList.length})`}
+                          title={`★ Imp Hybrid Playlists (${hybridPlaylistsList.length})`}
                         />
                         <HorizontalShelfRail variant="tiles" itemCount={hybridPlaylistsList.length}>
                           {hybridPlaylistsList.map(renderSimpPlaylistCard)}

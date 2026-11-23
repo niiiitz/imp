@@ -1,4 +1,4 @@
-import { AlbumRecord, TrackMetadata } from '@simp/client';
+import { AlbumRecord, TrackMetadata } from '@imp/client';
 import { normalizeParentFolderPath } from './libraryHelpers';
 
 export interface LocalSubfolderSummary {

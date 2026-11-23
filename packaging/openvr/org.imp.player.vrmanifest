@@ -10,8 +10,8 @@
       "image_path": "__IMP_ICON__",
       "strings": {
         "en_us": {
-          "name": "IMP Media Player",
-          "description": "Integrated Media Player — Native Console & SteamVR Audio Hub"
+          "name": "Imp Media Player",
+          "description": "Interactive Media Player — Native Console & SteamVR Audio Hub"
         }
       }
     }

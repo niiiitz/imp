@@ -279,7 +279,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .nest_service("/art", ServeDir::new(art_cache_dir));
 
     if let Some(ui_dir) = resolve_ui_dir() {
-        tracing::info!("Serving IMP Console UI from {}", ui_dir.display());
+        tracing::info!("Serving Imp Console UI from {}", ui_dir.display());
         let index_file = ui_dir.join("index.html");
         app = app
             .route_service("/pair", tower_http::services::ServeFile::new(&index_file))
@@ -308,10 +308,10 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
     let lan_ips = detect_lan_ips();
     if let Some(primary_ip) = lan_ips.first() {
         tracing::info!(
-            "IMP Daemon listening on http://127.0.0.1:18888 and LAN Companion http://{primary_ip}:18888/pair"
+            "Imp Daemon listening on http://127.0.0.1:18888 and LAN Companion http://{primary_ip}:18888/pair"
         );
     } else {
-        tracing::info!("IMP Daemon IPC, Art & UI Server listening on http://{addr}");
+        tracing::info!("Imp Daemon IPC, Art & UI Server listening on http://{addr}");
     }
     let mut bind_err = None;
     let mut listener_opt = None;
@@ -394,18 +394,22 @@ async fn apple_worker_html_handler() -> impl IntoResponse {
         if let Ok(raw) = std::fs::read_to_string(&index_path) {
             let worker_html = raw
                 .replace(
+                    "<title>Imp — Interactive Media Player</title>",
+                    "<title>Imp Headless Audio Worker</title>",
+                )
+                .replace(
                     "<title>IMP — Interactive Media Player</title>",
-                    "<title>IMP Headless Audio Worker</title>",
+                    "<title>Imp Headless Audio Worker</title>",
                 )
                 .replace(
                     "<title>SIMP — Simple Integrated Media Player</title>",
-                    "<title>IMP Headless Audio Worker</title>",
+                    "<title>Imp Headless Audio Worker</title>",
                 );
             return axum::response::Html(worker_html);
         }
     }
     axum::response::Html(
-        "<!DOCTYPE html><html><head><title>IMP Headless Audio Worker</title></head><body></body></html>"
+        "<!DOCTYPE html><html><head><title>Imp Headless Audio Worker</title></head><body></body></html>"
             .to_string(),
     )
 }

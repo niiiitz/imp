@@ -1,4 +1,4 @@
-import type { SoundCloudComment } from '@simp/client';
+import type { SoundCloudComment } from '@imp/client';
 
 export const CANVAS_W = 640;
 export const CANVAS_H = 360;

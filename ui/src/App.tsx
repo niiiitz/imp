@@ -8,7 +8,7 @@ import {
   SimpStateSnapshot,
   SoundCloudAuthConfig,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import { CompanionPairView } from './components/CompanionPairView';
 import { quitNativeAppWindow, toggleAppFullscreen } from './api/servicesCacheApi';
 import type { BrowseHubTarget } from './views/library/libraryHelpers';
@@ -79,7 +79,7 @@ const isDedicatedAppleWorkerRoute =
 
 const DedicatedAppleWorkerApp: React.FC = () => {
   useEffect(() => {
-    document.title = 'IMP Headless Audio Worker';
+    document.title = 'Imp Headless Audio Worker';
     defaultSimpClient.connect();
   }, []);
   return <AppleMusicDriver />;
@@ -658,7 +658,7 @@ const ConsoleMainApp: React.FC = () => {
         window.localStorage.setItem('imp_notified_update_tag_v1', tag);
       } catch {}
       const chLabel = channelName.toLowerCase() === 'alpha' ? 'Alpha' : 'Stable';
-      showToast(`✨ IMP ${tag} available (${chLabel}) — open Settings to update`);
+      showToast(`✨ Imp ${tag} available (${chLabel}) — open Settings to update`);
     };
 
     try {
@@ -810,7 +810,7 @@ const ConsoleMainApp: React.FC = () => {
 
   const applySimpUpdate = useCallback(async () => {
     setUpdateStatus((prev) => ({ ...prev, applying: true, error: undefined }));
-    showToast('Downloading & installing latest IMP release from GitHub...');
+    showToast('Downloading & installing latest Imp release from GitHub...');
     const base = resolveDaemonBaseUrl();
     try {
       const resp = await fetch(`${base}/api/update/apply`, { method: 'POST', cache: 'no-store' });
@@ -828,7 +828,7 @@ const ConsoleMainApp: React.FC = () => {
             update_available: false,
           }));
         }
-        showToast(`${data.message} — restarting IMP...`);
+        showToast(`${data.message} — restarting Imp...`);
         await new Promise((r) => window.setTimeout(r, 950));
         for (let attempt = 0; attempt < 15; attempt++) {
           try {
@@ -2259,12 +2259,12 @@ const ConsoleMainApp: React.FC = () => {
               }
             } else {
               setSourceModalOpen(true);
-              showToast('Select the folder in Local Folders -> [Browse...] to index it into IMP');
+              showToast('Select the folder in Local Folders -> [Browse...] to index it into Imp');
             }
           })
           .catch(() => {
             setSourceModalOpen(true);
-            showToast('Select the folder in Local Folders -> [Browse...] to index it into IMP');
+            showToast('Select the folder in Local Folders -> [Browse...] to index it into Imp');
           });
       };
 
@@ -2323,7 +2323,7 @@ const ConsoleMainApp: React.FC = () => {
     try {
       const created = await defaultSimpClient.query<PlaylistRecord>('create_playlist', {
         name: trimmed,
-        description: 'Created in IMP',
+        description: 'Created in Imp',
       });
       setNewPlaylistName('');
       setCreatingPlaylist(false);
@@ -2389,10 +2389,10 @@ const ConsoleMainApp: React.FC = () => {
       let targetPlName = 'Favorites';
 
       if (createNewName !== undefined) {
-        const trimmedName = createNewName.trim() || 'New IMP Playlist';
+        const trimmedName = createNewName.trim() || 'New Imp Playlist';
         const created = await defaultSimpClient.query<PlaylistRecord>('create_playlist', {
           name: trimmedName,
-          description: 'Hybrid Local + Apple Music IMP playlist',
+          description: 'Hybrid Local + Apple Music Imp playlist',
         });
         targetPlId = created.id;
         targetPlName = created.name;
@@ -2408,7 +2408,7 @@ const ConsoleMainApp: React.FC = () => {
           }).catch(() => { });
         }
         targetPlId = found?.id || explicitPlaylistId;
-        targetPlName = found?.name || 'IMP Playlist';
+        targetPlName = found?.name || 'Imp Playlist';
         setActivePlaylistId(targetPlId);
       } else if (writablePlaylists.length === 1) {
         targetPlId = writablePlaylists[0].id;
@@ -2423,7 +2423,7 @@ const ConsoleMainApp: React.FC = () => {
       if (!targetPlId) {
         const created = await defaultSimpClient.query<PlaylistRecord>('create_playlist', {
           name: 'Favorites',
-          description: 'Hybrid Local + Apple Music IMP playlist',
+          description: 'Hybrid Local + Apple Music Imp playlist',
         });
         targetPlId = created.id;
         targetPlName = created.name;
@@ -2663,7 +2663,7 @@ const ConsoleMainApp: React.FC = () => {
       );
       setActivePlaylistId((prev) => (prev === playlistId ? '' : prev));
       refreshLibraryData();
-      showToast(`Removed playlist "${playlistName}" from IMP`);
+      showToast(`Removed playlist "${playlistName}" from Imp`);
     } catch {
       showToast('Could not remove playlist');
     }
@@ -2680,7 +2680,7 @@ const ConsoleMainApp: React.FC = () => {
           : prev
       );
       refreshLibraryData();
-      showToast(`Unpinned album "${albumTitle}" from IMP`);
+      showToast(`Unpinned album "${albumTitle}" from Imp`);
     } catch {
       showToast('Could not remove album');
     }
@@ -2695,7 +2695,7 @@ const ConsoleMainApp: React.FC = () => {
       await pinApplePlaylistToSimp(pl, preloadedTracks, showToast);
       refreshLibraryData();
     } catch (err: any) {
-      showToast(err?.message || 'Failed to pin playlist to IMP');
+      showToast(err?.message || 'Failed to pin playlist to Imp');
     } finally {
       setCloudLoading(false);
     }
@@ -2707,7 +2707,7 @@ const ConsoleMainApp: React.FC = () => {
       await pinAppleAlbumToSimp(album, tracks, showToast);
       refreshLibraryData();
     } catch (err: any) {
-      showToast(err?.message || 'Failed to pin album to IMP');
+      showToast(err?.message || 'Failed to pin album to Imp');
     } finally {
       setCloudLoading(false);
     }
@@ -2722,7 +2722,7 @@ const ConsoleMainApp: React.FC = () => {
       await pinSoundCloudPlaylistToSimp(pl, preloadedTracks, showToast);
       refreshLibraryData();
     } catch (err: any) {
-      showToast(err?.message || 'Failed to pin SoundCloud set to IMP');
+      showToast(err?.message || 'Failed to pin SoundCloud set to Imp');
     } finally {
       setCloudLoading(false);
     }
@@ -2866,7 +2866,7 @@ const ConsoleMainApp: React.FC = () => {
             }}
           >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <ImpIcon name="moon" size={12} /> IMP Screen Sleep • {snap?.is_playing && track ? `▶ ${track.title}` : 'Standby'}
+              <ImpIcon name="moon" size={12} /> Imp Screen Sleep • {snap?.is_playing && track ? `▶ ${track.title}` : 'Standby'}
             </span>
             <span style={{ fontSize: 11 }}>Tap anywhere or press any button to wake</span>
           </div>

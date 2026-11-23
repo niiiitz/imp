@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=IMP
-GenericName=Integrated Media Player
+Name=Imp
+GenericName=Interactive Media Player
 Comment=Console-first hybrid media player for SteamOS, Steam Deck, Steam Machine & Steam Frame
 Exec=__IMP_BIN__
 Icon=__IMP_ICON__

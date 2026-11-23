@@ -1,5 +1,5 @@
 import React from 'react';
-import { PlaylistRecord } from '@simp/client';
+import { PlaylistRecord } from '@imp/client';
 
 export const CLOUD_PAGE_SIZE = 50;
 
@@ -138,7 +138,7 @@ export function formatPlaylistSourceBadge(pl: PlaylistRecord): string {
   if (parts.length > 0) {
     return parts.join(' + ');
   }
-  return '★ IMP';
+  return '★ Imp';
 }
 
 // Fixed-proportion tile grid style (3+ cols at 800p, fills cleanly across 1080p/UW/5K/8K without stretching)

@@ -5,7 +5,7 @@ import {
   PlaylistRecord,
   SimpStateSnapshot,
   TrackMetadata,
-} from "@simp/client";
+} from "@imp/client";
 import { AppleCloudPlaylistSummary } from "../../../drivers/AppleMusicDriver";
 import { SoundCloudPlaylistSummary } from "../../../drivers/SoundCloudDriver";
 import { SoundCloudLogo } from "../../../components/SoundCloudLogo";
@@ -824,7 +824,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       }}
                     >
                       <span>
-                        {albumsSecOpen ? '▾' : '▸'} IMP ALBUMS &amp; SOUNDTRACKS (
+                        {albumsSecOpen ? '▾' : '▸'} Imp Albums &amp; Soundtracks (
                         {filteredAlbums.length})
                       </span>
                     </button>
@@ -974,7 +974,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       }}
                     >
                       <span>
-                        {stationsSecOpen ? '▾' : '▸'} IMP STATIONS &amp; SETS ({totalStationsAndSets})
+                        {stationsSecOpen ? '▾' : '▸'} Imp Stations &amp; Sets ({totalStationsAndSets})
                       </span>
                     </button>
 
@@ -2275,7 +2275,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               cursor: 'pointer',
             }}
           >
-            {playlistsOpen ? '▾' : '▸'} IMP PLAYLISTS ({filteredPlaylists.length})
+            {playlistsOpen ? '▾' : '▸'} Imp Playlists ({filteredPlaylists.length})
           </button>
           <button
             data-xmb-drill-action="true"
@@ -2297,7 +2297,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 return next;
               });
             }}
-            title={creatingPlaylist ? 'Cancel New IMP Playlist' : 'Create New IMP Hybrid Playlist'}
+            title={creatingPlaylist ? 'Cancel New Imp Playlist' : 'Create New Imp Hybrid Playlist'}
             style={{
               padding: '2px 8px',
               borderRadius: 6,
@@ -2320,7 +2320,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             <input
               type="text"
               data-osk-input="playlist"
-              placeholder="New IMP Playlist name..."
+              placeholder="New Imp Playlist name..."
               value={newPlaylistName}
               onChange={(e) => setNewPlaylistName(e.target.value)}
               onClick={(e) => {

@@ -5,7 +5,7 @@ import {
   OpticalDiscStatus,
   SimpStateSnapshot,
   SoundCloudAuthConfig,
-} from '@simp/client';
+} from '@imp/client';
 import { QrCodeSvg } from './QrCodeSvg';
 import {
   authorizeAppleMusic,
@@ -1014,7 +1014,7 @@ export const XmbSourceSubPanel: React.FC<XmbSourceSubPanelProps> = ({
               justifyContent: 'space-between',
             }}
           >
-            <span>{confirmHardReset ? 'Cancel Hard Reset' : 'Hard Reset IMP...'}</span>
+            <span>{confirmHardReset ? 'Cancel Hard Reset' : 'Hard Reset Imp...'}</span>
             <ImpIcon name="ban" size={12} color="#fca5a5" />
           </button>
 

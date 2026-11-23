@@ -1,5 +1,5 @@
 import type React from 'react';
-import type { SoundCloudComment } from '@simp/client';
+import type { SoundCloudComment } from '@imp/client';
 import { CANVAS_H, CANVAS_W, drawMicroPartyCommentPill, RENDER_SCALE, type SceneRenderContext } from './types';
 
 export { CANVAS_H, CANVAS_W, drawMicroPartyCommentPill, RENDER_SCALE, type SceneRenderContext };

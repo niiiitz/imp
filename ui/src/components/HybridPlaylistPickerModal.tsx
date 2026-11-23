@@ -1,5 +1,5 @@
 import React from 'react';
-import { defaultSimpClient, PlaylistRecord, TrackMetadata } from '@simp/client';
+import { defaultSimpClient, PlaylistRecord, TrackMetadata } from '@imp/client';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import {
   addTracksToAppleCloudPlaylist,
@@ -295,7 +295,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
     try {
       const created = await createAppleCloudPlaylist(
         trimmed,
-        'Created from IMP',
+        'Created from Imp',
         job.uris
       );
       setCloudPlaylists?.((prev) => [created, ...prev]);
@@ -443,7 +443,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
               </span>
               <span style={{ fontSize: 11, color: '#cbd5e1' }}>
                 Write directly to "{onlineChoice.title}" on{' '}
-                {onlineChoice.provider === 'apple' ? 'Apple Music' : 'SoundCloud'} (re-syncs IMP if pinned)
+                {onlineChoice.provider === 'apple' ? 'Apple Music' : 'SoundCloud'} (re-syncs Imp if pinned)
               </span>
             </button>
 
@@ -472,7 +472,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
               <span style={{ fontSize: 11, color: '#cbd5e1' }}>
                 {onlineChoice.pinnedPlaylistId
                   ? 'Convert pinned copy into an editable multi-source Local Hybrid Playlist'
-                  : 'Create a local multi-source ★ IMP Hybrid copy without changing the cloud list'}
+                  : 'Create a local multi-source ★ Imp Hybrid copy without changing the cloud list'}
               </span>
             </button>
 
@@ -529,7 +529,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                     textAlign: 'left',
                   }}
                 >
-                  ★ + Create New IMP Hybrid Playlist...
+                  ★ + Create New Imp Hybrid Playlist...
                 </button>
                 {isAppleBatch && appleAuthenticated && (
                   <button
@@ -582,7 +582,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                   placeholder={
                     creatingCloudApple
                       ? 'New Apple Cloud Playlist name...'
-                      : 'New IMP Playlist name...'
+                      : 'New Imp Playlist name...'
                   }
                   value={newPlaylistName}
                   onChange={(e) => setNewPlaylistName(e.target.value)}

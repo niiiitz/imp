@@ -3,7 +3,7 @@ import {
   defaultSimpClient,
   SimpStateSnapshot,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { getSourceThemeForTrack } from '../../theme/sourceTheme';
 import { ImpIcon } from '../../components/icons/ImpIcon';

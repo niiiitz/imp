@@ -4,7 +4,7 @@ import {
   defaultSimpClient,
   SimpStateSnapshot,
   SoundCloudAuthConfig,
-} from '@simp/client';
+} from '@imp/client';
 import {
   authorizeAppleMusic,
   syncAppleMusicCatalog,
@@ -28,7 +28,7 @@ export const CompanionPairView: React.FC = () => {
   const [scAuthCfg, setScAuthCfg] = useState<SoundCloudAuthConfig | null>(null);
   const [busy, setBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>(
-    'Connecting to IMP Daemon on your Steam Deck...'
+    'Connecting to Imp Daemon on your Steam Deck...'
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [manualToken, setManualToken] = useState('');
@@ -184,7 +184,7 @@ export const CompanionPairView: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <img
             src="/simp-icon-dark.png"
-            alt="IMP"
+            alt="Imp"
             style={{
               width: 56,
               height: 56,
@@ -201,7 +201,7 @@ export const CompanionPairView: React.FC = () => {
                 letterSpacing: '-0.01em',
               }}
             >
-              IMP Companion Pairing
+              Imp Companion Pairing
             </div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
               Host: <span style={{ fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>{window.location.host}</span>
@@ -707,7 +707,7 @@ export const CompanionPairView: React.FC = () => {
             textDecoration: 'none',
           }}
         >
-          ← Open Full IMP Console UI
+          ← Open Full Imp Console UI
         </a>
       </div>
     </div>

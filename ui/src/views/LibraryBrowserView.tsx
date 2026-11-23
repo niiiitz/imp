@@ -10,7 +10,7 @@ import {
   SimpStateSnapshot,
   TrackMetadata,
   VideoEpisodeItem,
-} from '@simp/client';
+} from '@imp/client';
 import { DvdPlayerModal } from '../components/DvdPlayerModal';
 import {
   AppleArtistProfileResponse,
@@ -2721,7 +2721,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${item.title}" (${tracksToPin.length} ${
             tracksToPin.length === 1 ? 'item' : 'items'
-          }) to IMP`
+          }) to Imp`
         );
       } catch {
         showToast('Could not pin Internet Archive item');
@@ -2790,7 +2790,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           playlist: record,
           tracks: tracksToPin,
         });
-        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to IMP`);
+        showToast(`Pinned collection "${collectionLabel}" (${tracksToPin.length} items) to Imp`);
       } catch {
         showToast('Could not pin Internet Archive collection');
       } finally {
@@ -2957,10 +2957,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         showToast(
           `Pinned "${cleanTitle}" (${items.length} ${
             items.length === 1 ? 'track' : 'tracks'
-          }) to IMP Library`
+          }) to Imp Library`
         );
       } catch {
-        showToast('Could not pin local album to IMP Library');
+        showToast('Could not pin local album to Imp Library');
       }
     },
     [playlists, handleDeletePlaylist, showToast]
@@ -3966,7 +3966,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
                 ? 'Search SoundCloud Tracks, Sets & DJ Mixes...'
                 : browserSourceFilter === 'internet_archive'
                 ? 'Search Internet Archive Films, TV & Audio...'
-                : 'Search IMP Library, Apple Music, SoundCloud & Archive...'
+                : 'Search Imp Library, Apple Music, SoundCloud & Archive...'
             }
             value={browserSearch}
             onChange={(e) => {

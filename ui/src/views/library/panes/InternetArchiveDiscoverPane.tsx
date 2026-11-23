@@ -2,7 +2,7 @@ import React from "react";
 import {
   ArchiveItemSummary,
   PlaylistRecord,
-} from "@simp/client";
+} from "@imp/client";
 import {
   type BrowseHubTarget,
   tileGridStyle,

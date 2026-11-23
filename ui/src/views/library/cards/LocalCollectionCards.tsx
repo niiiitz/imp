@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlbumRecord, PlaylistRecord } from '@simp/client';
+import { AlbumRecord, PlaylistRecord } from '@imp/client';
 import { BrowserTarget } from '../../PlayerView';
 import { LibraryContextTarget } from '../../LibraryBrowserView';
 import {

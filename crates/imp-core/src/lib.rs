@@ -464,7 +464,9 @@ mod win32_window_mgr {
     }
 
     unsafe fn is_ui_window_title(title: &str) -> bool {
-        title.starts_with("IMP — Interactive Media Player")
+        title.starts_with("Imp — Interactive Media Player")
+            || title.starts_with("Imp - Interactive Media Player")
+            || title.starts_with("IMP — Interactive Media Player")
             || title.starts_with("IMP - Interactive Media Player")
             || title.starts_with("SIMP — Simple Integrated Media Player")
             || title.starts_with("SIMP - Simple Integrated Media Player")
@@ -474,7 +476,8 @@ mod win32_window_mgr {
         if read_window_class(hwnd) == IMP_NATIVE_WORKER_CLASS {
             return true;
         }
-        if title.starts_with("IMP Headless Audio Worker")
+        if title.starts_with("Imp Headless Audio Worker")
+            || title.starts_with("IMP Headless Audio Worker")
             || title.starts_with("SIMP Headless Audio Worker")
             || title.contains("apple-worker")
             || title.contains("worker=apple")

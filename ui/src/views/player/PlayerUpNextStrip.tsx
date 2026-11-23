@@ -1,5 +1,5 @@
 import React from 'react';
-import { SimpStateSnapshot } from '@simp/client';
+import { SimpStateSnapshot } from '@imp/client';
 import { ImpIcon } from '../../components/icons/ImpIcon';
 
 export interface PlayerUpNextStripProps {

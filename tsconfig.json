@@ -11,11 +11,11 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@simp/client": ["./packages/simp-client/src/index.ts"]
+      "@imp/client": ["./packages/imp-client/src/index.ts"]
     }
   },
   "include": [
-    "packages/simp-client/src",
+    "packages/imp-client/src",
     "ui/src",
     "decky-plugin/src"
   ]

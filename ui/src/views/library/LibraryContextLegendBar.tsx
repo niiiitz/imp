@@ -5,7 +5,7 @@ import {
   ArchiveItemSummary,
   PlaylistRecord,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import {
   AppleCloudAlbumSummary,
   AppleCloudPlaylistSummary,

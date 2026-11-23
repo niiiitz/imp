@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArchiveItemSummary, PlaylistRecord } from '@simp/client';
+import { ArchiveItemSummary, PlaylistRecord } from '@imp/client';
 import {
   SoundCloudPlaylistSummary,
   SoundCloudUserSummary,

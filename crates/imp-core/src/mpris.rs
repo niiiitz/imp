@@ -98,7 +98,7 @@ pub fn current_now_playing_summary() -> Option<(String, bool)> {
         let icon = if st.is_playing { "🎵" } else { "⏸" };
         Some((format!("{icon} {} — {artist}", t.title), st.is_playing))
     } else {
-        Some(("🎵 IMP — Idle".to_string(), st.is_playing))
+        Some(("🎵 Imp — Idle".to_string(), st.is_playing))
     }
 }
 
@@ -256,7 +256,7 @@ mod macos_mpris {
         dispatch::Queue::main().exec_async(move || {
             if let Ok(mut controls) = MediaControls::new(PlatformConfig {
                 dbus_name: "org.imp.player",
-                display_name: "IMP",
+                display_name: "Imp",
                 hwnd: None,
             }) {
                 let _ = controls.attach(move |event: MediaControlEvent| match event {
@@ -338,7 +338,7 @@ mod macos_mpris {
                     dispatch::Queue::main().exec_async(move || {
                         if let Ok(mut controls) = MediaControls::new(PlatformConfig {
                             dbus_name: "org.imp.player",
-                            display_name: "IMP",
+                            display_name: "Imp",
                             hwnd: None,
                         }) {
                             let artist = if track.artists.is_empty() {
@@ -374,7 +374,7 @@ mod macos_mpris {
                 dispatch::Queue::main().exec_async(move || {
                     if let Ok(mut controls) = MediaControls::new(PlatformConfig {
                         dbus_name: "org.imp.player",
-                        display_name: "IMP",
+                        display_name: "Imp",
                         hwnd: None,
                     }) {
                         let progress = Some(MediaPosition(Duration::from_millis(position_ms as u64)));
@@ -457,7 +457,7 @@ mod linux_mpris {
             };
             let album = track.album.clone();
             let artists = if track.artists.is_empty() {
-                vec!["IMP".to_string()]
+                vec!["Imp".to_string()]
             } else {
                 track.artists.clone()
             };
@@ -503,18 +503,18 @@ mod linux_mpris {
         } else {
             map.insert(
                 "xesam:title".to_string(),
-                Variant(Box::new("IMP Ready".to_string()) as Box<dyn RefArg>),
+                Variant(Box::new("Imp Ready".to_string()) as Box<dyn RefArg>),
             );
             map.insert(
                 "xesam:album".to_string(),
                 Variant(
-                    Box::new("Integrated Media Player".to_string()) as Box<dyn RefArg>
+                    Box::new("Interactive Media Player".to_string()) as Box<dyn RefArg>
                 ),
             );
             map.insert(
                 "xesam:artist".to_string(),
                 Variant(
-                    Box::new(vec!["Click to Open IMP Window".to_string()]) as Box<dyn RefArg>
+                    Box::new(vec!["Click to Open Imp Window".to_string()]) as Box<dyn RefArg>
                 ),
             );
             map.insert(
@@ -569,7 +569,7 @@ mod linux_mpris {
             b.property("CanRaise").get(|_, _| Ok(true));
             b.property("HasTrackList").get(|_, _| Ok(false));
             b.property("Identity")
-                .get(|_, _| Ok("IMP".to_string()));
+                .get(|_, _| Ok("Imp".to_string()));
             b.property("DesktopEntry")
                 .get(|_, _| Ok("org.imp.player".to_string()));
             b.property("SupportedUriSchemes").get(|_, _| {

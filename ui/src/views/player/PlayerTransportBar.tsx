@@ -4,7 +4,7 @@ import {
   SimpStateSnapshot,
   SoundCloudComment,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import { ProgressBarRaf } from '../../components/ProgressBarRaf';
 import { ImpIcon } from '../../components/icons/ImpIcon';
 import { type TrackLyricsResponse } from '../../drivers/appleApi';

@@ -4,7 +4,7 @@ import {
   defaultSimpClient,
   SimpStateSnapshot,
   TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import {
   DEFAULT_STARTER_FYP_DESCRIPTORS,
   LocalDiscoverResponse,

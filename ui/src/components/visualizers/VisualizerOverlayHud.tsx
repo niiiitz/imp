@@ -3,7 +3,7 @@ import {
   defaultSimpClient,
   type SoundCloudComment,
   type TrackMetadata,
-} from '@simp/client';
+} from '@imp/client';
 import { ImpIcon } from '../icons/ImpIcon';
 import {
   getSceneDescriptor,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { DvdTitleInfo, VideoEpisodeItem } from '@simp/client';
+import { DvdTitleInfo, VideoEpisodeItem } from '@imp/client';
 
 export interface DvdPlayerModalProps {
   mode?: 'dvd' | 'ia_video' | 'local_video';

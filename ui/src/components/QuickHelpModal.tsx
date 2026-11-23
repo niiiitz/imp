@@ -107,7 +107,7 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
                 color: 'var(--imp-accent-active-text, #f5e1be)',
               }}
             >
-              IMP Help & Reference
+              Imp Help & Reference
             </div>
             <div style={{ fontSize: 11, color: 'var(--imp-text-secondary, #8b92a1)', marginTop: 2 }}>
               Open anytime via START (P / F1 / ☰) → System & Help → Quick Help
@@ -352,7 +352,7 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
                 <div style={cardTitleStyle}>Gamepad Focus Policy</div>
                 <div style={cardBodyStyle}>
                   Under <strong>System &amp; Network</strong>, <strong>Focused Only</strong> (default)
-                  prevents controller presses from reaching IMP while you are inside another fullscreen
+                  prevents controller presses from reaching Imp while you are inside another fullscreen
                   or VR game. Switch to <strong>Always</strong> for background media control or{' '}
                   <strong>Off</strong> to disable gamepad capture completely.
                 </div>
@@ -411,7 +411,7 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
               <div style={cardStyle}>
                 <div style={cardTitleStyle}>Updates &amp; Database Maintenance</div>
                 <div style={cardBodyStyle}>
-                  IMP checks your selected <strong>Update Channel</strong> (Stable / Alpha / Off) and
+                  Imp checks your selected <strong>Update Channel</strong> (Stable / Alpha / Off) and
                   notifies once per version tag. Use{' '}
                   <strong>System &amp; Network → Database &amp; Reset...</strong> to reset the
                   library index, purge per-source caches, or perform a full factory reset.

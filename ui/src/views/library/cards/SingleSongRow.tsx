@@ -1,5 +1,5 @@
 import React from 'react';
-import { defaultSimpClient, SimpStateSnapshot, TrackMetadata } from '@simp/client';
+import { defaultSimpClient, SimpStateSnapshot, TrackMetadata } from '@imp/client';
 import { AppleMusicLogo } from '../../../components/AppleMusicLogo';
 import { SoundCloudLogo } from '../../../components/SoundCloudLogo';
 import { ImpIcon } from '../../../components/icons/ImpIcon';

@@ -80,7 +80,7 @@ import sys
 tag = sys.argv[1]
 notes_file = sys.argv[2] if len(sys.argv) > 2 else ""
 
-notes = f"IMP {tag}"
+notes = f"Imp {tag}"
 if notes_file and os.path.isfile(notes_file):
     with open(notes_file, "r", encoding="utf-8") as f:
         notes = f.read()
@@ -158,7 +158,7 @@ channel_desc = "Pre-release (Alpha channel)" if is_prerelease else "Latest Stabl
 rel_payload = {
     "tag_name": tag,
     "target_commitish": target_commitish,
-    "name": f"IMP {tag}",
+    "name": f"Imp {tag}",
     "body": rel_body,
     "draft": False,
     "prerelease": is_prerelease,

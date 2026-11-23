@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrackMetadata } from '@simp/client';
+import { TrackMetadata } from '@imp/client';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 
 export interface AppOnScreenKeyboardBarProps {

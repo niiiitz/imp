@@ -1,18 +1,18 @@
 <div align="center">
-  <img src="docs/open-graph-banner.png" width="100%" alt="IMP — Interactive Media Player" />
+  <img src="docs/open-graph-banner.png" width="100%" alt="Imp — Interactive Media Player" />
 
-  # IMP — Interactive Media Player
+  # Imp — Interactive Media Player
 
   **A lightweight, controller-first & desktop-native audio and video player for SteamOS, Linux, macOS, Windows, and SteamVR.**
 
-  [![Status: v1.1.0](https://img.shields.io/badge/status-v1.1.0-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
+  [![Status: v1.1.1](https://img.shields.io/badge/status-v1.1.1-ff6a00?style=flat-square)](https://github.com/niiiitz/imp/releases)
   [![Platforms: SteamOS | Linux | macOS | Windows | SteamVR](https://img.shields.io/badge/platforms-SteamOS%20%7C%20Linux%20%7C%20macOS%20%7C%20Windows%20%7C%20SteamVR-000000?style=flat-square)](#installation)
   [![Backend: 100% Native Rust](https://img.shields.io/badge/backend-Native%20Rust-dea584?style=flat-square)](#development--building-from-source)
 </div>
 
 ---
 
-## ⬇️ Download IMP (`v1.1.0`)
+## ⬇️ Download Imp (`v1.1.1`)
 
 Grab the ready-to-run installer or portable bundle for your platform directly below (or browse **[All Releases](https://github.com/niiiitz/imp/releases)**):
 
@@ -30,19 +30,19 @@ Grab the ready-to-run installer or portable bundle for your platform directly be
 
 Playing your own music, soundtracks, and video across a Steam Deck, desktop, living-room console, or VR headset shouldn't require a heavy web browser or five separate apps.
 
-**IMP** pairs a tiny native Rust media daemon with a high-contrast, OLED-friendly interface built for gamepads, VR pointers, and mouse & keyboard alike.
+**Imp** pairs a tiny native Rust media daemon with a high-contrast, OLED-friendly interface built for gamepads, VR pointers, and mouse & keyboard alike.
 
-| <a href="docs/screenshots/library_queue.png"><img src="docs/screenshots/library_queue.png" alt="IMP Unified Library and Horizontal Shelves" width="100%" /></a> | <a href="docs/screenshots/lyrics_viz.png"><img src="docs/screenshots/lyrics_viz.png" alt="IMP Audio Visualizers and Live Synced Lyrics" width="100%" /></a> |
+| <a href="docs/screenshots/library_queue.png"><img src="docs/screenshots/library_queue.png" alt="Imp Unified Library and Horizontal Shelves" width="100%" /></a> | <a href="docs/screenshots/lyrics_viz.png"><img src="docs/screenshots/lyrics_viz.png" alt="Imp Audio Visualizers and Live Synced Lyrics" width="100%" /></a> |
 | :---: | :---: |
 | **Studio Graphite Library & `See All ›` Grids**<br><sub>Local media, Steam OSTs, Apple Music, SoundCloud, Internet Archive & Optical Discs</sub> | **Audio Visualizers & Synced Lyrics (`LRCLIB`)**<br><sub>12 High-DPI scenes (20/30/40/Uncapped FPS pacing) with Stats HUD and OLED black floors</sub> |
-| <a href="docs/screenshots/player_with_select_overlay.png"><img src="docs/screenshots/player_with_select_overlay.png" alt="IMP 3-Column XMB START Menu" width="100%" /></a> | <a href="docs/screenshots/settings_sources.png"><img src="docs/screenshots/settings_sources.png" alt="IMP Networked Retrieval Privacy Controls" width="100%" /></a> |
+| <a href="docs/screenshots/player_with_select_overlay.png"><img src="docs/screenshots/player_with_select_overlay.png" alt="Imp 3-Column XMB START Menu" width="100%" /></a> | <a href="docs/screenshots/settings_sources.png"><img src="docs/screenshots/settings_sources.png" alt="Imp Networked Retrieval Privacy Controls" width="100%" /></a> |
 | **3-Column XMB `START` Menu & `UI Scale`**<br><sub>Unified Display, Audio & Sources, and System & Network navigation with `100%–175%` scaling</sub> | **Granular Privacy & Account Controls**<br><sub>5 independent `Networked Retrieval` toggles (Lyrics, Artwork, Factoids, Track Data, Comments)</sub> |
 
 ---
 
 ## High-Level Features
 
-<img src="docs/imp-mascot-slouched.png" align="right" width="220" alt="IMP Mascot" />
+<img src="docs/imp-mascot-slouched.png" align="right" width="220" alt="Imp Mascot" />
 
 * **One Queue for Audio & Video (`★ Hybrid Playlists`):** Mix local music & video files, **Steam Soundtracks**, **Apple Music**, **SoundCloud** tracks & DJ mixes, **Internet Archive** films & live concerts, and physical **Audio CDs / DVDs** inside a single playlist, browsed via 1-row square-tile shelves with **`See All ›`** grid pop-outs.
 * **12 Reactive Visualizers & Live Synced Lyrics (`LRCLIB`):** Gaming-friendly **30 FPS** default (`20 / 30 / 40 / Uncapped`) with optional unfocused pause, time-synced lyrics, timed `@username` SoundCloud comments, retro VHS track chyrons, interactive waveform scrubbing, and Stats HUD.
@@ -66,7 +66,7 @@ Playing your own music, soundtracks, and video across a Steam Deck, desktop, liv
 
 ## Installation
 
-Grab the package for your platform from the **[latest GitHub Release (`v1.1.0`)](https://github.com/niiiitz/imp/releases/latest)**:
+Grab the package for your platform from the **[latest GitHub Release (`v1.1.1`)](https://github.com/niiiitz/imp/releases/latest)**:
 
 ### SteamOS / Bazzite / Linux (`x86_64` & `aarch64`)
 
@@ -77,12 +77,12 @@ rm -rf /tmp/imp-steamos-userland && tar -xzf imp-steamos-userland-x86_64.tar.gz 
 /tmp/imp-steamos-userland/install-steamos.sh
 ```
 
-* **Launch:** Open **IMP** from your application menu, run `imp`, or right-click **IMP** → **Add to Steam** for Game Mode & SteamVR.
+* **Launch:** Open **Imp** from your application menu, run `imp`, or right-click **Imp** → **Add to Steam** for Game Mode & SteamVR.
 * **Optional Decky Plugin:** Download **[`imp-decky.zip`](https://github.com/niiiitz/imp/releases/latest/download/imp-decky.zip)** and install via Decky Loader's *Install from ZIP* menu for a Quick Access Menu drawer.
 
 ### macOS (`Apple Silicon arm64`)
 
-Download **[`IMP-macos-arm64.zip`](https://github.com/niiiitz/imp/releases/latest/download/IMP-macos-arm64.zip)**, extract `IMP.app` into `/Applications`, and launch **IMP**.
+Download **[`IMP-macos-arm64.zip`](https://github.com/niiiitz/imp/releases/latest/download/IMP-macos-arm64.zip)**, extract `IMP.app` into `/Applications`, and launch **Imp**.
 * Closing the window (`Cmd+W`) keeps playback active in the **macOS Menu Bar** (`NSStatusItem`) with full **Control Center / Media Key** integration.
 
 ### Windows (`x86_64` Portable)
@@ -115,7 +115,7 @@ Open the top-right **Settings (`☰`)** drawer to switch between the **Alpha** a
 
 ## Development & Building from Source
 
-IMP splits playback and UI into two lightweight layers:
+Imp splits playback and UI into two lightweight layers:
 1. **Rust Daemon (`imp --daemon`):** Indexes media into SQLite, decodes audio (`Symphonia` + `Rodio`), streams cloud & archival media, reads optical discs, and drives native OS media controls + `OpenVR`.
 2. **Console UI (`http://127.0.0.1:18888`):** React + TypeScript frontend synchronized over WebSockets.
 
@@ -135,7 +135,7 @@ IMP_TARGET_ARCH=aarch64 ./packaging/scripts/package-release.sh # Steam Frame / L
 
 ## Attributions & Provenance
 
-IMP builds on the work of open-source maintainers and public archives — including **[Jake Johnson (`@jjjake/internetarchive`)](https://github.com/jjjake/internetarchive)** and the **[Internet Archive (`archive.org`)](https://archive.org/developers/)**, **[Tran Xuan Thang (`LRCLIB`)](https://github.com/tranxuanthang/lrclib)**, **Symphonia**, **Rodio**, **Lofty**, **VideoLAN (`libdvdcss` / `libdvdread`)**, **MusicBrainz & Cover Art Archive**, **Souvlaki**, **OpenVR**, and **Decky Loader**.
+Imp builds on the work of open-source maintainers and public archives — including **[Jake Johnson (`@jjjake/internetarchive`)](https://github.com/jjjake/internetarchive)** and the **[Internet Archive (`archive.org`)](https://archive.org/developers/)**, **[Tran Xuan Thang (`LRCLIB`)](https://github.com/tranxuanthang/lrclib)**, **Symphonia**, **Rodio**, **Lofty**, **VideoLAN (`libdvdcss` / `libdvdread`)**, **MusicBrainz & Cover Art Archive**, **Souvlaki**, **OpenVR**, and **Decky Loader**.
 
 See **[`ATTRIBUTIONS.md`](ATTRIBUTIONS.md)** for the complete provenance ledger and technical acknowledgments.
 
@@ -143,4 +143,4 @@ See **[`ATTRIBUTIONS.md`](ATTRIBUTIONS.md)** for the complete provenance ledger 
 
 ## Disclaimer
 
-> **IMP (Interactive Media Player)** is an independent open-source project and is **not** affiliated with, endorsed by, or sponsored by **Valve Corporation**, **Apple Inc.**, **SoundCloud**, **Internet Archive**, or the **MetaBrainz Foundation**. All product and company names are trademarks of their respective owners and are used strictly for identification and interoperability (nominative fair use).
+> **Imp (Interactive Media Player)** is an independent open-source project and is **not** affiliated with, endorsed by, or sponsored by **Valve Corporation**, **Apple Inc.**, **SoundCloud**, **Internet Archive**, or the **MetaBrainz Foundation**. All product and company names are trademarks of their respective owners and are used strictly for identification and interoperability (nominative fair use).

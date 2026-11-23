@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlbumRecord, PlaylistRecord, TrackMetadata } from '@simp/client';
+import { AlbumRecord, PlaylistRecord, TrackMetadata } from '@imp/client';
 import {
   AppleArtistSummary,
   AppleCloudAlbumSummary,

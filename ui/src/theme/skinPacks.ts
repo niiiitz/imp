@@ -59,7 +59,7 @@ export const SKIN_PACK_REGISTRY: SkinPackDefinition[] = [
   },
   {
     id: 'imp-portal-dark',
-    name: 'IMP Portal Dark',
+    name: 'Imp Portal Dark',
     tagline: 'OLED dark surfaces with warm amber & slate accents',
     badge: 'OLED',
     tokens: {

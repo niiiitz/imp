@@ -1,5 +1,5 @@
 import React from 'react';
-import { defaultSimpClient, TrackMetadata } from '@simp/client';
+import { defaultSimpClient, TrackMetadata } from '@imp/client';
 import { ImpIcon } from './icons/ImpIcon';
 import { StatsHudPill } from './StatsHudPill';
 import { useUiScale } from '../theme/uiScale';
@@ -92,7 +92,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             }
             window.dispatchEvent(new CustomEvent('simp-player-actions-toggle'));
           }}
-          title={track ? 'Track Options & Queue (SELECT)' : 'Open IMP Menu (START)'}
+          title={track ? 'Track Options & Queue (SELECT)' : 'Open Imp Menu (START)'}
           style={{
             minHeight: 38,
             maxWidth: 'clamp(140px, 26%, 320px)',

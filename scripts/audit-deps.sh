@@ -166,13 +166,13 @@ if os.path.isfile("package-lock.json"):
     print(f"✓ package-lock.json verified ({len(lock.get('packages', {}))} entries, registry.npmjs.org-only)")
 
 direct_npm_names = set()
-for pj in ["package.json", os.path.join("ui", "package.json"), os.path.join("packages", "simp-client", "package.json"), os.path.join("decky-plugin", "package.json")]:
+for pj in ["package.json", os.path.join("ui", "package.json"), os.path.join("packages", "imp-client", "package.json"), os.path.join("decky-plugin", "package.json")]:
     if not os.path.isfile(pj):
         continue
     pdata = json.load(open(pj, "r", encoding="utf-8"))
     for sec in ("dependencies", "devDependencies"):
         for pkg_name in pdata.get(sec, {}):
-            if not pkg_name.startswith("@simp/"):
+            if not pkg_name.startswith("@imp/"):
                 direct_npm_names.add(pkg_name)
 
 direct_npm = sorted(
