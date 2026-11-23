@@ -43,6 +43,11 @@ fn main() {
                 match imp_core::updater::apply_self_update(Some(&status.latest_tag), true, false) {
                     Ok(res) => {
                         println!("✅ {}", res.message);
+                        if res.decky_staged_only {
+                            println!("ℹ️  Decky Loader detected, but ~/homebrew/plugins is not writable without sudo.");
+                            println!("   To install or reinstall the staged Decky QAM plugin now, run:");
+                            println!("   sudo rm -rf ~/homebrew/plugins/imp-decky && sudo cp -r ~/.local/share/imp/decky-staged ~/homebrew/plugins/imp-decky && sudo chown -R $USER:$USER ~/homebrew/plugins/imp-decky && sudo systemctl restart plugin_loader");
+                        }
                         match imp_core::updater::restart_daemon_synchronously() {
                             Ok(restart_msg) => println!("🔄 {restart_msg}"),
                             Err(e) => eprintln!("⚠️  Could not auto-restart background daemon: {e}"),

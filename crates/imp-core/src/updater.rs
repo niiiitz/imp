@@ -28,6 +28,8 @@ pub struct UpdateApplyResult {
     pub previous_version: String,
     pub updated_version: String,
     pub decky_updated: bool,
+    #[serde(default)]
+    pub decky_staged_only: bool,
     pub message: String,
 }
 
@@ -1058,6 +1060,7 @@ pub fn apply_self_update(
 
     // 3. Stage Decky plugin into `~/.local/share/imp/decky-staged/` (if present in bundle)
     let mut decky_updated = false;
+    let mut plugin_loader_restarted = false;
     let decky_staged = install_root.join("decky-staged");
     if src_decky.is_dir() {
         let _ = std::fs::remove_dir_all(&decky_staged);
@@ -1067,9 +1070,9 @@ pub fn apply_self_update(
     let homebrew_dir = home.join("homebrew");
     let decky_plugins_dir = homebrew_dir.join("plugins");
     let decky_target = decky_plugins_dir.join("imp-decky");
-    if src_decky.is_dir()
-        && (decky_target.is_dir() || decky_plugins_dir.is_dir() || homebrew_dir.is_dir())
-    {
+    let decky_env_present = src_decky.is_dir()
+        && (decky_target.is_dir() || decky_plugins_dir.is_dir() || homebrew_dir.is_dir());
+    if decky_env_present {
         // Clean any nested/legacy subdirectories inside imp-decky so stale binaries never linger
         let _ = std::fs::remove_dir_all(decky_target.join("imp-decky"));
         let _ = std::fs::remove_dir_all(decky_target.join("simp-decky"));
@@ -1127,12 +1130,14 @@ pub fn apply_self_update(
                         std::fs::set_permissions(&main_py, std::fs::Permissions::from_mode(0o755));
                 }
                 // Best-effort non-interactive reload of Decky's plugin_loader service if passwordless sudo is enabled
-                let _ = Command::new("sudo")
+                plugin_loader_restarted = Command::new("sudo")
                     .args(["-n", "systemctl", "restart", "plugin_loader"])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
-                    .status();
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
             }
         }
     }
@@ -1144,8 +1149,13 @@ pub fn apply_self_update(
         spawn_delayed_daemon_restart();
     }
 
-    let msg = if decky_updated {
+    let decky_staged_only = decky_env_present && !decky_updated;
+    let msg = if decky_updated && plugin_loader_restarted {
         format!("Updated IMP ({arch} Daemon + UI + Decky QAM) to v{target_ver}")
+    } else if decky_updated {
+        format!("Updated IMP ({arch} Daemon + UI + Decky QAM) to v{target_ver} (restart Decky/Steam or run 'sudo systemctl restart plugin_loader' to reload QAM)")
+    } else if decky_staged_only {
+        format!("Updated IMP ({arch} Daemon + UI) to v{target_ver} — Decky QAM staged at ~/.local/share/imp/decky-staged (needs sudo to install into ~/homebrew/plugins/imp-decky)")
     } else {
         format!("Updated IMP ({arch} Daemon + UI) to v{target_ver}")
     };
@@ -1155,6 +1165,7 @@ pub fn apply_self_update(
         previous_version: status.current_version,
         updated_version: target_ver,
         decky_updated,
+        decky_staged_only,
         message: msg,
     })
     }
@@ -1483,6 +1494,7 @@ fn apply_windows_self_update(
         previous_version: status.current_version.clone(),
         updated_version: target_ver.to_string(),
         decky_updated: false,
+        decky_staged_only: false,
         message: format!(
             "Updated IMP Portable ({}) to v{target_ver}",
             install_dir.display()
@@ -1622,6 +1634,7 @@ fn apply_macos_self_update(
         previous_version: status.current_version.clone(),
         updated_version: target_ver.to_string(),
         decky_updated: false,
+        decky_staged_only: false,
         message: format!(
             "Updated IMP.app ({}) to v{target_ver}",
             dest_app.display()

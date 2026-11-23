@@ -7,14 +7,14 @@ import socket
 import subprocess
 
 SERVICE_UNIT_TEMPLATE = """[Unit]
-Description=SIMP (Simple Integrated Media Player) Background Audio & UI Daemon
+Description=IMP (Integrated Media Player) Background Audio & UI Daemon
 After=pipewire.service pipewire-pulse.service graphical-session.target
 Wants=pipewire.service
 
 [Service]
 Type=simple
-ExecStart=%h/.local/share/simp/bin/simp --daemon
-Environment="SIMP_UI_DIR=%h/.local/share/simp/ui"
+ExecStart=%h/.local/share/imp/bin/imp --daemon
+Environment="IMP_UI_DIR=%h/.local/share/imp/ui"
 Environment="XDG_RUNTIME_DIR=/run/user/%U"
 Environment="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus"
 Environment="MIMALLOC_PURGE_DELAY=100"
@@ -23,6 +23,10 @@ Restart=always
 RestartSec=1
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=default.target
@@ -109,6 +113,8 @@ def _parse_version_tuple(raw: str) -> tuple[int, int, int, int, int]:
     cleaned = raw.strip()
     if "simp " in cleaned:
         cleaned = cleaned.split("simp ", 1)[1].strip()
+    elif "imp " in cleaned:
+        cleaned = cleaned.split("imp ", 1)[1].strip()
     cleaned = cleaned.lstrip("v")
     if "-" in cleaned:
         core, pre = cleaned.split("-", 1)
@@ -144,9 +150,9 @@ def _binary_version_tuple(bin_path: str) -> tuple[int, int, int, int, int]:
 
 def _sync_staged_decky_plugin(plugin_dir: str, home: str, uid: int, gid: int) -> bool:
     """
-    If `simp` self-updater staged a newer Decky plugin bundle into `~/.local/share/simp/decky-staged/`,
-    copy its files into `~/homebrew/plugins/simp-decky/` (with root privileges if running under Decky Loader)
-    and grant `deck:deck` ownership on both `~/homebrew/plugins` and `~/homebrew/plugins/simp-decky`
+    If `imp` self-updater staged a newer Decky plugin bundle into `~/.local/share/imp/decky-staged/`,
+    copy its files into `~/homebrew/plugins/imp-decky/` (with root privileges if running under Decky Loader)
+    and grant `deck:deck` ownership on both `~/homebrew/plugins` and `~/homebrew/plugins/imp-decky`
     so future updates and restores work seamlessly without sudo.
     """
     plugins_parent = os.path.dirname(plugin_dir)
@@ -157,7 +163,12 @@ def _sync_staged_decky_plugin(plugin_dir: str, home: str, uid: int, gid: int) ->
         except Exception:
             pass
 
-    staged_dir = os.path.join(home, ".local", "share", "simp", "decky-staged")
+    imp_staged = os.path.join(home, ".local", "share", "imp", "decky-staged")
+    simp_staged = os.path.join(home, ".local", "share", "simp", "decky-staged")
+    if os.path.isfile(os.path.join(imp_staged, "dist", "index.js")):
+        staged_dir = imp_staged
+    else:
+        staged_dir = simp_staged
     staged_dist_index = os.path.join(staged_dir, "dist", "index.js")
     if not os.path.isfile(staged_dist_index):
         _chown_tree(plugin_dir, uid, gid)
@@ -204,21 +215,22 @@ def _provision_and_start_userland():
     )
     user, home, uid, gid = _resolve_target_user()
 
-    # 0. Self-heal nested `simp-decky/simp-decky` directory if created by `cp -r SRC DEST` when DEST existed
-    nested_dir = os.path.join(plugin_dir, "simp-decky")
-    if os.path.isdir(nested_dir):
-        try:
-            shutil.copytree(nested_dir, plugin_dir, dirs_exist_ok=True)
-            shutil.rmtree(nested_dir, ignore_errors=True)
-        except Exception:
-            pass
+    # 0. Self-heal nested `imp-decky/imp-decky` or `simp-decky/simp-decky` directory if created by `cp -r SRC DEST` when DEST existed
+    for nested_name in ("imp-decky", "simp-decky"):
+        nested_dir = os.path.join(plugin_dir, nested_name)
+        if os.path.isdir(nested_dir):
+            try:
+                shutil.copytree(nested_dir, plugin_dir, dirs_exist_ok=True)
+                shutil.rmtree(nested_dir, ignore_errors=True)
+            except Exception:
+                pass
 
-    # 1. Sync any staged Decky plugin bundle from `~/.local/share/simp/decky-staged/`
-    # and ensure user `deck` owns `~/homebrew/plugins/simp-decky` so userland updates work without sudo.
+    # 1. Sync any staged Decky plugin bundle from `~/.local/share/imp/decky-staged/`
+    # and ensure user `deck` owns `~/homebrew/plugins/imp-decky` so userland updates work without sudo.
     _sync_staged_decky_plugin(plugin_dir, home, uid, gid)
     _chown_tree(plugin_dir, uid, gid)
 
-    install_root = os.path.join(home, ".local", "share", "simp")
+    install_root = os.path.join(home, ".local", "share", "imp")
     bin_dest_dir = os.path.join(install_root, "bin")
     ui_dest_dir = os.path.join(install_root, "ui")
     local_bin_dir = os.path.join(home, ".local", "bin")
@@ -227,13 +239,15 @@ def _provision_and_start_userland():
     for d in (bin_dest_dir, ui_dest_dir, local_bin_dir, systemd_user_dir):
         os.makedirs(d, exist_ok=True)
 
-    bundled_bin = os.path.join(plugin_dir, "bin", "simp")
+    bundled_imp = os.path.join(plugin_dir, "bin", "imp")
+    bundled_simp = os.path.join(plugin_dir, "bin", "simp")
+    bundled_bin = bundled_imp if os.path.isfile(bundled_imp) else bundled_simp
     bundled_ui = os.path.join(plugin_dir, "ui")
-    dest_bin = os.path.join(bin_dest_dir, "simp")
+    dest_bin = os.path.join(bin_dest_dir, "imp")
     binary_updated = False
 
-    # 2. If `simp-decky.zip` includes the bundled `bin/simp` + `ui/`, install/update them into userland
-    # ONLY if `~/.local/share/simp/bin/simp` does not exist or has a strictly older semver than `bundled_bin`.
+    # 2. If `imp-decky.zip` includes the bundled `bin/imp` + `ui/`, install/update them into userland
+    # ONLY if `~/.local/share/imp/bin/imp` does not exist or has a strictly older semver than `bundled_bin`.
     bundled_is_newer = False
     if os.path.isfile(bundled_bin):
         if not os.path.isfile(dest_bin):
@@ -250,30 +264,31 @@ def _provision_and_start_userland():
         if _sha256_file(bundled_bin) != _sha256_file(dest_bin):
             binary_updated = True
             _run_as_user(
-                ["systemctl", "--user", "stop", "simp.service"],
+                ["systemctl", "--user", "stop", "imp.service"],
                 user,
                 home,
                 uid,
                 gid,
             )
-            subprocess.run(
-                ["pkill", "-f", "simp --daemon"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+            _run_as_user(
+                ["systemctl", "--user", "disable", "--now", "simp.service"],
+                user,
+                home,
+                uid,
+                gid,
             )
-            subprocess.run(
-                ["pkill", "-f", "simp-widevine-worker"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            subprocess.run(
-                ["pkill", "-f", "18888/?worker=apple"],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            for pattern in (
+                "imp --daemon",
+                "simp --daemon",
+                "simp-widevine-worker",
+                "18888/?worker=apple",
+            ):
+                subprocess.run(
+                    ["pkill", "-f", pattern],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
             tmp_dest = dest_bin + ".new"
             shutil.copy2(bundled_bin, tmp_dest)
             os.chmod(tmp_dest, 0o755)
@@ -283,14 +298,14 @@ def _provision_and_start_userland():
             shutil.copytree(bundled_ui, ui_dest_dir, dirs_exist_ok=True)
             binary_updated = True
 
-    # Once userland has a valid `dest_bin`, clean up any `plugin_dir/bin` and `plugin_dir/ui` from `simp-decky.zip`
+    # Once userland has a valid `dest_bin`, clean up any `plugin_dir/bin` and `plugin_dir/ui` from `imp-decky.zip`
     # so an older bundled binary can never overwrite a future self-update.
     if os.path.isfile(dest_bin) and os.path.isdir(os.path.join(plugin_dir, "bin")):
         shutil.rmtree(os.path.join(plugin_dir, "bin"), ignore_errors=True)
         shutil.rmtree(os.path.join(plugin_dir, "ui"), ignore_errors=True)
 
     if os.path.isfile(dest_bin):
-        symlink_path = os.path.join(local_bin_dir, "simp")
+        symlink_path = os.path.join(local_bin_dir, "imp")
         try:
             if os.path.lexists(symlink_path):
                 os.remove(symlink_path)
@@ -298,20 +313,21 @@ def _provision_and_start_userland():
         except Exception:
             pass
 
-    # 3. Ensure `~/.config/systemd/user/simp.service` is present and up to date
-    unit_path = os.path.join(systemd_user_dir, "simp.service")
+    # 3. Ensure `~/.config/systemd/user/imp.service` is present and up to date
+    unit_path = os.path.join(systemd_user_dir, "imp.service")
     with open(unit_path, "w", encoding="utf-8") as f:
         f.write(SERVICE_UNIT_TEMPLATE)
 
     _chown_tree(install_root, uid, gid)
     _chown_tree(os.path.join(home, ".config", "systemd"), uid, gid)
 
-    # 4. Start or restart `simp.service` under target user's systemd session
+    # 4. Start or restart `imp.service` under target user's systemd session
     _run_as_user(["systemctl", "--user", "daemon-reload"], user, home, uid, gid)
-    _run_as_user(["systemctl", "--user", "enable", "simp.service"], user, home, uid, gid)
+    _run_as_user(["systemctl", "--user", "disable", "--now", "simp.service"], user, home, uid, gid)
+    _run_as_user(["systemctl", "--user", "enable", "imp.service"], user, home, uid, gid)
     if binary_updated or not _is_daemon_listening():
         _run_as_user(
-            ["systemctl", "--user", "restart", "simp.service"],
+            ["systemctl", "--user", "restart", "imp.service"],
             user,
             home,
             uid,
@@ -319,7 +335,7 @@ def _provision_and_start_userland():
         )
     else:
         _run_as_user(
-            ["systemctl", "--user", "start", "simp.service"],
+            ["systemctl", "--user", "start", "imp.service"],
             user,
             home,
             uid,
@@ -333,6 +349,7 @@ def _provision_and_start_userland():
         env["USER"] = user
         env["XDG_RUNTIME_DIR"] = f"/run/user/{uid}"
         env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path=/run/user/{uid}/bus"
+        env["IMP_UI_DIR"] = ui_dest_dir
         env["SIMP_UI_DIR"] = ui_dest_dir
         if os.geteuid() == 0:
             subprocess.Popen(
@@ -356,9 +373,9 @@ def _provision_and_start_userland():
 
 class Plugin:
     """
-    All-in-One Decky Loader lifecycle supervisor for SIMP (org.simp.player).
-    Automatically provisions/updates `~/.local/share/simp/` from the Decky plugin bundle
-    and supervises `simp.service` across Gaming Mode boots and plugin reloads.
+    All-in-One Decky Loader lifecycle supervisor for IMP (org.imp.player).
+    Automatically provisions/updates `~/.local/share/imp/` from the Decky plugin bundle
+    and supervises `imp.service` across Gaming Mode boots and plugin reloads.
     """
 
     _watch_task = None
@@ -373,7 +390,7 @@ class Plugin:
                         os.path.realpath(__file__)
                     )
                     _user, home, uid, gid = _resolve_target_user()
-                    install_root = os.path.join(home, ".local", "share", "simp")
+                    install_root = os.path.join(home, ".local", "share", "imp")
                     if os.path.isdir(install_root):
                         _chown_tree(install_root, uid, gid)
                     _sync_staged_decky_plugin(plugin_dir, home, uid, gid)

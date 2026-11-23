@@ -531,6 +531,7 @@ async fn update_apply_handler() -> impl IntoResponse {
                 "updated_version": applied.updated_version,
                 "installed_version": applied.updated_version,
                 "decky_updated": applied.decky_updated,
+                "decky_staged_only": applied.decky_staged_only,
                 "message": applied.message,
             }))
         }
