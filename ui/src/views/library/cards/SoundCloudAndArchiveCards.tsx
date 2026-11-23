@@ -58,7 +58,7 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#2c140a' : '#0a0a0e',
+        background: isSelected ? '#2c140a' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #ea580c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -124,9 +124,9 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
               style={{
                 padding: '2px 6px',
                 borderRadius: 6,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 10,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -150,16 +150,16 @@ export const SoundCloudPlaylistCard: React.FC<SoundCloudPlaylistCardProps> = ({
               style={{
                 padding: '3px 6px',
                 borderRadius: 6,
-                background: isPinned ? '#0f222a' : '#2c140a',
-                border: isPinned ? '1px solid #2aa3c4' : '1px solid #7c2d12',
-                color: isPinned ? '#67e8f9' : '#fdba74',
+                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#2c140a',
+                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #7c2d12',
+                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fdba74'} />
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fdba74'} />
             </span>
           </div>
         </div>
@@ -242,7 +242,7 @@ export const SoundCloudUserCard: React.FC<SoundCloudUserCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#2c140a' : '#0a0a0e',
+        background: isSelected ? '#2c140a' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #ea580c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -392,7 +392,7 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#261a0b' : '#0a0a0e',
+        background: isSelected ? '#261a0b' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #f59e0b' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -458,9 +458,9 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
               style={{
                 padding: '2px 6px',
                 borderRadius: 6,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 10,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -484,16 +484,16 @@ export const ArchiveItemCard: React.FC<ArchiveItemCardProps> = ({
               style={{
                 padding: '3px 6px',
                 borderRadius: 6,
-                background: isPinned ? '#0f222a' : '#261a0b',
-                border: isPinned ? '1px solid #2aa3c4' : '1px solid #78350f',
-                color: isPinned ? '#67e8f9' : '#fde68a',
+                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#261a0b',
+                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #78350f',
+                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fde68a'} />
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a'} />
             </span>
           </div>
         </div>

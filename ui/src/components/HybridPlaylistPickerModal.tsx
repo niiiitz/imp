@@ -332,8 +332,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
           maxWidth: 480,
           maxHeight: '84vh',
           overflowY: 'auto',
-          background: '#0a0a0e',
-          border: '2px solid #2aa3c4',
+          background: 'var(--imp-surface-card, #1a1d24)',
+          border: '2px solid var(--imp-focus-ring, #e8b86d)',
           borderRadius: 18,
           padding: 20,
           boxSizing: 'border-box',
@@ -352,7 +352,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 800, color: '#bfeaf5' }}>
+            <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
               {onlineChoice
                 ? '☁️ Online Sync vs. ★ Local Hybrid'
                 : '★ Add to Playlist or Set'}
@@ -397,8 +397,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
               padding: '10px 12px',
               borderRadius: 10,
               background: '#111824',
-              border: '1px solid #2aa3c4',
-              color: '#67e8f9',
+              border: '1px solid var(--imp-focus-ring, #e8b86d)',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 12,
               fontWeight: 700,
             }}
@@ -455,8 +455,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                 minHeight: 54,
                 padding: '10px 14px',
                 borderRadius: 11,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
                 color: '#f4f4f6',
                 display: 'flex',
                 flexDirection: 'column',
@@ -466,7 +466,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                 textAlign: 'left',
               }}
             >
-              <span style={{ fontSize: 13, fontWeight: 800, color: '#67e8f9' }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                 ★ Fork / Save as Local Imp Hybrid Playlist
               </span>
               <span style={{ fontSize: 11, color: '#cbd5e1' }}>
@@ -521,8 +521,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                     padding: '0 14px',
                     borderRadius: 10,
                     background: '#121822',
-                    border: '1px dashed #2aa3c4',
-                    color: '#67e8f9',
+                    border: '1px dashed var(--imp-focus-ring, #e8b86d)',
+                    color: 'var(--imp-accent-active-text, #f5e1be)',
                     fontSize: 12,
                     fontWeight: 800,
                     cursor: 'pointer',
@@ -572,8 +572,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                   gap: 8,
                   padding: 10,
                   borderRadius: 10,
-                  background: creatingCloudApple ? '#1c0d14' : '#0c161c',
-                  border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
+                  background: creatingCloudApple ? '#1c0d14' : 'var(--imp-surface-card, #1a1d24)',
+                  border: creatingCloudApple ? '1px solid #fb7185' : '1px solid var(--imp-focus-ring, #e8b86d)',
                 }}
               >
                 <input
@@ -617,7 +617,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                     minHeight: 38,
                     padding: '0 12px',
                     borderRadius: 8,
-                    background: '#08080c',
+                    background: 'var(--imp-bg-canvas, #121418)',
                     border: '1px solid #2e2e3c',
                     color: '#d4d4dc',
                     fontSize: 12,
@@ -647,9 +647,9 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                     minHeight: 38,
                     padding: '0 14px',
                     borderRadius: 8,
-                    background: creatingCloudApple ? '#251018' : '#0f222a',
-                    color: creatingCloudApple ? '#fda4af' : '#bfeaf5',
-                    border: creatingCloudApple ? '1px solid #fb7185' : '1px solid #2aa3c4',
+                    background: creatingCloudApple ? '#251018' : 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                    color: creatingCloudApple ? '#fda4af' : 'var(--imp-accent-active-text, #f5e1be)',
+                    border: creatingCloudApple ? '1px solid #fb7185' : '1px solid var(--imp-focus-ring, #e8b86d)',
                     fontWeight: 800,
                     fontSize: 12,
                     cursor: 'pointer',
@@ -715,8 +715,8 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                         minHeight: 44,
                         padding: '0 14px',
                         borderRadius: 10,
-                        background: isPreferred ? '#0f222a' : '#101018',
-                        border: isPreferred ? '1px solid #2aa3c4' : '1px solid #222230',
+                        background: isPreferred ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                        border: isPreferred ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                         color: '#e4e4ec',
                         display: 'flex',
                         justifyContent: 'space-between',
@@ -730,7 +730,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                         style={{
                           fontSize: 13,
                           fontWeight: 800,
-                          color: isLocal ? '#bfeaf5' : '#fde68a',
+                          color: isLocal ? 'var(--imp-accent-active-text, #f5e1be)' : '#fde68a',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -744,7 +744,7 @@ export const HybridPlaylistPickerModal: React.FC<HybridPlaylistPickerModalProps>
                           fontSize: 10.5,
                           fontFamily: 'monospace',
                           color: isLocal
-                            ? '#67e8f9'
+                            ? 'var(--imp-accent-active-text, #f5e1be)'
                             : canSameSourceOnlineWrite
                               ? '#fda4af'
                               : '#fbbf24',

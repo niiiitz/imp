@@ -80,8 +80,8 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#0d1b22' : '#0a0a0e',
-        border: isSelected ? '1px solid #2aa3c4' : '1px solid #181822',
+        background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+        border: isSelected ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
         cursor: 'pointer',
@@ -106,7 +106,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
           src={pl.cover_art_url}
           fallbackIcon={
             isLocal ? (
-              <ImpIcon name="imp" size={20} color="#67e8f9" />
+              <ImpIcon name="imp" size={20} color="var(--imp-accent-active-text, #f5e1be)" />
             ) : pl.origin === 'soundcloud_remote' ? (
               <SoundCloudLogo width={30} color="#fdba74" />
             ) : pl.origin === 'archive_remote' ? (
@@ -115,8 +115,8 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
               <AppleMusicLogo size={20} />
             )
           }
-          bg={isLocal ? '#0f222a' : '#251018'}
-          border={isLocal ? '1px solid #2aa3c4' : '1px solid #4c1d2e'}
+          bg={isLocal ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#251018'}
+          border={isLocal ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #4c1d2e'}
           playlistCoverId={
             pl.id.startsWith('applemusic:playlist:')
               ? pl.id.replace('applemusic:playlist:', '')
@@ -144,9 +144,9 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
             style={{
               padding: '2px 6px',
               borderRadius: 6,
-              background: isLocal ? '#0f222a' : '#251018',
-              border: isLocal ? '1px solid #2aa3c4' : '1px solid #4c1d2e',
-              color: isLocal ? '#67e8f9' : '#fda4af',
+              background: isLocal ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#251018',
+              border: isLocal ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #4c1d2e',
+              color: isLocal ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af',
               fontSize: 10,
               fontFamily: 'monospace',
               fontWeight: 800,
@@ -173,7 +173,7 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
               </>
             ) : (
               <>
-                <ImpIcon name="imp" size={11} color={isLocal ? '#67e8f9' : '#fda4af'} />
+                <ImpIcon name="imp" size={11} color={isLocal ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af'} />
                 <span>{isActiveTarget ? `★ ${sourceBadge}` : sourceBadge}</span>
               </>
             )}
@@ -192,9 +192,9 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
                 style={{
                   padding: '2px 6px',
                   borderRadius: 6,
-                  background: '#0f222a',
-                  border: '1px solid #2aa3c4',
-                  color: '#67e8f9',
+                  background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                  border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                  color: 'var(--imp-accent-active-text, #f5e1be)',
                   fontSize: 10,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -216,8 +216,8 @@ export const SimpPlaylistCard: React.FC<SimpPlaylistCardProps> = ({
                   padding: '2px 6px',
                   borderRadius: 6,
                   background: isActiveTarget ? '#13303d' : '#12141c',
-                  border: isActiveTarget ? '1px solid #2aa3c4' : '1px solid #262a38',
-                  color: isActiveTarget ? '#67e8f9' : '#71717a',
+                  border: isActiveTarget ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #262a38',
+                  color: isActiveTarget ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                   fontSize: 10,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -342,8 +342,8 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#0d1b22' : '#0a0a0e',
-        border: isSelected ? '1px solid #2aa3c4' : '1px solid #181822',
+        background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+        border: isSelected ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
         cursor: 'pointer',
@@ -384,9 +384,9 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
             style={{
               padding: '2px 6px',
               borderRadius: 6,
-              background: isAppleAlbum ? '#251018' : '#0f222a',
-              border: isAppleAlbum ? '1px solid #4c1d2e' : '1px solid #2aa3c4',
-              color: isAppleAlbum ? '#fda4af' : '#67e8f9',
+              background: isAppleAlbum ? '#251018' : 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              border: isAppleAlbum ? '1px solid #4c1d2e' : '1px solid var(--imp-focus-ring, #e8b86d)',
+              color: isAppleAlbum ? '#fda4af' : 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 10,
               fontFamily: 'monospace',
               fontWeight: 800,
@@ -418,9 +418,9 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
               style={{
                 padding: '2px 6px',
                 borderRadius: 6,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 10,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -468,9 +468,9 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
                 style={{
                   padding: '3px 6px',
                   borderRadius: 6,
-                  background: isLocalPinned ? '#0f222a' : '#121820',
-                  border: isLocalPinned ? '1px solid #2aa3c4' : '1px solid #283848',
-                  color: isLocalPinned ? '#67e8f9' : '#bfeaf5',
+                  background: isLocalPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#121820',
+                  border: isLocalPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #283848',
+                  color: isLocalPinned ? 'var(--imp-accent-active-text, #f5e1be)' : 'var(--imp-accent-active-text, #f5e1be)',
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -480,7 +480,7 @@ export const SimpAlbumCard: React.FC<SimpAlbumCardProps> = ({
                 <ImpIcon
                   name={isLocalPinned ? 'check' : 'imp'}
                   size={11}
-                  color={isLocalPinned ? '#67e8f9' : '#bfeaf5'}
+                  color={isLocalPinned ? 'var(--imp-accent-active-text, #f5e1be)' : 'var(--imp-accent-active-text, #f5e1be)'}
                 />
               </span>
             )}
@@ -587,8 +587,8 @@ export const LocalArtistCard: React.FC<LocalArtistCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#0d1b22' : '#0a0a0e',
-        border: isSelected ? '1px solid #2aa3c4' : '1px solid #181822',
+        background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+        border: isSelected ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
         cursor: 'pointer',
@@ -612,16 +612,16 @@ export const LocalArtistCard: React.FC<LocalArtistCardProps> = ({
         <ResilientTileArtwork
           src={artUrl}
           fallbackIcon="🎤"
-          bg="#0f222a"
-          border="1px solid #2aa3c4"
+          bg="var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))"
+          border="1px solid var(--imp-focus-ring, #e8b86d)"
         />
         <span
           style={{
             padding: '2px 6px',
             borderRadius: 6,
-            background: '#0f222a',
-            border: '1px solid #2aa3c4',
-            color: '#67e8f9',
+            background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+            color: 'var(--imp-accent-active-text, #f5e1be)',
             fontSize: 10,
             fontFamily: 'monospace',
             fontWeight: 800,

@@ -518,7 +518,7 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
                 style={{
                   fontSize: 13,
                   fontFamily: 'monospace',
-                  color: '#67e8f9',
+                  color: 'var(--imp-accent-active-text, #f5e1be)',
                   fontWeight: 700,
                   textShadow: '0 1px 4px rgba(0, 0, 0, 0.98)',
                 }}
@@ -538,7 +538,7 @@ export const PlayerTransportBar: React.FC<PlayerTransportBarProps> = ({
                       maxWidth: karaokeModeActive ? 'none' : '100%',
                       fontSize: 15,
                       fontWeight: 800,
-                      color: '#67e8f9',
+                      color: 'var(--imp-accent-active-text, #f5e1be)',
                       textShadow: '0 1px 6px rgba(0, 0, 0, 0.98)',
                       overflow: karaokeModeActive ? 'visible' : 'hidden',
                       textOverflow: karaokeModeActive ? 'clip' : 'ellipsis',
@@ -619,8 +619,8 @@ export const TransportIconButton: React.FC<TransportBtnProps> = ({
       width: 72,
       height: 72,
       borderRadius: 18,
-      background: active ? 'var(--imp-accent-muted, #0d1b22)' : '#0b0c12',
-      border: active ? '2px solid var(--imp-accent, #2aa3c4)' : '2px solid #2a2c3c',
+      background: active ? 'var(--imp-accent-muted, var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13)))' : '#0b0c12',
+      border: active ? '2px solid var(--imp-accent, var(--imp-focus-ring, #e8b86d))' : '2px solid #2a2c3c',
       boxShadow:
         '0 10px 26px rgba(0, 0, 0, 0.94), 0 3px 8px rgba(0, 0, 0, 0.96), 0 0 0 1px rgba(0, 0, 0, 0.85)',
       color: '#d4d4dc',

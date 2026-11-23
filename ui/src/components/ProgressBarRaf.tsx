@@ -108,9 +108,9 @@ function getScrubSourceTheme(trackUri?: string): ScrubSourceTheme {
     playedBot: 'rgba(14, 165, 233, 0.46)',
     unplayedTop: 'rgba(56, 189, 248, 0.32)',
     unplayedBot: 'rgba(14, 116, 144, 0.18)',
-    barGradient: 'linear-gradient(90deg, #164e63 0%, #2aa3c4 100%)',
-    compactBarGradient: 'linear-gradient(90deg, #164e63 0%, #2aa3c4 100%)',
-    thumbBorder: '#2aa3c4',
+    barGradient: 'linear-gradient(90deg, #6b532e 0%, var(--imp-focus-ring, #e8b86d) 100%)',
+    compactBarGradient: 'linear-gradient(90deg, #6b532e 0%, var(--imp-focus-ring, #e8b86d) 100%)',
+    thumbBorder: 'var(--imp-focus-ring, #e8b86d)',
   };
 }
 

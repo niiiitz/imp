@@ -167,7 +167,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       borderRadius: 8,
                       background: '#14141e',
                       border: '1px solid #2a2a38',
-                      color: '#bfeaf5',
+                      color: 'var(--imp-accent-active-text, #f5e1be)',
                       fontSize: 11,
                       fontWeight: 800,
                       cursor: 'pointer',
@@ -420,9 +420,9 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       minHeight: 40,
                       padding: '0 14px',
                       borderRadius: 10,
-                      background: '#0f222a',
-                      color: '#bfeaf5',
-                      border: '1px solid #2aa3c4',
+                      background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                      color: 'var(--imp-accent-active-text, #f5e1be)',
+                      border: '1px solid var(--imp-focus-ring, #e8b86d)',
                       fontWeight: 800,
                       fontSize: 12,
                       cursor: 'pointer',
@@ -632,8 +632,8 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                         fontWeight: 700,
                         padding: '3px 8px',
                         borderRadius: 6,
-                        background: opticalDisc.dvd_ffmpeg_available ? '#0f222a' : '#291216',
-                        color: opticalDisc.dvd_ffmpeg_available ? '#67e8f9' : '#fca5a5',
+                        background: opticalDisc.dvd_ffmpeg_available ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#291216',
+                        color: opticalDisc.dvd_ffmpeg_available ? 'var(--imp-accent-active-text, #f5e1be)' : '#fca5a5',
                         border: opticalDisc.dvd_ffmpeg_available
                           ? '1px solid #0891b2'
                           : '1px solid #991b1b',
@@ -655,7 +655,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                             value={dvdAudioChoice}
                             onChange={(e) => setDvdAudioChoice(Number(e.target.value))}
                             style={{
-                              background: '#0a0a0e',
+                              background: 'var(--imp-surface-card, #1a1d24)',
                               color: '#f8fafc',
                               border: '1px solid #2e2e3e',
                               borderRadius: 6,
@@ -678,7 +678,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                             value={dvdSubChoice}
                             onChange={(e) => setDvdSubChoice(e.target.value)}
                             style={{
-                              background: '#0a0a0e',
+                              background: 'var(--imp-surface-card, #1a1d24)',
                               color: '#f8fafc',
                               border: '1px solid #2e2e3e',
                               borderRadius: 6,
@@ -709,7 +709,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       style={{
                         padding: '10px 12px',
                         borderRadius: 12,
-                        background: '#0a0a0e',
+                        background: 'var(--imp-surface-card, #1a1d24)',
                         border: '1px solid #181822',
                         display: 'flex',
                         flexDirection: 'column',
@@ -761,9 +761,9 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                             minHeight: 36,
                             padding: '0 14px',
                             borderRadius: 8,
-                            background: '#0f222a',
-                            border: '1px solid #2aa3c4',
-                            color: '#bfeaf5',
+                            background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                            color: 'var(--imp-accent-active-text, #f5e1be)',
                             fontSize: 12,
                             fontWeight: 800,
                             cursor: 'pointer',
@@ -935,8 +935,8 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                     minHeight: 50,
                     padding: '6px 12px',
                     borderRadius: 12,
-                    background: track?.uri === t.uri ? '#0d1b22' : '#0a0a0e',
-                    border: track?.uri === t.uri ? '1px solid #2aa3c4' : '1px solid #16161e',
+                    background: track?.uri === t.uri ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+                    border: track?.uri === t.uri ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #16161e',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -1091,7 +1091,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                             t.source === 'ia_video' ||
                             t.source === 'cdda'
                               ? '#fcd34d'
-                              : '#67e8f9',
+                              : 'var(--imp-accent-active-text, #f5e1be)',
                         }}
                       >
                         {(() => {
@@ -1258,7 +1258,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                           borderRadius: 8,
                           background: '#161620',
                           border: '1px solid #2e2e3c',
-                          color: '#2aa3c4',
+                          color: 'var(--imp-focus-ring, #e8b86d)',
                           fontSize: 12,
                           fontWeight: 800,
                           cursor: 'pointer',
@@ -1300,7 +1300,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                 style={{
                   padding: '20px 14px',
                   borderRadius: 12,
-                  background: '#0a0a0e',
+                  background: 'var(--imp-surface-card, #1a1d24)',
                   border: '1px solid #16161e',
                   fontSize: 13,
                   color: '#8e8e99',

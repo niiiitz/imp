@@ -503,9 +503,9 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
     {
       key: 'media_type',
       label: 'Type',
-      accentColor: '#2aa3c4',
-      activeBg: '#0f222a',
-      activeText: '#bfeaf5',
+      accentColor: 'var(--imp-focus-ring, #e8b86d)',
+      activeBg: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+      activeText: 'var(--imp-accent-active-text, #f5e1be)',
       items: [
         {
           id: 'all',
@@ -574,12 +574,12 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
         activeText: '#6ee7b7',
         items: (
           [
-            { id: 'overview', label: '⚡ Overview' },
-            { id: 'artists', label: `🎤 Artists (${localArtistsCount})` },
-            { id: 'albums', label: `💿 Albums (${localAlbumsCount})` },
-            { id: 'folders', label: `📂 Folders (${localMountsCount})` },
+            { id: 'overview', label: 'Overview' },
+            { id: 'artists', label: `Artists (${localArtistsCount})` },
+            { id: 'albums', label: `Albums (${localAlbumsCount})` },
+            { id: 'folders', label: `Folders (${localMountsCount})` },
             ...(localVideosCount > 0 && mediaTypeFilter !== 'audio'
-              ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideosCount})` }]
+              ? [{ id: 'videos' as const, label: `Videos (${localVideosCount})` }]
               : []),
           ] as const
         ).map((t) => ({
@@ -752,9 +752,9 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
     rows.push({
       key: 'imp_library_view',
       label: 'Library View',
-      accentColor: '#2aa3c4',
-      activeBg: '#0f222a',
-      activeText: '#bfeaf5',
+      accentColor: 'var(--imp-focus-ring, #e8b86d)',
+      activeBg: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+      activeText: 'var(--imp-accent-active-text, #f5e1be)',
       items: [
         { id: 'all' as const, label: 'All' },
         ...(recentCount > 0
@@ -1145,7 +1145,7 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
           maxHeight: '85vh',
           overflowY: 'auto',
           background: '#08080e',
-          border: '1.5px solid #2aa3c4',
+          border: '1.5px solid var(--imp-focus-ring, #e8b86d)',
           borderRadius: 16,
           padding: '16px 18px',
           boxSizing: 'border-box',
@@ -1166,7 +1166,7 @@ export const LibraryFilterModal: React.FC<LibraryFilterModalProps> = ({
           }}
         >
           <div>
-            <div style={{ fontSize: 14.5, fontWeight: 900, color: '#bfeaf5' }}>
+            <div style={{ fontSize: 14.5, fontWeight: 900, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
               ⚲ Library &amp; View Filters
             </div>
             <div style={{ fontSize: 11, color: '#7b8090', marginTop: 2 }}>

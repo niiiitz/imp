@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { defaultSimpClient } from '@simp/client';
+import './themeTokens.css';
 import { App } from './App';
 import { AppleMusicDriver } from './drivers/AppleMusicDriver';
 

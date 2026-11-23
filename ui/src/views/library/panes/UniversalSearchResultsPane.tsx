@@ -108,7 +108,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                     gap: 8,
                   }}
                 >
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#bfeaf5' }}>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                     🔍 Search Results for "{browserSearch.trim()}"
                   </div>
                 </div>
@@ -116,8 +116,8 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                 {/* 1A. Matching SIMP Hybrid & Pinned Playlists */}
                 {searchMatchedPlaylists.length > 0 && (
                   <>
-                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                      <ImpIcon name="imp" size={11} color="#2aa3c4" />
+                    <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      <ImpIcon name="imp" size={11} color="var(--imp-focus-ring, #e8b86d)" />
                       <span>MATCHING IMP & PINNED PLAYLISTS ({searchMatchedPlaylists.length})</span>
                     </div>
                     <div style={tileGridStyle}>
@@ -207,7 +207,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           {/* 1C-0. Matching Local Library Artists */}
                           {isSourceIncluded('local') && matchedLocalArtists.length > 0 && (
                             <>
-                              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
+                              <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)' }}>
                                 🎤 MATCHING LOCAL LIBRARY ARTISTS ({matchedLocalArtists.length})
                               </div>
                               <div style={tileGridStyle}>
@@ -225,7 +225,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           {/* 1C. Matching Local & Pinned Albums */}
                           {filteredAlbums.length > 0 && (
                             <>
-                              <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
+                              <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)' }}>
                                 💿 MATCHING IMP LIBRARY ALBUMS ({filteredAlbums.length})
                               </div>
                               <div style={tileGridStyle}>
@@ -238,7 +238,7 @@ export const UniversalSearchResultsPane: React.FC<UniversalSearchResultsPaneProp
                           {isSourceIncluded('local') &&
                             localOnlySearchTracks.length > 0 && (
                               <>
-                                <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#2aa3c4' }}>
+                                <div style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)' }}>
                                   LOCAL TRACKS & VIDEOS ({localOnlySearchTracks.length})
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

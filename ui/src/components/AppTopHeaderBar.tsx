@@ -1,6 +1,7 @@
 import React from 'react';
 import { defaultSimpClient, TrackMetadata } from '@simp/client';
 import { ImpIcon } from './icons/ImpIcon';
+import { StatsHudPill } from './StatsHudPill';
 
 export interface AppTopHeaderBarProps {
   isNavBarHidden: boolean;
@@ -49,14 +50,16 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
     <>
       <header
         style={{
-          height: 58,
+          height: 56,
           boxSizing: 'border-box',
-          padding: '0 24px',
-          borderBottom: isNavBarHidden ? '1px solid transparent' : '1px solid #16161c',
+          padding: '0 20px',
+          borderBottom: isNavBarHidden
+            ? '1px solid transparent'
+            : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: isNavBarHidden ? 'transparent' : '#000000',
+          background: isNavBarHidden ? 'transparent' : 'var(--imp-surface-panel, #161920)',
           width: '100%',
           flexShrink: 0,
           opacity: isNavBarHidden ? 0 : 1,
@@ -91,13 +94,13 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
           }}
           title="Track Options, Visualizer & Active Queue (SELECT)"
           style={{
-            minHeight: 44,
+            minHeight: 38,
             maxWidth: 'clamp(190px, 32vw, 380px)',
-            padding: '0 12px 0 10px',
-            borderRadius: 12,
-            background: '#0a0a0e',
-            border: '1px solid #22222c',
-            color: '#d4d4dc',
+            padding: '0 10px',
+            borderRadius: 8,
+            background: 'var(--imp-surface-card, #1a1d24)',
+            border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+            color: 'var(--imp-text-primary, #eef0f4)',
             display: 'flex',
             alignItems: 'center',
             gap: 8,
@@ -134,7 +137,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             ) : track?.source === 'cdda' || track?.source === 'dvd' ? (
               <ImpIcon name="disc" size={13} color="#fcd34d" />
             ) : (
-              <ImpIcon name="disc" size={13} color="#67e8f9" />
+              <ImpIcon name="disc" size={13} color="var(--imp-accent-active-text, #f5e1be)" />
             )}
           </span>
           <span
@@ -158,11 +161,11 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 6,
-              background: '#0a0a0e',
-              padding: 4,
-              borderRadius: 12,
-              border: '1px solid #1c1c24',
+              gap: 4,
+              background: 'var(--imp-surface-card, #1a1d24)',
+              padding: 3,
+              borderRadius: 8,
+              border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
             }}
           >
             <span
@@ -174,34 +177,52 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             <button
               onClick={() => setView('lock')}
               style={{
-                minHeight: 36,
-                padding: '0 16px',
-                borderRadius: 8,
-                border: view === 'lock' ? '1px solid #2aa3c4' : '1px solid transparent',
+                minHeight: 32,
+                padding: '0 14px',
+                borderRadius: 6,
+                border:
+                  view === 'lock'
+                    ? '1px solid var(--imp-accent-active-border, rgba(232, 184, 109, 0.52))'
+                    : '1px solid transparent',
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: 'pointer',
-                background: view === 'lock' ? '#0f222a' : 'transparent',
-                color: view === 'lock' ? '#bfeaf5' : '#8e8e99',
+                background:
+                  view === 'lock'
+                    ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                    : 'transparent',
+                color:
+                  view === 'lock'
+                    ? 'var(--imp-accent-active-text, #f5e1be)'
+                    : 'var(--imp-text-secondary, #8b92a1)',
               }}
             >
-              🎵 Player
+              Player
             </button>
             <button
               onClick={() => setView('browser')}
               style={{
-                minHeight: 36,
-                padding: '0 16px',
-                borderRadius: 8,
-                border: view === 'browser' ? '1px solid #2aa3c4' : '1px solid transparent',
+                minHeight: 32,
+                padding: '0 14px',
+                borderRadius: 6,
+                border:
+                  view === 'browser'
+                    ? '1px solid var(--imp-accent-active-border, rgba(232, 184, 109, 0.52))'
+                    : '1px solid transparent',
                 fontSize: 12,
                 fontWeight: 700,
                 cursor: 'pointer',
-                background: view === 'browser' ? '#0f222a' : 'transparent',
-                color: view === 'browser' ? '#bfeaf5' : '#8e8e99',
+                background:
+                  view === 'browser'
+                    ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                    : 'transparent',
+                color:
+                  view === 'browser'
+                    ? 'var(--imp-accent-active-text, #f5e1be)'
+                    : 'var(--imp-text-secondary, #8b92a1)',
               }}
             >
-              📚 Library
+              Library
             </button>
             <span
               className="simp-gp-badge"
@@ -215,23 +236,24 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             type="button"
             onClick={() => setView('browser')}
             style={{
-              minHeight: 36,
-              padding: '0 16px',
-              borderRadius: 10,
-              border: '1px solid #2aa3c4',
+              minHeight: 34,
+              padding: '0 14px',
+              borderRadius: 8,
+              border: '1px solid var(--imp-accent-active-border, rgba(232, 184, 109, 0.52))',
               fontSize: 12,
               fontWeight: 800,
               cursor: 'pointer',
-              background: '#0f222a',
-              color: '#bfeaf5',
+              background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
             }}
           >
             ← Back to Library
           </button>
         ) : null}
 
-        {/* Compact Volume & Brightness Dropdown Controls + Settings Button */}
+        {/* Stats HUD + Volume & Brightness Controls + START Menu */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, position: 'relative', zIndex: 40 }}>
+          {!isNavBarHidden && <StatsHudPill track={track} />}
           {/* Unified Play/Pause (Silence) Toggle + Volume % Vertical Slider Popover */}
           <div
             onWheel={(e) => {
@@ -240,14 +262,14 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
               applyVolume(currentVolume + delta);
             }}
             style={{
-              height: 44,
-              borderRadius: 12,
-              background: '#0a0a0e',
+              height: 38,
+              borderRadius: 8,
+              background: 'var(--imp-surface-card, #1a1d24)',
               border: volumePopoverOpen
-                ? '1px solid #2aa3c4'
+                ? '1px solid var(--imp-focus-ring, #e8b86d)'
                 : isPlaying
-                  ? '1px solid #1e3a46'
-                  : '1px solid #22222c',
+                  ? '1px solid var(--imp-border-strong, rgba(255, 255, 255, 0.16))'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
               display: 'flex',
               alignItems: 'stretch',
               position: 'relative',
@@ -282,10 +304,10 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                 padding: '0 10px',
                 border: 'none',
                 borderRight: '1px solid #1e1e28',
-                borderTopLeftRadius: view === 'lock' ? 0 : 11,
-                borderBottomLeftRadius: view === 'lock' ? 0 : 11,
-                background: isPlaying ? 'rgba(42, 163, 196, 0.1)' : '#12121a',
-                color: isPlaying ? '#2aa3c4' : '#9ca3af',
+                borderTopLeftRadius: view === 'lock' ? 0 : 7,
+                borderBottomLeftRadius: view === 'lock' ? 0 : 7,
+                background: isPlaying ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'transparent',
+                color: isPlaying ? 'var(--imp-focus-ring, #e8b86d)' : '#9ca3af',
                 fontSize: 14,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -311,7 +333,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                 border: 'none',
                 borderTopRightRadius: view === 'lock' ? 0 : 11,
                 borderBottomRightRadius: view === 'lock' ? 0 : 11,
-                background: volumePopoverOpen ? '#0f222a' : 'transparent',
+                background: volumePopoverOpen ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'transparent',
                 color: isPlaying ? '#c8c8d2' : '#8e8e99',
                 fontSize: 12,
                 fontFamily: 'monospace',
@@ -356,8 +378,8 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                   width: 74,
                   padding: '14px 10px',
                   borderRadius: 16,
-                  background: '#0c0c12',
-                  border: '2px solid #2aa3c4',
+                  background: 'var(--imp-surface-elevated, #21252f)',
+                  border: '2px solid var(--imp-focus-ring, #e8b86d)',
                   boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
                   display: 'flex',
                   flexDirection: 'column',
@@ -366,7 +388,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                   zIndex: 60,
                 }}
               >
-                <span style={{ fontSize: 11, fontWeight: 800, color: isPlaying ? '#67e8f9' : '#9ca3af' }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: isPlaying ? 'var(--imp-accent-active-text, #f5e1be)' : '#9ca3af' }}>
                   {volPct}%
                 </span>
                 <div
@@ -386,7 +408,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                     onChange={(e) => applyVolume(Number(e.target.value) / 100)}
                     style={{
                       width: 120,
-                      accentColor: '#2aa3c4',
+                      accentColor: 'var(--imp-focus-ring, #e8b86d)',
                       transform: 'rotate(-90deg)',
                       cursor: 'pointer',
                     }}
@@ -397,16 +419,22 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                   style={{
                     width: '100%',
                     padding: '4px 0',
-                    borderRadius: 8,
-                    background: isPlaying ? '#0f222a' : '#161622',
-                    border: isPlaying ? '1px solid #2aa3c4' : '1px solid #2a2a38',
-                    color: isPlaying ? '#7dd3fc' : '#d4d4dc',
+                    borderRadius: 6,
+                    background: isPlaying
+                      ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                      : 'var(--imp-surface-card, #1a1d24)',
+                    border: isPlaying
+                      ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                      : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                    color: isPlaying
+                      ? 'var(--imp-accent-active-text, #f5e1be)'
+                      : '#d4d4dc',
                     fontSize: 10,
                     fontWeight: 800,
                     cursor: 'pointer',
                   }}
                 >
-                  {isPlaying ? '⏸ Pause' : '▶ Play'}
+                  {isPlaying ? 'Pause' : 'Play'}
                 </button>
               </div>
             )}
@@ -421,12 +449,18 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
               }}
               title="Adjust OLED screen brightness"
               style={{
-                height: 44,
+                height: 38,
                 padding: '0 10px',
-                borderRadius: 12,
-                background: brightnessPopoverOpen ? '#0f222a' : '#0a0a0e',
-                border: brightnessPopoverOpen ? '1px solid #2aa3c4' : '1px solid #22222c',
-                color: brightnessPopoverOpen ? '#bfeaf5' : '#c8c8d2',
+                borderRadius: 8,
+                background: brightnessPopoverOpen
+                  ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                  : 'var(--imp-surface-card, #1a1d24)',
+                border: brightnessPopoverOpen
+                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+                color: brightnessPopoverOpen
+                  ? 'var(--imp-accent-active-text, #f5e1be)'
+                  : '#c8c8d2',
                 fontSize: 12,
                 fontFamily: 'monospace',
                 fontWeight: 700,
@@ -451,8 +485,8 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                   width: 68,
                   padding: '14px 10px',
                   borderRadius: 16,
-                  background: '#0c0c12',
-                  border: '2px solid #2aa3c4',
+                  background: 'var(--imp-surface-elevated, #21252f)',
+                  border: '2px solid var(--imp-focus-ring, #e8b86d)',
                   boxShadow: '0 12px 28px rgba(0,0,0,0.85)',
                   display: 'flex',
                   flexDirection: 'column',
@@ -461,7 +495,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                   zIndex: 60,
                 }}
               >
-                <span style={{ fontSize: 11, fontWeight: 800, color: '#67e8f9' }}>
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                   {brightnessPct}%
                 </span>
                 <div
@@ -481,7 +515,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
                     onChange={(e) => setBrightnessPct(Number(e.target.value))}
                     style={{
                       width: 120,
-                      accentColor: '#2aa3c4',
+                      accentColor: 'var(--imp-focus-ring, #e8b86d)',
                       transform: 'rotate(-90deg)',
                       cursor: 'pointer',
                     }}
@@ -501,15 +535,21 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
             }}
             title="Settings Menu (START)"
             style={{
-              height: 44,
-              padding: '0 12px',
-              borderRadius: 12,
-              background: sourceModalOpen || powerModalOpen ? '#0f222a' : '#0a0a0e',
+              height: 38,
+              padding: '0 10px',
+              borderRadius: 8,
+              background:
+                sourceModalOpen || powerModalOpen
+                  ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                  : 'var(--imp-surface-card, #1a1d24)',
               border:
                 sourceModalOpen || powerModalOpen
-                  ? '1px solid #2aa3c4'
-                  : '1px solid #22222c',
-              color: sourceModalOpen || powerModalOpen ? '#bfeaf5' : '#c8c8d2',
+                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                  : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
+              color:
+                sourceModalOpen || powerModalOpen
+                  ? 'var(--imp-accent-active-text, #f5e1be)'
+                  : '#c8c8d2',
               fontSize: 16,
               cursor: 'pointer',
               display: 'flex',

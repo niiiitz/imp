@@ -2849,7 +2849,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
       : localSubTab === 'albums'
       ? 'Local Albums'
       : localSubTab === 'folders'
-      ? 'Mounts & Folders'
+      ? 'Folders'
       : localSubTab === 'videos'
       ? 'Local Videos'
       : 'Local Overview'
@@ -3955,7 +3955,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           gap: 4,
           minHeight: 84,
           padding: '6px 14px',
-          background: '#06070b',
+          background: 'var(--imp-surface-panel, #161920)',
           borderRight: '1px solid #16161c',
           borderBottom: `1px solid ${browserSearch ? libTheme.accentBorder : '#181a24'}`,
           boxSizing: 'border-box',
@@ -4008,7 +4008,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
               minHeight: 26,
               padding: browserSearch ? '0 58px 0 32px' : '0 34px 0 32px',
               borderRadius: 8,
-              background: '#08080c',
+              background: 'var(--imp-bg-canvas, #121418)',
               border: browserSearch ? `1px solid ${libTheme.accent}` : '1px solid #242430',
               color: '#d4d4dc',
               fontSize: 12,
@@ -4238,12 +4238,12 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
               gap: 10,
               padding: '8px 12px',
               borderRadius: 10,
-              background: '#0f222a',
-              border: '1px solid #2aa3c4',
+              background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              border: '1px solid var(--imp-focus-ring, #e8b86d)',
               flexShrink: 0,
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 800, color: '#bfeaf5' }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
               🔍 Filtering by “{browserSearch.trim()}”
             </span>
             <button
@@ -4254,7 +4254,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
                 padding: '4px 10px',
                 borderRadius: 7,
                 background: '#16313c',
-                border: '1px solid #2aa3c4',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
                 color: '#7dd3fc',
                 fontSize: 11.5,
                 fontFamily: 'monospace',

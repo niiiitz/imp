@@ -87,7 +87,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
           maxWidth: 650,
           maxHeight: '88vh',
           background: '#0a0b10',
-          border: '2px solid var(--imp-accent, #2aa3c4)',
+          border: '2px solid var(--imp-accent, var(--imp-focus-ring, #e8b86d))',
           borderRadius: 18,
           padding: 20,
           boxSizing: 'border-box',
@@ -158,7 +158,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
               minHeight: 40,
               padding: '8px 10px',
               borderRadius: 10,
-              background: vizMode === 'cycle' ? 'rgba(42, 163, 196, 0.22)' : '#12141e',
+              background: vizMode === 'cycle' ? 'rgba(232, 184, 109, 0.22)' : '#12141e',
               border:
                 vizMode === 'cycle'
                   ? '1.5px solid var(--imp-accent, #38bdf8)'
@@ -185,7 +185,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
               minHeight: 40,
               padding: '8px 10px',
               borderRadius: 10,
-              background: vizMode === 'shuffle' ? 'rgba(42, 163, 196, 0.22)' : '#12141e',
+              background: vizMode === 'shuffle' ? 'rgba(232, 184, 109, 0.22)' : '#12141e',
               border:
                 vizMode === 'shuffle'
                   ? '1.5px solid var(--imp-accent, #38bdf8)'
@@ -397,7 +397,7 @@ export const VisualizerDrawerModal: React.FC<VisualizerDrawerModalProps> = ({
                         style={{
                           fontSize: 13,
                           fontWeight: 800,
-                          color: isCurrentlyRendering ? '#67e8f9' : '#f1f5f9',
+                          color: isCurrentlyRendering ? 'var(--imp-accent-active-text, #f5e1be)' : '#f1f5f9',
                           whiteSpace: 'nowrap',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',

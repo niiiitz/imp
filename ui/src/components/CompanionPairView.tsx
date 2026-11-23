@@ -170,7 +170,7 @@ export const CompanionPairView: React.FC = () => {
           width: '100%',
           maxWidth: 440,
           borderRadius: 20,
-          background: '#0c0c12',
+          background: 'var(--imp-surface-elevated, #21252f)',
           border: '1px solid #222230',
           padding: 24,
           boxSizing: 'border-box',
@@ -204,7 +204,7 @@ export const CompanionPairView: React.FC = () => {
               IMP Companion Pairing
             </div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-              Host: <span style={{ fontFamily: 'monospace', color: '#67e8f9' }}>{window.location.host}</span>
+              Host: <span style={{ fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>{window.location.host}</span>
             </div>
           </div>
         </div>
@@ -214,7 +214,7 @@ export const CompanionPairView: React.FC = () => {
           style={{
             padding: '12px 14px',
             borderRadius: 12,
-            background: isAuth ? '#0d221c' : '#11111a',
+            background: isAuth ? '#0d221c' : 'var(--imp-surface-card, #1a1d24)',
             border: isAuth ? '1px solid #10b981' : '1px solid #262638',
             fontSize: 13,
             lineHeight: 1.45,
@@ -276,9 +276,9 @@ export const CompanionPairView: React.FC = () => {
             style={{
               minHeight: 46,
               borderRadius: 12,
-              background: '#0f222a',
-              border: '1px solid #2aa3c4',
-              color: '#bfeaf5',
+              background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              border: '1px solid var(--imp-focus-ring, #e8b86d)',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 13,
               fontWeight: 800,
               cursor: busy ? 'wait' : 'pointer',
@@ -292,7 +292,7 @@ export const CompanionPairView: React.FC = () => {
           <div
             style={{
               fontSize: 12,
-              color: '#67e8f9',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
               textAlign: 'center',
               fontFamily: 'monospace',
             }}
@@ -433,10 +433,10 @@ export const CompanionPairView: React.FC = () => {
               }}
             >
               <div style={{ fontSize: 11, color: '#a1a1aa', lineHeight: 1.45 }}>
-                <strong style={{ color: '#e4e4ec' }}>Why use this?</strong> If your Apple ID uses hardware security keys (FIDO2 / YubiKey) or a browser blocks the Apple popup, you can paste a <code style={{ color: '#67e8f9' }}>Music-User-Token</code> directly:
+                <strong style={{ color: '#e4e4ec' }}>Why use this?</strong> If your Apple ID uses hardware security keys (FIDO2 / YubiKey) or a browser blocks the Apple popup, you can paste a <code style={{ color: 'var(--imp-accent-active-text, #f5e1be)' }}>Music-User-Token</code> directly:
                 <ol style={{ margin: '6px 0 0', paddingLeft: 18 }}>
-                  <li>Sign in to <code style={{ color: '#67e8f9' }}>music.apple.com</code> on any desktop browser.</li>
-                  <li>Open DevTools (<code style={{ color: '#67e8f9' }}>F12</code>) → Application / Storage → Cookies or Local Storage, or run <code style={{ color: '#67e8f9' }}>MusicKit.getInstance().musicUserToken</code> in the Console.</li>
+                  <li>Sign in to <code style={{ color: 'var(--imp-accent-active-text, #f5e1be)' }}>music.apple.com</code> on any desktop browser.</li>
+                  <li>Open DevTools (<code style={{ color: 'var(--imp-accent-active-text, #f5e1be)' }}>F12</code>) → Application / Storage → Cookies or Local Storage, or run <code style={{ color: 'var(--imp-accent-active-text, #f5e1be)' }}>MusicKit.getInstance().musicUserToken</code> in the Console.</li>
                   <li>Paste the token below to authorize your Steam Deck immediately.</li>
                 </ol>
               </div>
@@ -458,7 +458,7 @@ export const CompanionPairView: React.FC = () => {
                       borderRadius: 6,
                       background: '#171724',
                       border: '1px solid #2e2e42',
-                      color: '#67e8f9',
+                      color: 'var(--imp-accent-active-text, #f5e1be)',
                       fontSize: 10,
                       fontWeight: 700,
                       cursor: 'pointer',

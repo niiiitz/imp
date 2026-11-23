@@ -456,7 +456,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
       : effectiveSubTab === 'folders'
       ? effectiveMount
         ? `${effectiveMount.label}${folderDrillData.curPrefix ? ` / ${folderDrillData.curPrefix}` : ''}`
-        : 'Storage Mounts & Folders'
+        : 'Local Folders'
       : effectiveSubTab === 'videos'
       ? `Local Videos (${localVideos.length})`
       : 'Local Music & Storage';
@@ -1165,7 +1165,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                All Mounts ({mountsList.length})
+                All Folders ({mountsList.length})
               </button>
               {mountsList.map((m) => {
                 const isActive = effectiveMount?.mount_root === m.mount_root;
@@ -1399,7 +1399,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                         borderRadius: 8,
                         background: '#12141e',
                         border: '1px solid #2a2a38',
-                        color: '#67e8f9',
+                        color: 'var(--imp-accent-active-text, #f5e1be)',
                         fontSize: 11,
                         fontWeight: 800,
                         cursor: 'pointer',

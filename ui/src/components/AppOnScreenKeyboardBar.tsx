@@ -52,7 +52,7 @@ export const AppOnScreenKeyboardBar: React.FC<AppOnScreenKeyboardBarProps> = ({
           bottom: 0,
           zIndex: 95,
           background: 'rgba(8, 8, 12, 0.96)',
-          borderTop: '2px solid #2aa3c4',
+          borderTop: '2px solid var(--imp-focus-ring, #e8b86d)',
           boxShadow: '0 -12px 32px rgba(0, 0, 0, 0.85)',
           padding: '10px 18px 14px',
           display: 'flex',
@@ -73,7 +73,7 @@ export const AppOnScreenKeyboardBar: React.FC<AppOnScreenKeyboardBarProps> = ({
               style={{
                 fontSize: 11,
                 fontFamily: 'monospace',
-                color: '#2aa3c4',
+                color: 'var(--imp-focus-ring, #e8b86d)',
                 fontWeight: 800,
                 flexShrink: 0,
               }}
@@ -91,7 +91,7 @@ export const AppOnScreenKeyboardBar: React.FC<AppOnScreenKeyboardBarProps> = ({
                 padding: '0 12px',
                 borderRadius: 8,
                 background: '#050508',
-                border: '1px solid #2aa3c4',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
                 color: '#f4f4f6',
                 fontSize: 13,
                 fontFamily: 'monospace',
@@ -109,7 +109,7 @@ export const AppOnScreenKeyboardBar: React.FC<AppOnScreenKeyboardBarProps> = ({
                 : customFolderPath) || (
                 <span style={{ color: '#71717a' }}>Type with D-Pad + (A) or press (B) when done...</span>
               )}
-              <span style={{ color: '#2aa3c4', marginLeft: 2, fontWeight: 900 }}>▋</span>
+              <span style={{ color: 'var(--imp-focus-ring, #e8b86d)', marginLeft: 2, fontWeight: 900 }}>▋</span>
             </div>
           </div>
 
@@ -171,9 +171,9 @@ export const AppOnScreenKeyboardBar: React.FC<AppOnScreenKeyboardBarProps> = ({
                 minHeight: 34,
                 padding: '0 14px',
                 borderRadius: 8,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#bfeaf5',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 12,
                 fontWeight: 800,
                 cursor: 'pointer',

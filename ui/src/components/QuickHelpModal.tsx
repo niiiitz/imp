@@ -41,8 +41,8 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
           maxWidth: 640,
           maxHeight: '88vh',
           overflowY: 'auto',
-          background: '#09090f',
-          border: '2px solid #2aa3c4',
+          background: 'var(--imp-surface-panel, #161920)',
+          border: '2px solid var(--imp-focus-ring, #e8b86d)',
           borderRadius: 18,
           padding: 20,
           boxSizing: 'border-box',
@@ -65,15 +65,12 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
           }}
         >
           <div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: '#bfeaf5', display: 'flex', alignItems: 'center', gap: 7 }}>
-              <ImpIcon name="bolt" size={16} color="#fb923c" />
-              <span>Welcome to IMP • Quick Guide &amp; Tips</span>
+            <div style={{ fontSize: 15, fontWeight: 900, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <ImpIcon name="bolt" size={15} color="#fb923c" />
+              <span>IMP Quick Guide</span>
             </div>
-            <div style={{ fontSize: 11.5, color: '#8e8e99', marginTop: 2, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span>Interactive Media Player • Re-open anytime via</span>
-              <span style={{ fontFamily: 'monospace', color: '#67e8f9', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                START (☰) → <ImpIcon name="help" size={12} color="#67e8f9" /> Help
-              </span>
+            <div style={{ fontSize: 11, color: 'var(--imp-text-secondary, #8b92a1)', marginTop: 2 }}>
+              Re-open via START (☰) → Help
             </div>
           </div>
           <button
@@ -109,7 +106,7 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
             gap: 8,
           }}
         >
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#bfeaf5' }}>
+          <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
             Choose Sources:
           </div>
           <div
@@ -172,12 +169,11 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
         >
           {/* 1. START Menu */}
           <div style={tipCardStyle}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#67e8f9' }}>
-              1. ☰ START Menu
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
+              1. START Menu
             </div>
             <div style={tipBodyStyle}>
-              <strong>&ldquo;START&rdquo;</strong> (<strong>☰</strong> from top-right) to configure
-              your connected accounts and local folders to scan for media.
+              Configure accounts and local folders from <strong>START (☰)</strong>.
             </div>
             <button
               type="button"
@@ -188,12 +184,12 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
               }}
               style={{
                 marginTop: 4,
-                minHeight: 34,
+                minHeight: 32,
                 padding: '0 12px',
-                borderRadius: 8,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#bfeaf5',
+                borderRadius: 6,
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 11.5,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -206,35 +202,22 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
 
           {/* 2. [SELECT] Context Actions */}
           <div style={tipCardStyle}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#fdba74', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#fdba74', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>2.</span>
-              <ImpIcon name="gamepad-select" size={14} color="#fdba74" />
-              <span>[SELECT] Context Actions</span>
+              <ImpIcon name="gamepad-select" size={13} color="#fdba74" />
+              <span>SELECT Actions</span>
             </div>
             <div style={tipBodyStyle}>
-              <strong>&ldquo;SELECT&rdquo;</strong> menu or right-click on library object for
-              contextual controls.
-              <ul style={{ margin: '6px 0 0', paddingLeft: 18, lineHeight: 1.5 }}>
-                <li>
-                  <strong>Player View:</strong> Interface Settings: Lyrics, Visualizer,{' '}
-                  <SoundCloudLogo
-                    width={30}
-                    style={{ margin: '0 2px', verticalAlign: 'middle' }}
-                  />{' '}
-                  Comments, Content Queue,{' '}
-                  <ImpIcon name="heart" size={12} color="#f43f5e" style={{ margin: '0 2px' }} /> Favorite
-                  &amp; Discover more, etc.
-                </li>
-              </ul>
+              Press <strong>SELECT</strong> or right-click any focused item for track, queue, visualizer, and pin actions.
             </div>
           </div>
 
-          {/* 3. Gamepad and Controls */}
+          {/* 3. Gamepad Controls */}
           <div style={tipCardStyle}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#fda4af', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#fda4af', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>3.</span>
-              <ImpIcon name="gamepad" size={14} color="#fda4af" />
-              <span>Gamepad and Controls</span>
+              <ImpIcon name="gamepad" size={13} color="#fda4af" />
+              <span>Controls</span>
             </div>
             <div
               style={{
@@ -248,28 +231,25 @@ export const QuickHelpModal: React.FC<QuickHelpModalProps> = ({
               }}
             >
               <span style={kbdBadgeStyle}>R1 / L1</span>
-              <span>Switch Player ↔ Library / Cycle tabs</span>
+              <span>Player ↔ Library / Tabs</span>
               <span style={kbdBadgeStyle}>A / B</span>
-              <span>Play or Select / Walk Back</span>
+              <span>Select / Back</span>
               <span style={kbdBadgeStyle}>X / Y</span>
-              <span>Shuffle Collection / Focus Search</span>
+              <span>Shuffle / Search</span>
               <span style={kbdBadgeStyle}>R2 / L2</span>
-              <span>Seek +10s / -10s (Fast-Forward / Rewind)</span>
+              <span>Seek ±10s</span>
             </div>
           </div>
 
           {/* 4. Library Management */}
           <div style={tipCardStyle}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: '#a7f3d0', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: '#a7f3d0', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span>4.</span>
               <ImpIcon name="folder" size={13} color="#a7f3d0" />
-              <span>Library Management</span>
+              <span>Library</span>
             </div>
             <div style={tipBodyStyle}>
-              Search across combinations of the selected sources, as found in the{' '}
-              <strong>☰ START</strong> menu Folders &amp; Accounts. Create and Edit Hybrid
-              Playlists that may span across sources. Drill down into sources to discover and
-              browse content. Manage <ImpIcon name="pin" size={12} color="#67e8f9" /> pinned collections.
+              Search across enabled sources, build hybrid playlists, and pin collections.
             </div>
           </div>
         </div>
@@ -298,7 +278,7 @@ const kbdBadgeStyle: React.CSSProperties = {
   fontFamily: 'monospace',
   fontSize: 10.5,
   fontWeight: 800,
-  color: '#67e8f9',
+  color: 'var(--imp-accent-active-text, #f5e1be)',
   background: '#141c24',
   border: '1px solid #243b4a',
   borderRadius: 5,
@@ -311,7 +291,7 @@ function sourceChipStyle(active: boolean, accent: string): React.CSSProperties {
     minHeight: 34,
     padding: '0 10px',
     borderRadius: 8,
-    background: active ? 'rgba(42, 163, 196, 0.14)' : '#12121a',
+    background: active ? 'rgba(232, 184, 109, 0.14)' : '#12121a',
     border: active ? `1px solid ${accent}` : '1px solid transparent',
     color: active ? '#f8fafc' : '#6b7280',
     fontSize: 11.5,

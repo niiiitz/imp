@@ -22,6 +22,7 @@ import { BrowserTarget } from './PlayerView';
 import { ImpIcon } from '../components/icons/ImpIcon';
 import { FolderChooserModal } from '../components/FolderChooserModal';
 import { resolveDaemonUrl } from '../api/servicesCacheApi';
+import { loadStatsHudEnabled, saveStatsHudEnabled } from '../components/StatsHudPill';
 
 interface DaemonPerfSnapshot {
   cpu_percent: number;
@@ -187,6 +188,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   );
   const [iaSafeSearch, setIaSafeSearch] = useState(true);
   const [perfSnap, setPerfSnap] = useState<DaemonPerfSnapshot | null>(null);
+  const [statsHudEnabled, setStatsHudEnabled] = useState<boolean>(() => loadStatsHudEnabled());
 
   const closeSettingsDrawer = () => {
     setSourceModalOpen(false);
@@ -422,8 +424,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               overflowY: 'auto',
               WebkitOverflowScrolling: 'touch',
               touchAction: 'pan-y',
-              background: '#09090f',
-              border: '2px solid #2aa3c4',
+              background: 'var(--imp-surface-panel, #161920)',
+              border: '2px solid var(--imp-focus-ring, #e8b86d)',
               borderRadius: 18,
               padding: 16,
               boxSizing: 'border-box',
@@ -442,10 +444,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 borderBottom: '1px solid #1e1e2a',
               }}
             >
-              <strong style={{ fontSize: 13.5, color: '#bfeaf5', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <strong style={{ fontSize: 13.5, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <ImpIcon name="folder" size={14} /> Folders & Accounts
               </strong>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#67e8f9' }}>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                 <span className="simp-gp-badge">D-Pad ▸ / B</span>
               </span>
             </div>
@@ -661,7 +663,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         gap: 10,
                         padding: 8,
                         borderRadius: 8,
-                        background: '#08080c',
+                        background: 'var(--imp-bg-canvas, #121418)',
                         border: '1px solid #222230',
                       }}
                     >
@@ -674,7 +676,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <div
                           style={{
                             fontFamily: 'monospace',
-                            color: '#67e8f9',
+                            color: 'var(--imp-accent-active-text, #f5e1be)',
                             marginTop: 2,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -862,7 +864,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {/* + Folders */}
             <div style={nestedCardStyle}>
               <div style={nestedHeaderRowStyle}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: '#67e8f9', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <ImpIcon name="folder" size={13} /> Local Folders ({snap?.mounts?.length || 0})
                 </span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -878,7 +880,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setAddPathOpen((v) => !v)}
-                    style={pillToggleStyle(addPathOpen, '#2aa3c4')}
+                    style={pillToggleStyle(addPathOpen, 'var(--imp-focus-ring, #e8b86d)')}
                   >
                     + Add local path
                   </button>
@@ -888,7 +890,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       defaultSimpClient.rescanStorage();
                       showToast('Rescanning local folders...');
                     }}
-                    style={pillToggleStyle(false, '#bfeaf5')}
+                    style={pillToggleStyle(false, 'var(--imp-accent-active-text, #f5e1be)')}
                   >
                     <ImpIcon name="refresh" size={11} style={{ marginRight: 4 }} />
                     Rescan
@@ -971,7 +973,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           gap: 8,
                           padding: '5px 8px',
                           borderRadius: 8,
-                          background: '#08080c',
+                          background: 'var(--imp-bg-canvas, #121418)',
                           border: '1px solid #1c1c26',
                           fontSize: 11,
                         }}
@@ -998,7 +1000,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ))}
                   </div>
                 ) : (
-                  <div style={{ fontSize: 11, color: '#71717a' }}>No mounted local paths</div>
+                  <div style={{ fontSize: 11, color: '#71717a' }}>No local folders added</div>
                 )}
               </div>
             </div>
@@ -1138,8 +1140,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             overflowY: 'auto',
             WebkitOverflowScrolling: 'touch',
             touchAction: 'pan-y',
-            background: '#09090f',
-            border: '2px solid #2aa3c4',
+            background: 'var(--imp-surface-panel, #161920)',
+            border: '2px solid var(--imp-focus-ring, #e8b86d)',
             borderRadius: 18,
             padding: 16,
             boxSizing: 'border-box',
@@ -1161,7 +1163,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               gap: 8,
             }}
           >
-            <strong style={{ fontSize: 14, color: '#bfeaf5', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <strong style={{ fontSize: 14, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <ImpIcon name="settings" size={14} /> IMP Settings<span className="simp-gp-badge"> (START)</span>
             </strong>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1178,8 +1180,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     padding: '0 10px',
                     borderRadius: 8,
                     background: '#101d24',
-                    border: '1px solid #2aa3c4',
-                    color: '#67e8f9',
+                    border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                    color: 'var(--imp-accent-active-text, #f5e1be)',
                     fontSize: 11.5,
                     fontWeight: 800,
                     cursor: 'pointer',
@@ -1224,9 +1226,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 minHeight: 46,
                 padding: '8px 14px',
                 borderRadius: 12,
-                background: '#0d1b22',
-                border: '1px solid #2aa3c4',
-                color: '#bfeaf5',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 textAlign: 'left',
                 display: 'flex',
                 alignItems: 'center',
@@ -1237,7 +1239,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <span style={{ fontSize: 13, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <ImpIcon name="moon" size={13} /> Sleep Screen
               </span>
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#67e8f9' }}>OLED 0%</span>
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>OLED 0%</span>
             </button>
 
             <button
@@ -1303,8 +1305,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               width: '100%',
               padding: '9px 12px',
               borderRadius: 12,
-              background: brightnessScrubActive ? '#0f222a' : '#0e0e16',
-              border: brightnessScrubActive ? '2px solid #2aa3c4' : '1px solid #222230',
+              background: brightnessScrubActive ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+              border: brightnessScrubActive ? '2px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
@@ -1321,10 +1323,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 width: '100%',
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#bfeaf5', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <ImpIcon name="sun" size={13} /> Brightness
               </span>
-              <span style={{ fontSize: 11.5, fontFamily: 'monospace', color: '#67e8f9' }}>
+              <span style={{ fontSize: 11.5, fontFamily: 'monospace', color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                 {brightnessScrubActive ? `◄ ${brightnessPct}% ►` : `${brightnessPct}%`}
               </span>
             </div>
@@ -1355,7 +1357,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onChange={(e) => setBrightnessPct(Number(e.target.value))}
                 style={{
                   flex: 1,
-                  accentColor: '#2aa3c4',
+                  accentColor: 'var(--imp-focus-ring, #e8b86d)',
                   cursor: 'pointer',
                   minWidth: 0,
                 }}
@@ -1399,8 +1401,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               minHeight: 44,
               padding: '10px 14px',
               borderRadius: 14,
-              background: foldersAccountsOpen ? '#0f222a' : '#0d0d14',
-              border: foldersAccountsOpen ? '1px solid #2aa3c4' : '1px solid #222230',
+              background: foldersAccountsOpen ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+              border: foldersAccountsOpen ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -1408,10 +1410,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               textAlign: 'left',
             }}
           >
-            <span style={{ fontSize: 13, fontWeight: 800, color: '#bfeaf5', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <ImpIcon name="folder" size={14} /> Folders & Accounts
             </span>
-            <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#67e8f9', fontWeight: 900 }}>
+            <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--imp-accent-active-text, #f5e1be)', fontWeight: 900 }}>
               ◄
             </span>
           </button>
@@ -1420,34 +1422,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div
             style={{
               padding: '10px 12px',
-              borderRadius: 14,
-              background: '#0d0d14',
-              border: '1px solid #222230',
+              borderRadius: 8,
+              background: 'var(--imp-surface-card, #1a1d24)',
+              border: '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
               display: 'flex',
               flexDirection: 'column',
-              gap: 4,
+              gap: 6,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#d4d4dc', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-text-primary, #eef0f4)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <ImpIcon name="cpu" size={13} /> System Load
               </span>
-              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#8e8e99' }}>
-                {perfSnap?.audio_backend || 'PipeWire'} • {perfSnap?.platform || 'Linux'}
+              <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--imp-text-secondary, #8b92a1)' }}>
+                {perfSnap?.audio_backend || 'PipeWire'} · {perfSnap?.platform || 'Linux'}
               </span>
             </div>
-            <div style={{ fontFamily: 'monospace', fontSize: 11.5, color: '#a1a1aa' }}>
-              CPU:{' '}
-              <strong style={{ color: '#6ee7b7' }}>
-                {perfSnap?.cpu_percent.toFixed(1) ?? '0.0'}%
-              </strong>{' '}
-              • RAM:{' '}
-              <strong style={{ color: '#67e8f9' }}>
-                {perfSnap?.rss_mb.toFixed(1) ?? '0.0'} MB
-                {typeof (perfSnap as any)?.ram_percent === 'number'
-                  ? ` (${((perfSnap as any).ram_percent as number).toFixed(1)}%)`
-                  : ''}
-              </strong>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontFamily: 'monospace', fontSize: 11.5, color: 'var(--imp-text-secondary, #8b92a1)' }}>
+                CPU{' '}
+                <strong style={{ color: '#6ee7b7' }}>
+                  {perfSnap?.cpu_percent.toFixed(1) ?? '0.0'}%
+                </strong>{' '}
+                · RAM{' '}
+                <strong style={{ color: 'var(--imp-text-primary, #eef0f4)' }}>
+                  {perfSnap?.rss_mb.toFixed(1) ?? '0.0'} MB
+                  {typeof (perfSnap as any)?.ram_percent === 'number'
+                    ? ` (${((perfSnap as any).ram_percent as number).toFixed(1)}%)`
+                    : ''}
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !statsHudEnabled;
+                  saveStatsHudEnabled(next);
+                  setStatsHudEnabled(next);
+                }}
+                style={pillToggleStyle(statsHudEnabled, 'var(--imp-focus-ring, #e8b86d)')}
+                title="Show or hide CPU/RAM/Codec HUD in Player and Mini-Player"
+              >
+                HUD: {statsHudEnabled ? 'On' : 'Off'}
+              </button>
             </div>
           </div>
 
@@ -1482,7 +1498,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   minHeight: 42,
                   padding: '0 12px',
                   borderRadius: 12,
-                  background: '#0d0d14',
+                  background: 'var(--imp-surface-card, #1a1d24)',
                   border:
                     (updateStatus.channel || 'stable').toLowerCase() === 'stable'
                       ? '1px solid #6ee7b7'
@@ -1503,7 +1519,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     color:
                       (updateStatus.channel || 'stable').toLowerCase() === 'stable'
                         ? '#6ee7b7'
-                        : '#67e8f9',
+                        : 'var(--imp-accent-active-text, #f5e1be)',
                     fontFamily: 'monospace',
                   }}
                 >
@@ -1529,18 +1545,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   borderRadius: 12,
                   background:
                     updateStatus.update_available || updateStatus.channel_switch_available
-                      ? '#0f2936'
-                      : '#0f222a',
+                      ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
+                      : 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
                   border: updateStatus.update_available
                     ? '1px solid #6ee7b7'
                     : updateStatus.channel_switch_available
                       ? '1px solid #f59e0b'
-                      : '1px solid #2aa3c4',
+                      : '1px solid var(--imp-focus-ring, #e8b86d)',
                   color: updateStatus.update_available
                     ? '#6ee7b7'
                     : updateStatus.channel_switch_available
                       ? '#fcd34d'
-                      : '#bfeaf5',
+                      : 'var(--imp-accent-active-text, #f5e1be)',
                   fontSize: 11.5,
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -1615,7 +1631,7 @@ const smallStepBtnStyle: React.CSSProperties = {
 const nestedCardStyle: React.CSSProperties = {
   padding: '8px 10px',
   borderRadius: 10,
-  background: '#11111a',
+  background: 'var(--imp-surface-card, #1a1d24)',
   border: '1px solid #222232',
   display: 'flex',
   flexDirection: 'column',
@@ -1635,7 +1651,7 @@ function pillToggleStyle(active: boolean, accent: string): React.CSSProperties {
     minHeight: 28,
     padding: '0 9px',
     borderRadius: 7,
-    background: active ? 'rgba(42, 163, 196, 0.16)' : '#171722',
+    background: active ? 'rgba(232, 184, 109, 0.16)' : '#171722',
     border: active ? `1px solid ${accent}` : '1px solid #2a2a3a',
     color: active ? accent : '#a1a1aa',
     fontSize: 10.5,
@@ -1650,7 +1666,7 @@ const compactInputStyle: React.CSSProperties = {
   minHeight: 32,
   padding: '0 9px',
   borderRadius: 7,
-  background: '#07070b',
+  background: 'var(--imp-bg-canvas, #121418)',
   border: '1px solid #2a2a3a',
   color: '#d4d4dc',
   fontSize: 11,
@@ -1661,9 +1677,9 @@ const compactPrimaryBtnStyle: React.CSSProperties = {
   minHeight: 32,
   padding: '0 11px',
   borderRadius: 7,
-  background: '#0f222a',
-  border: '1px solid #2aa3c4',
-  color: '#bfeaf5',
+  background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+  border: '1px solid var(--imp-focus-ring, #e8b86d)',
+  color: 'var(--imp-accent-active-text, #f5e1be)',
   fontSize: 11,
   fontWeight: 800,
   cursor: 'pointer',

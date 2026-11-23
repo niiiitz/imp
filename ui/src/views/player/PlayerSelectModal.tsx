@@ -230,7 +230,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
               maxHeight: 'calc(100vh - 76px)',
               overflow: 'hidden',
               background: '#0a0a10',
-              border: '2px solid #2aa3c4',
+              border: '2px solid var(--imp-focus-ring, #e8b86d)',
               borderRadius: 18,
               padding: 16,
               boxSizing: 'border-box',
@@ -255,13 +255,13 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                   style={{
                     fontSize: 13.5,
                     fontWeight: 800,
-                    color: '#bfeaf5',
+                    color: 'var(--imp-accent-active-text, #f5e1be)',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 6,
                   }}
                 >
-                  <ImpIcon name="gamepad-select" size={14} color="#67e8f9" />
+                  <ImpIcon name="gamepad-select" size={14} color="var(--imp-accent-active-text, #f5e1be)" />
                   <span>SELECT Menu</span>
                 </div>
                 <div
@@ -332,10 +332,10 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     ...actionRowBtnStyle,
                     minHeight: 46,
                     padding: '8px 12px',
-                    background: selectCategory === 'track_options' ? '#0f222a' : '#101018',
+                    background: selectCategory === 'track_options' ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
                     border:
                       selectCategory === 'track_options'
-                        ? '1px solid #2aa3c4'
+                        ? '1px solid var(--imp-focus-ring, #e8b86d)'
                         : '1px solid #222230',
                   }}
                 >
@@ -344,7 +344,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       style={{
                         fontSize: 13,
                         fontWeight: 800,
-                        color: selectCategory === 'track_options' ? '#bfeaf5' : '#e4e4ec',
+                        color: selectCategory === 'track_options' ? 'var(--imp-accent-active-text, #f5e1be)' : '#e4e4ec',
                       }}
                     >
                       🎵 Track Options
@@ -357,7 +357,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     style={{
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      color: selectCategory === 'track_options' ? '#67e8f9' : '#71717a',
+                      color: selectCategory === 'track_options' ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                     }}
                   >
                     ▸
@@ -375,10 +375,10 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     ...actionRowBtnStyle,
                     minHeight: 46,
                     padding: '8px 12px',
-                    background: selectCategory === 'collection' ? '#0f222a' : '#101018',
+                    background: selectCategory === 'collection' ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
                     border:
                       selectCategory === 'collection'
-                        ? '1px solid #2aa3c4'
+                        ? '1px solid var(--imp-focus-ring, #e8b86d)'
                         : '1px solid #222230',
                   }}
                 >
@@ -387,7 +387,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       style={{
                         fontSize: 13,
                         fontWeight: 800,
-                        color: selectCategory === 'collection' ? '#bfeaf5' : '#e4e4ec',
+                        color: selectCategory === 'collection' ? 'var(--imp-accent-active-text, #f5e1be)' : '#e4e4ec',
                       }}
                     >
                       💿 Open Collection
@@ -400,7 +400,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     style={{
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      color: selectCategory === 'collection' ? '#67e8f9' : '#71717a',
+                      color: selectCategory === 'collection' ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                     }}
                   >
                     ▸
@@ -418,10 +418,10 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     ...actionRowBtnStyle,
                     minHeight: 46,
                     padding: '8px 12px',
-                    background: selectCategory === 'interface' ? '#0f222a' : '#101018',
+                    background: selectCategory === 'interface' ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
                     border:
                       selectCategory === 'interface'
-                        ? '1px solid #2aa3c4'
+                        ? '1px solid var(--imp-focus-ring, #e8b86d)'
                         : '1px solid #222230',
                   }}
                 >
@@ -430,7 +430,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                       style={{
                         fontSize: 13,
                         fontWeight: 800,
-                        color: selectCategory === 'interface' ? '#bfeaf5' : '#e4e4ec',
+                        color: selectCategory === 'interface' ? 'var(--imp-accent-active-text, #f5e1be)' : '#e4e4ec',
                       }}
                     >
                       🖥️ Interface
@@ -445,7 +445,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                     style={{
                       fontFamily: 'monospace',
                       fontSize: 12,
-                      color: selectCategory === 'interface' ? '#67e8f9' : '#71717a',
+                      color: selectCategory === 'interface' ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                     }}
                   >
                     ▸
@@ -556,7 +556,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             style={{ ...actionRowBtnStyle, minHeight: 46, padding: '8px 12px' }}
                           >
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                              <span style={{ fontSize: 12.5, fontWeight: 800, color: '#67e8f9' }}>
+                              <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                                 ★ + Hybrid Playlist
                               </span>
                               <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
@@ -564,7 +564,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               </span>
                             </div>
                             <span
-                              style={{ fontFamily: 'monospace', fontSize: 11, color: '#67e8f9' }}
+                              style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--imp-accent-active-text, #f5e1be)' }}
                             >
                               + ★
                             </span>
@@ -587,8 +587,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             ...actionRowBtnStyle,
                             minHeight: 46,
                             padding: '8px 12px',
-                            background: shuffle ? '#0f222a' : '#101018',
-                            border: shuffle ? '1px solid #2aa3c4' : '1px solid #222230',
+                            background: shuffle ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                            border: shuffle ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                           }}
                         >
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -596,7 +596,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               style={{
                                 fontSize: 12.5,
                                 fontWeight: 800,
-                                color: shuffle ? '#67e8f9' : '#d4d4dc',
+                                color: shuffle ? 'var(--imp-accent-active-text, #f5e1be)' : '#d4d4dc',
                               }}
                             >
                               🔀 Shuffle Queue
@@ -610,7 +610,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               fontFamily: 'monospace',
                               fontSize: 11,
                               fontWeight: 800,
-                              color: shuffle ? '#67e8f9' : '#71717a',
+                              color: shuffle ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                             }}
                           >
                             {shuffle ? 'ON' : 'OFF'}
@@ -891,7 +891,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                         gap: 8,
                       }}
                     >
-                      <span style={{ fontSize: 12, fontWeight: 800, color: '#bfeaf5' }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                         📑{' '}
                         {rightColMode === 'chapters' && chapterModalItems.length > 0
                           ? 'MIX CHAPTERS'
@@ -914,8 +914,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               padding: '3px 8px',
                               borderRadius: 6,
                               background: '#161622',
-                              border: '1px solid #2aa3c4',
-                              color: '#67e8f9',
+                              border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                              color: 'var(--imp-accent-active-text, #f5e1be)',
                               fontSize: 10.5,
                               fontFamily: 'monospace',
                               fontWeight: 700,
@@ -931,9 +931,9 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                           style={{
                             padding: '3px 8px',
                             borderRadius: 6,
-                            background: '#0f222a',
-                            border: '1px solid #2aa3c4',
-                            color: '#bfeaf5',
+                            background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                            color: 'var(--imp-accent-active-text, #f5e1be)',
                             fontSize: 10.5,
                             fontFamily: 'monospace',
                             fontWeight: 700,
@@ -967,8 +967,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               width: '100%',
                               padding: '8px 11px',
                               borderRadius: 10,
-                              background: item.isCurrent ? '#0f222a' : '#12121c',
-                              border: item.isCurrent ? '1px solid #2aa3c4' : '1px solid #222230',
+                              background: item.isCurrent ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#12121c',
+                              border: item.isCurrent ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                               color: item.isCurrent ? '#7dd3fc' : '#d4d4dc',
                               textAlign: 'left',
                               display: 'flex',
@@ -996,7 +996,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                 <div
                                   style={{
                                     fontSize: 10.5,
-                                    color: item.isCurrent ? '#67e8f9' : '#71717a',
+                                    color: item.isCurrent ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     whiteSpace: 'nowrap',
@@ -1011,7 +1011,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               style={{
                                 fontSize: 10.5,
                                 fontFamily: 'monospace',
-                                color: item.isCurrent ? '#67e8f9' : '#71717a',
+                                color: item.isCurrent ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                                 flexShrink: 0,
                               }}
                             >
@@ -1063,12 +1063,12 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             ...actionRowBtnStyle,
                             minHeight: 46,
                             padding: '8px 12px',
-                            background: desktopMode ? '#0f222a' : '#101018',
-                            border: desktopMode ? '1px solid #2aa3c4' : '1px solid #222230',
+                            background: desktopMode ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                            border: desktopMode ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                           }}
                         >
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <span style={{ fontSize: 12.5, fontWeight: 800, color: '#bfeaf5' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                               🖥️ Desktop Mode
                             </span>
                             <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
@@ -1080,7 +1080,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               fontFamily: 'monospace',
                               fontSize: 11,
                               fontWeight: 800,
-                              color: desktopMode ? '#67e8f9' : '#71717a',
+                              color: desktopMode ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                             }}
                           >
                             {desktopMode ? 'ON' : 'OFF'}
@@ -1107,14 +1107,14 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                   alignItems: 'center',
                                 }}
                               >
-                                <span style={{ fontSize: 11.5, fontWeight: 800, color: '#bfeaf5' }}>
+                                <span style={{ fontSize: 11.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                                   ✨ Idle Visualizer Screensaver Timer
                                 </span>
                                 <span
                                   style={{
                                     fontSize: 10.5,
                                     fontFamily: 'monospace',
-                                    color: '#67e8f9',
+                                    color: 'var(--imp-accent-active-text, #f5e1be)',
                                   }}
                                 >
                                   {desktopVizIdleSec === 0
@@ -1145,8 +1145,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                                         padding: '0 10px',
                                         borderRadius: 8,
                                         background: active ? '#122934' : '#10121a',
-                                        border: active ? '1px solid #2aa3c4' : '1px solid #242636',
-                                        color: active ? '#67e8f9' : '#a1a1aa',
+                                        border: active ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #242636',
+                                        color: active ? 'var(--imp-accent-active-text, #f5e1be)' : '#a1a1aa',
                                         fontSize: 11,
                                         fontFamily: 'monospace',
                                         fontWeight: 800,
@@ -1196,12 +1196,12 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                           ...actionRowBtnStyle,
                           minHeight: 46,
                           padding: '8px 12px',
-                          background: vizMode !== 'off' ? '#0f222a' : '#101018',
-                          border: vizMode !== 'off' ? '1px solid #2aa3c4' : '1px solid #222230',
+                          background: vizMode !== 'off' ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                          border: vizMode !== 'off' ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                         }}
                       >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 800, color: '#67e8f9' }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                             ✨ Visualizer:{' '}
                             {VISUALIZER_MODES.find((m) => m.id === vizMode)?.label ||
                               'Glyph Matrix'}
@@ -1215,7 +1215,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             fontFamily: 'monospace',
                             fontSize: 11,
                             fontWeight: 800,
-                            color: vizMode !== 'off' ? '#67e8f9' : '#71717a',
+                            color: vizMode !== 'off' ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                           }}
                         >
                           {VISUALIZER_MODES.find((m) => m.id === vizMode)?.shortLabel || 'GLYPH'} ▸
@@ -1250,7 +1250,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                           padding: '8px 12px',
                           background:
                             dspState.eq_enabled || dspState.vocal_mode !== 'off'
-                              ? '#0f222a'
+                              ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))'
                               : '#101018',
                           border:
                             dspState.eq_enabled || dspState.vocal_mode !== 'off'
@@ -1387,8 +1387,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                           ...actionRowBtnStyle,
                           minHeight: 46,
                           padding: '8px 12px',
-                          background: lyricsKaraokeEnabled ? '#0f222a' : '#101018',
-                          border: lyricsKaraokeEnabled ? '1px solid #2aa3c4' : '1px solid #222230',
+                          background: lyricsKaraokeEnabled ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                          border: lyricsKaraokeEnabled ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                         }}
                       >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -1396,13 +1396,13 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             style={{
                               fontSize: 12.5,
                               fontWeight: 800,
-                              color: '#67e8f9',
+                              color: 'var(--imp-accent-active-text, #f5e1be)',
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: 6,
                             }}
                           >
-                            <ImpIcon name="lyrics" size={14} color="#67e8f9" />
+                            <ImpIcon name="lyrics" size={14} color="var(--imp-accent-active-text, #f5e1be)" />
                             Foreground Synced Lyrics
                           </span>
                           <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
@@ -1418,7 +1418,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             fontFamily: 'monospace',
                             fontSize: 11,
                             fontWeight: 800,
-                            color: lyricsKaraokeEnabled ? '#67e8f9' : '#71717a',
+                            color: lyricsKaraokeEnabled ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                           }}
                         >
                           {lyricsKaraokeEnabled ? 'ON' : 'OFF'}
@@ -1516,8 +1516,8 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                         gap: 6,
                         padding: '8px 12px',
                         borderRadius: 12,
-                        background: idleFadeEnabled ? '#0f222a' : '#101018',
-                        border: idleFadeEnabled ? '1px solid #2aa3c4' : '1px solid #222230',
+                        background: idleFadeEnabled ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
+                        border: idleFadeEnabled ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #222230',
                       }}
                     >
                       <button
@@ -1538,7 +1538,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                         }}
                       >
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 800, color: '#67e8f9' }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                             🫧 Idle Controls Fade (6s)
                           </span>
                           <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
@@ -1550,7 +1550,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             fontFamily: 'monospace',
                             fontSize: 11,
                             fontWeight: 800,
-                            color: idleFadeEnabled ? '#67e8f9' : '#71717a',
+                            color: idleFadeEnabled ? 'var(--imp-accent-active-text, #f5e1be)' : '#71717a',
                           }}
                         >
                           {idleFadeEnabled ? `ON (${idleOpacityPct}%)` : 'OFF'}
@@ -1564,7 +1564,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             alignItems: 'center',
                             gap: 8,
                             paddingTop: 4,
-                            borderTop: '1px solid rgba(42, 163, 196, 0.22)',
+                            borderTop: '1px solid rgba(232, 184, 109, 0.22)',
                           }}
                         >
                           <span
@@ -1587,7 +1587,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               borderRadius: 6,
                               background: '#14141e',
                               border: '1px solid #2a2c3c',
-                              color: '#bfeaf5',
+                              color: 'var(--imp-accent-active-text, #f5e1be)',
                               fontFamily: 'monospace',
                               fontSize: 12,
                               fontWeight: 800,
@@ -1606,7 +1606,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             onChange={(e) => updateIdleOpacityPct(Number(e.target.value))}
                             style={{
                               flex: 1,
-                              accentColor: '#2aa3c4',
+                              accentColor: 'var(--imp-focus-ring, #e8b86d)',
                               cursor: 'pointer',
                             }}
                           />
@@ -1620,7 +1620,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               borderRadius: 6,
                               background: '#14141e',
                               border: '1px solid #2a2c3c',
-                              color: '#bfeaf5',
+                              color: 'var(--imp-accent-active-text, #f5e1be)',
                               fontFamily: 'monospace',
                               fontSize: 12,
                               fontWeight: 800,
@@ -1634,7 +1634,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                               fontSize: 11,
                               fontFamily: 'monospace',
                               fontWeight: 800,
-                              color: '#67e8f9',
+                              color: 'var(--imp-accent-active-text, #f5e1be)',
                               minWidth: 36,
                               textAlign: 'right',
                             }}
@@ -1689,14 +1689,14 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             ...actionRowBtnStyle,
                             minHeight: 46,
                             padding: '8px 12px',
-                            background: videoTheatreExpanded ? '#0f222a' : '#101018',
+                            background: videoTheatreExpanded ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#101018',
                             border: videoTheatreExpanded
-                              ? '1px solid #2aa3c4'
+                              ? '1px solid var(--imp-focus-ring, #e8b86d)'
                               : '1px solid #222230',
                           }}
                         >
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <span style={{ fontSize: 12.5, fontWeight: 800, color: '#67e8f9' }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--imp-accent-active-text, #f5e1be)' }}>
                               {videoTheatreExpanded ? '↙ Exit Theatre Stage' : '⛶ Theatre Stage'}
                             </span>
                             <span style={{ fontSize: 10.5, color: '#8e8e99' }}>
@@ -1704,7 +1704,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             </span>
                           </div>
                           <span
-                            style={{ fontFamily: 'monospace', fontSize: 11, color: '#67e8f9' }}
+                            style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--imp-accent-active-text, #f5e1be)' }}
                           >
                             {videoTheatreExpanded ? 'CARD' : 'THEATRE'}
                           </span>
@@ -1724,7 +1724,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             </span>
                           </div>
                           <span
-                            style={{ fontFamily: 'monospace', fontSize: 11, color: '#2aa3c4' }}
+                            style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--imp-focus-ring, #e8b86d)' }}
                           >
                             {selectedQualityIdx + 1}/{Math.max(1, videoQualities.length)}
                           </span>
@@ -1744,7 +1744,7 @@ export const PlayerSelectModal: React.FC<PlayerSelectModalProps> = ({
                             </span>
                           </div>
                           <span
-                            style={{ fontFamily: 'monospace', fontSize: 11, color: '#2aa3c4' }}
+                            style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--imp-focus-ring, #e8b86d)' }}
                           >
                             {activeSubtitle ? 'ON' : 'OFF'}
                           </span>

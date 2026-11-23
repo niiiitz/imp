@@ -1,0 +1,22 @@
+:root {
+  /* Neutral Studio Graphite — Active UI Surface Tokens */
+  --imp-bg-canvas: #121418;
+  --imp-bg-oled: #000000;
+  --imp-surface-panel: #161920;
+  --imp-surface-card: #1a1d24;
+  --imp-surface-elevated: #21252f;
+  --imp-border-subtle: rgba(255, 255, 255, 0.08);
+  --imp-border-strong: rgba(255, 255, 255, 0.16);
+  --imp-text-primary: #eef0f4;
+  --imp-text-secondary: #8b92a1;
+  --imp-text-muted: #646b7a;
+
+  /* Focus & Active Control Accent (Warm Amber / Ivory) */
+  --imp-focus-ring: #e8b86d;
+  --imp-focus-glow: rgba(232, 184, 109, 0.26);
+  --imp-accent-active-bg: rgba(232, 184, 109, 0.13);
+  --imp-accent-active-border: rgba(232, 184, 109, 0.52);
+  --imp-accent-active-text: #f5e1be;
+  --imp-accent-primary: var(--imp-focus-ring);
+  --imp-accent-glow: var(--imp-focus-glow);
+}

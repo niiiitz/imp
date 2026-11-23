@@ -207,7 +207,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
           overflowY: 'auto',
           borderRadius: 16,
           background: '#0b0c13',
-          border: '1px solid #2aa3c4',
+          border: '1px solid var(--imp-focus-ring, #e8b86d)',
           boxShadow: '0 22px 55px rgba(0, 0, 0, 0.85)',
           padding: 16,
           display: 'flex',
@@ -232,7 +232,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                 fontSize: 10,
                 fontFamily: 'monospace',
                 fontWeight: 800,
-                color: '#2aa3c4',
+                color: 'var(--imp-focus-ring, #e8b86d)',
                 textTransform: 'uppercase',
                 letterSpacing: 0.6,
                 display: 'inline-flex',
@@ -240,7 +240,7 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                 gap: 5,
               }}
             >
-              <ImpIcon name="gamepad-select" size={11} color="#2aa3c4" />
+              <ImpIcon name="gamepad-select" size={11} color="var(--imp-focus-ring, #e8b86d)" />
               <span>
                 {libraryContextTarget.type === 'track'
                   ? 'Track Actions (SELECT)'
@@ -323,8 +323,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                     minHeight: 40,
                     padding: '8px 12px',
                     borderRadius: 10,
-                    background: '#0f222a',
-                    border: '1px solid #2aa3c4',
+                    background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                    border: '1px solid var(--imp-focus-ring, #e8b86d)',
                     color: '#e0f7fc',
                     fontSize: 12,
                     fontWeight: 800,
@@ -556,8 +556,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                     padding: '8px 12px',
                     borderRadius: 10,
                     background: '#111b27',
-                    border: '1px solid #2aa3c4',
-                    color: '#bfeaf5',
+                    border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                    color: 'var(--imp-accent-active-text, #f5e1be)',
                     fontSize: 12,
                     fontWeight: 800,
                     textAlign: 'left',
@@ -933,8 +933,8 @@ export const LibraryContextMenuModal: React.FC<LibraryContextMenuModalProps> = (
                       minHeight: 40,
                       padding: '8px 12px',
                       borderRadius: 10,
-                      background: '#0f222a',
-                      border: '1px solid #2aa3c4',
+                      background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                      border: '1px solid var(--imp-focus-ring, #e8b86d)',
                       color: '#e0f7fc',
                       fontSize: 12,
                       fontWeight: 800,

@@ -2706,7 +2706,7 @@ const ConsoleMainApp: React.FC = () => {
 
   const handleRemoveFolder = (mountRoot: string, label: string) => {
     defaultSimpClient.removeLibraryPath(mountRoot);
-    showToast(`Removed mount: ${label}`);
+    showToast(`Removed folder: ${label}`);
     window.setTimeout(() => refreshLibraryData(), 350);
   };
 
@@ -2738,8 +2738,11 @@ const ConsoleMainApp: React.FC = () => {
         maxHeight: '100vh',
         boxSizing: 'border-box',
         overflow: 'hidden',
-        background: '#000000',
-        color: '#d4d4dc',
+        background:
+          isDimmed || isSleeping || desktopScreensaverActive
+            ? '#000000'
+            : 'var(--imp-bg-canvas, #121418)',
+        color: 'var(--imp-text-primary, #eef0f4)',
         display: 'flex',
         flexDirection: 'column',
         opacity: activeOpacity,
@@ -2758,9 +2761,9 @@ const ConsoleMainApp: React.FC = () => {
         select:focus, select:focus-visible,
         [data-focusable="true"]:focus, [data-focusable="true"]:focus-visible,
         .simp-gpfocus, [data-simp-active-focus="true"] {
-          outline: 2px solid var(--imp-accent-primary, #2aa3c4) !important;
+          outline: 2px solid var(--imp-focus-ring, #e8b86d) !important;
           outline-offset: 2px !important;
-          box-shadow: 0 0 0 3px var(--imp-accent-glow, rgba(42, 163, 196, 0.28)) !important;
+          box-shadow: 0 0 0 3px var(--imp-focus-glow, rgba(232, 184, 109, 0.26)) !important;
         }
         html[data-simp-input="pointer"] .simp-gp-badge {
           display: none !important;
@@ -2848,18 +2851,18 @@ const ConsoleMainApp: React.FC = () => {
             bottom: 22,
             left: '50%',
             transform: 'translateX(-50%)',
-            background: '#0d0d14',
-            border: '1px solid #2aa3c4',
-            color: '#d4d4dc',
-            padding: '10px 18px',
-            borderRadius: 99,
-            fontSize: 13,
+            background: 'var(--imp-surface-elevated, #21252f)',
+            border: '1px solid var(--imp-focus-ring, #e8b86d)',
+            color: 'var(--imp-text-primary, #eef0f4)',
+            padding: '8px 14px',
+            borderRadius: 8,
+            fontSize: 12.5,
             fontWeight: 700,
             zIndex: 90,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.75)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.65)',
           }}
         >
-          ✨ {toastMsg}
+          {toastMsg}
         </div>
       )}
 

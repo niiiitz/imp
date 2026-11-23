@@ -19,9 +19,9 @@ export interface FilterTriggerButtonProps {
 export const FilterTriggerButton: React.FC<FilterTriggerButtonProps> = ({
   summary,
   active = false,
-  accentColor = '#2aa3c4',
-  activeBg = '#0f222a',
-  activeText = '#bfeaf5',
+  accentColor = 'var(--imp-focus-ring, #e8b86d)',
+  activeBg = 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+  activeText = 'var(--imp-accent-active-text, #f5e1be)',
   onClick,
 }) => {
   if (!onClick) return null;

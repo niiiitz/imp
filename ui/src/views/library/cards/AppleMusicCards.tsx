@@ -67,7 +67,7 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#28111b' : '#0a0a0e',
+        background: isSelected ? '#28111b' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #fa243c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -139,9 +139,9 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
               style={{
                 padding: '2px 6px',
                 borderRadius: 6,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 10,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -165,16 +165,16 @@ export const CloudPlaylistCard: React.FC<CloudPlaylistCardProps> = ({
               style={{
                 padding: '3px 6px',
                 borderRadius: 6,
-                background: isPinned ? '#0f222a' : '#251018',
-                border: isPinned ? '1px solid #2aa3c4' : '1px solid #4c1d2e',
-                color: isPinned ? '#67e8f9' : '#fda4af',
+                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#251018',
+                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #4c1d2e',
+                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fda4af'} />
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af'} />
             </span>
           </div>
         </div>
@@ -276,7 +276,7 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#28111b' : '#0a0a0e',
+        background: isSelected ? '#28111b' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #fa243c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -341,9 +341,9 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
               style={{
                 padding: '2px 6px',
                 borderRadius: 6,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#67e8f9',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 10,
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -371,16 +371,16 @@ export const CloudAlbumCard: React.FC<CloudAlbumCardProps> = ({
               style={{
                 padding: '3px 6px',
                 borderRadius: 6,
-                background: isPinned ? '#0f222a' : '#251018',
-                border: isPinned ? '1px solid #2aa3c4' : '1px solid #4c1d2e',
-                color: isPinned ? '#67e8f9' : '#fda4af',
+                background: isPinned ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#251018',
+                border: isPinned ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #4c1d2e',
+                color: isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
               }}
             >
-              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? '#67e8f9' : '#fda4af'} />
+              <ImpIcon name={isPinned ? 'check' : 'imp'} size={11} color={isPinned ? 'var(--imp-accent-active-text, #f5e1be)' : '#fda4af'} />
             </span>
           </div>
         </div>
@@ -464,7 +464,7 @@ export const StationCard: React.FC<StationCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isPlayingStation ? '#28111b' : '#0a0a0e',
+        background: isPlayingStation ? '#28111b' : 'var(--imp-surface-card, #1a1d24)',
         border: isPlayingStation ? '1px solid #fa243c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',
@@ -610,7 +610,7 @@ export const AppleArtistCard: React.FC<AppleArtistCardProps> = ({
         minHeight: 124,
         padding: 10,
         borderRadius: 12,
-        background: isSelected ? '#28111b' : '#0a0a0e',
+        background: isSelected ? '#28111b' : 'var(--imp-surface-card, #1a1d24)',
         border: isSelected ? '1px solid #fa243c' : '1px solid #181822',
         color: '#d4d4dc',
         textAlign: 'left',

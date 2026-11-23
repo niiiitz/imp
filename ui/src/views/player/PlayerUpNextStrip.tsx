@@ -66,7 +66,7 @@ export const PlayerUpNextStrip: React.FC<PlayerUpNextStripProps> = ({
                 minWidth: 0,
               }}
             >
-              <strong style={{ fontFamily: 'monospace', color: '#2aa3c4', marginRight: 8 }}>
+              <strong style={{ fontFamily: 'monospace', color: 'var(--imp-focus-ring, #e8b86d)', marginRight: 8 }}>
                 NEXT:
               </strong>
               {snap.up_next[0].title} — {snap.up_next[0].artists.join(', ')}

@@ -639,7 +639,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
             }}
           >
             <span style={{ fontSize: 12, fontWeight: 800, color: '#fde047' }}>
-              Pinned FYP Shelves ({shelves.length}) — Pin any shelf across Local, Cloud or Artist Profiles with [+ FYP]
+              Pinned Shelves ({shelves.length})
             </span>
             <button
               type="button"
@@ -649,9 +649,9 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 minHeight: 28,
                 padding: '0 10px',
                 borderRadius: 7,
-                background: '#0f222a',
-                border: '1px solid #2aa3c4',
-                color: '#bfeaf5',
+                background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+                border: '1px solid var(--imp-focus-ring, #e8b86d)',
+                color: 'var(--imp-accent-active-text, #f5e1be)',
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -799,9 +799,9 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                     minHeight: 26,
                     padding: '0 9px',
                     borderRadius: 6,
-                    background: rec.enabled ? '#0f222a' : '#181822',
-                    border: rec.enabled ? '1px solid #2aa3c4' : '1px solid #2c2c38',
-                    color: rec.enabled ? '#67e8f9' : '#94a3b8',
+                    background: rec.enabled ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : '#181822',
+                    border: rec.enabled ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #2c2c38',
+                    color: rec.enabled ? 'var(--imp-accent-active-text, #f5e1be)' : '#94a3b8',
                     fontSize: 10.5,
                     fontWeight: 800,
                     cursor: 'pointer',
@@ -887,9 +887,9 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
               minHeight: 34,
               padding: '0 14px',
               borderRadius: 9,
-              background: '#0f222a',
-              border: '1px solid #2aa3c4',
-              color: '#bfeaf5',
+              background: 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))',
+              border: '1px solid var(--imp-focus-ring, #e8b86d)',
+              color: 'var(--imp-accent-active-text, #f5e1be)',
               fontSize: 12,
               fontWeight: 800,
               cursor: 'pointer',
