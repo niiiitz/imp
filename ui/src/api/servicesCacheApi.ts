@@ -182,6 +182,36 @@ export function emitSimpToast(message: string): void {
 
 let nativeWebViewFullscreen = false;
 let nativeWebViewListenerInstalled = false;
+let fullscreenEscapeLockListenerInstalled = false;
+
+type NavigatorKeyboardLock = {
+  lock?: (keyCodes?: string[]) => Promise<void>;
+  unlock?: () => void;
+};
+
+/**
+ * Prevents short `Escape` presses (including Steam Input KDE Desktop's `START -> Escape`
+ * mapping) from dropping Chromium HTML5 fullscreen while still allowing long-hold `Esc`.
+ */
+function syncFullscreenEscapeLock(): void {
+  if (typeof document === 'undefined' || typeof navigator === 'undefined') return;
+  const kb = (navigator as unknown as { keyboard?: NavigatorKeyboardLock }).keyboard;
+  if (!kb) return;
+  if (document.fullscreenElement) {
+    kb.lock?.(['Escape'])?.catch(() => {});
+  } else {
+    try {
+      kb.unlock?.();
+    } catch {
+      // Ignore environments without unlock support
+    }
+  }
+}
+
+if (typeof document !== 'undefined' && !fullscreenEscapeLockListenerInstalled) {
+  fullscreenEscapeLockListenerInstalled = true;
+  document.addEventListener('fullscreenchange', syncFullscreenEscapeLock);
+}
 
 function getNativeWebViewBridge(): {
   postMessage: (msg: unknown) => void;
@@ -243,7 +273,10 @@ export function setAppFullscreen(enter: boolean): void {
   if (typeof document === 'undefined') return;
   if (enter) {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
+      document.documentElement
+        .requestFullscreen?.()
+        ?.then(() => syncFullscreenEscapeLock())
+        .catch(() => {});
     }
   } else if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
@@ -263,7 +296,10 @@ export function toggleAppFullscreen(): void {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   } else {
-    document.documentElement.requestFullscreen?.().catch(() => {});
+    document.documentElement
+      .requestFullscreen?.()
+      ?.then(() => syncFullscreenEscapeLock())
+      .catch(() => {});
   }
 }
 
