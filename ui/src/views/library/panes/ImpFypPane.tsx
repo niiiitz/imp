@@ -82,6 +82,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
     loaded,
     revalidatingKeys,
     saveAllShelves,
+    toggleShelfEnabled,
     unpinShelf,
     restoreDefaultShelves,
   } = useFypShelves();
@@ -622,10 +623,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                   data-fyp-action="toggle"
                   onClick={(e) => {
                     const btn = e.currentTarget;
-                    const next = shelves.map((s) =>
-                      s.shelf_uid === rec.shelf_uid ? { ...s, enabled: !s.enabled } : s
-                    );
-                    saveAllShelves(next);
+                    toggleShelfEnabled(rec.shelf_uid, !rec.enabled);
                     window.requestAnimationFrame(() => {
                       if (btn.isConnected) {
                         window.dispatchEvent(

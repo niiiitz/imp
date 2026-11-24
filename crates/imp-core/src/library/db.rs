@@ -2103,14 +2103,28 @@ impl LibraryDatabase {
         albums.sort_by(|a, b| b.release_year.cmp(&a.release_year).then_with(|| a.title.cmp(&b.title)));
 
         let all_tracks = self.get_tracks_filtered(None, None, Some(cleaned), 500, 0)?;
-        let mut tracks: Vec<TrackMetadata> = all_tracks
-            .into_iter()
-            .filter(|t| {
-                t.artists
-                    .iter()
-                    .any(|ar| ar.trim().to_lowercase() == lower || ar.to_lowercase().contains(&lower))
-            })
-            .collect();
+        let mut seen_uris = std::collections::HashSet::new();
+        let mut tracks: Vec<TrackMetadata> = Vec::new();
+        for t in all_tracks {
+            if t.artists
+                .iter()
+                .any(|ar| ar.trim().to_lowercase() == lower || ar.to_lowercase().contains(&lower))
+                && seen_uris.insert(t.uri.clone())
+            {
+                tracks.push(t);
+            }
+        }
+        // Also include every track from albums owned by this album_artist so guest/interlude
+        // tracks on an album don't vanish when viewing the primary album artist's profile.
+        for alb in &albums {
+            if let Ok(alb_tracks) = self.get_album_tracks(&alb.id) {
+                for t in alb_tracks {
+                    if seen_uris.insert(t.uri.clone()) {
+                        tracks.push(t);
+                    }
+                }
+            }
+        }
         tracks.sort_by(|a, b| {
             a.album
                 .cmp(&b.album)
@@ -3636,6 +3650,77 @@ mod tests {
         assert_eq!(only_b.len(), 1);
         assert_eq!(only_b[0].title, "Track 02");
         assert_eq!(only_b[0].mount_root.as_deref(), Some("/mnt/share_b"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_local_artist_profile_includes_featured_and_album_tracks() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("simp_artist_profile_{nanos}"));
+        let db = LibraryDatabase::open(&temp_dir.join("library.db")).unwrap();
+
+        let mk = |uri: &str, title: &str, track_no: u32, artists: Vec<&str>| IndexedTrackBatchItem {
+            album_id: "alb_sample".to_string(),
+            album_title: "Sample Album".to_string(),
+            album_artist: "Sample Artist".to_string(),
+            steam_app_id: None,
+            release_year: Some(2024),
+            art_cache_path: None,
+            genre: Some("Electronic".to_string()),
+            parent_folder: Some("Sample Artist/Sample Album".to_string()),
+            track: TrackMetadata {
+                uri: uri.to_string(),
+                title: title.to_string(),
+                artists: artists.into_iter().map(String::from).collect(),
+                album: "Sample Album".to_string(),
+                album_id: Some("alb_sample".to_string()),
+                track_number: Some(track_no),
+                disc_number: Some(1),
+                duration_ms: 180_000,
+                art_url: None,
+                source: "local".to_string(),
+                mount_root: None,
+                genre: Some("Electronic".to_string()),
+                release_year: Some(2024),
+                content_rating: None,
+                parent_folder: Some("Sample Artist/Sample Album".to_string()),
+            },
+            file_mtime: Some(1700000100),
+            file_size: Some(4096),
+            has_art: false,
+            has_local_lrc: false,
+        };
+
+        db.upsert_indexed_batch(&[
+            mk(
+                "file:///music/sample/01.flac",
+                "Track 01",
+                1,
+                vec!["Sample Artist"],
+            ),
+            mk(
+                "file:///music/sample/02.flac",
+                "Track 02 (feat. Guest)",
+                2,
+                vec!["Sample Artist & Guest B"],
+            ),
+            mk(
+                "file:///music/sample/03.flac",
+                "Guest Interlude",
+                3,
+                vec!["Guest B"],
+            ),
+        ])
+        .unwrap();
+
+        let profile = db.get_local_artist_profile("Sample Artist").unwrap();
+        assert_eq!(profile.albums.len(), 1);
+        assert_eq!(profile.tracks.len(), 3);
+        assert!(profile.tracks.iter().any(|t| t.title == "Guest Interlude"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -595,6 +595,61 @@ const fypStore: FypStoreSnapshot = {
 
 const listeners = new Set<() => void>();
 let initialLoadPromise: Promise<void> | null = null;
+let fypWriteChain: Promise<void> = Promise.resolve();
+
+function enqueueFypWrite<T>(task: () => Promise<T>): Promise<T> {
+  const next = fypWriteChain.then(task, task);
+  fypWriteChain = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+export async function fetchDaemonUiPrefs(): Promise<Record<string, unknown> | null> {
+  try {
+    const resp = await fetch(resolveDaemonUrl('/api/ui/prefs'));
+    const json = await resp.json();
+    if (json?.ok && json.prefs && typeof json.prefs === 'object') {
+      return json.prefs as Record<string, unknown>;
+    }
+  } catch {
+    // Ignore daemon offline error
+  }
+  return null;
+}
+
+export async function saveDaemonUiPrefs(
+  prefs: Record<string, unknown>
+): Promise<Record<string, unknown> | null> {
+  try {
+    const resp = await fetch(resolveDaemonUrl('/api/ui/prefs'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefs }),
+    });
+    const json = await resp.json();
+    if (json?.ok && json.prefs && typeof json.prefs === 'object') {
+      return json.prefs as Record<string, unknown>;
+    }
+  } catch {
+    // Ignore daemon offline error
+  }
+  return null;
+}
+
+export async function deleteDaemonUiPrefs(keys: string[]): Promise<void> {
+  if (!keys.length) return;
+  try {
+    await fetch(resolveDaemonUrl('/api/ui/prefs'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete: keys }),
+    });
+  } catch {
+    // Ignore daemon offline error
+  }
+}
 
 function notifyFypListeners(): void {
   for (const l of listeners) {
@@ -643,13 +698,9 @@ export async function refreshFypFromDb(): Promise<void> {
     const json = await resp.json();
     if (!json?.ok) return;
     const serverShelves: FypShelfRecord[] = Array.isArray(json.shelves) ? json.shelves : [];
-    const alreadySeeded =
-      typeof window !== 'undefined' && window.localStorage.getItem('simp_fyp_seeded_v1') === '1';
+    const alreadySeeded = Boolean(json.seeded) || serverShelves.length > 0;
 
     if (serverShelves.length === 0 && !alreadySeeded) {
-      try {
-        window.localStorage.setItem('simp_fyp_seeded_v1', '1');
-      } catch {}
       const starterRecords: FypShelfRecord[] = DEFAULT_STARTER_FYP_DESCRIPTORS.map((d, idx) => ({
         shelf_uid: d.shelfUid,
         provider: d.provider,
@@ -713,53 +764,84 @@ export async function pinFypShelfWithSnapshot(
   }
   notifyFypListeners();
 
-  try {
-    const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pin', shelf, snapshot }),
-    });
-    const json = await resp.json();
-    if (json?.ok) {
-      applyFypServerPayload(json);
+  await enqueueFypWrite(async () => {
+    try {
+      const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pin', shelf, snapshot }),
+      });
+      const json = await resp.json();
+      if (json?.ok) {
+        applyFypServerPayload(json);
+      }
+    } catch {
+      // Keep optimistic state if request fails transiently
     }
-  } catch {
-    // Keep optimistic state if request fails transiently
-  }
+  });
 }
 
 export async function unpinFypShelf(shelfUid: string): Promise<void> {
   fypStore.shelves = fypStore.shelves.filter((s) => s.shelf_uid !== shelfUid);
   notifyFypListeners();
 
-  try {
-    const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unpin', shelf_uid: shelfUid }),
-    });
-    const json = await resp.json();
-    if (json?.ok) {
-      applyFypServerPayload(json);
-    }
-  } catch {}
+  await enqueueFypWrite(async () => {
+    try {
+      const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unpin', shelf_uid: shelfUid }),
+      });
+      const json = await resp.json();
+      if (json?.ok) {
+        applyFypServerPayload(json);
+      }
+    } catch {}
+  });
+}
+
+export async function toggleFypShelfEnabled(
+  shelfUid: string,
+  enabled: boolean
+): Promise<void> {
+  fypStore.shelves = fypStore.shelves.map((s) =>
+    s.shelf_uid === shelfUid ? { ...s, enabled } : s
+  );
+  notifyFypListeners();
+
+  await enqueueFypWrite(async () => {
+    try {
+      const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_enabled', shelf_uid: shelfUid, enabled }),
+      });
+      const json = await resp.json();
+      if (json?.ok) {
+        applyFypServerPayload(json);
+      }
+    } catch {}
+  });
 }
 
 export async function saveAllFypShelves(nextShelves: FypShelfRecord[]): Promise<void> {
-  fypStore.shelves = nextShelves.map((s, idx) => ({ ...s, sort_order: idx }));
+  const ordered = nextShelves.map((s, idx) => ({ ...s, sort_order: idx }));
+  fypStore.shelves = ordered;
   notifyFypListeners();
 
-  try {
-    const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'save_all', shelves: fypStore.shelves }),
-    });
-    const json = await resp.json();
-    if (json?.ok) {
-      applyFypServerPayload(json);
-    }
-  } catch {}
+  await enqueueFypWrite(async () => {
+    try {
+      const resp = await fetch(resolveDaemonUrl('/api/fyp/shelves'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_all', shelves: ordered }),
+      });
+      const json = await resp.json();
+      if (json?.ok) {
+        applyFypServerPayload(json);
+      }
+    } catch {}
+  });
 }
 
 // Viewport-lazy background revalidation throttled to max 2 concurrent network refreshes
@@ -955,6 +1037,7 @@ export function queueFypRevalidation(descriptor: FypShelfDescriptor, force = fal
 export function useFypShelves(): FypStoreSnapshot & {
   pinShelfWithSnapshot: (descriptor: FypShelfDescriptor, liveItems: unknown[]) => Promise<void>;
   unpinShelf: (shelfUid: string) => Promise<void>;
+  toggleShelfEnabled: (shelfUid: string, enabled: boolean) => Promise<void>;
   saveAllShelves: (nextShelves: FypShelfRecord[]) => Promise<void>;
   refreshFypFromDb: () => Promise<void>;
   restoreDefaultShelves: () => Promise<void>;
@@ -995,6 +1078,7 @@ export function useFypShelves(): FypStoreSnapshot & {
     ...fypStore,
     pinShelfWithSnapshot: pinFypShelfWithSnapshot,
     unpinShelf: unpinFypShelf,
+    toggleShelfEnabled: toggleFypShelfEnabled,
     saveAllShelves: saveAllFypShelves,
     refreshFypFromDb,
     restoreDefaultShelves,

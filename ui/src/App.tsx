@@ -10,7 +10,14 @@ import {
   TrackMetadata,
 } from '@imp/client';
 import { CompanionPairView } from './components/CompanionPairView';
-import { quitNativeAppWindow, toggleAppFullscreen } from './api/servicesCacheApi';
+import {
+  deleteDaemonUiPrefs,
+  fetchDaemonUiPrefs,
+  quitNativeAppWindow,
+  saveDaemonUiPrefs,
+  toggleAppFullscreen,
+} from './api/servicesCacheApi';
+import { saveStatsHudEnabled } from './components/StatsHudPill';
 import type { BrowseHubTarget } from './views/library/libraryHelpers';
 import { computeRelativeSubpath } from './views/library/localFolderTree';
 import {
@@ -289,6 +296,44 @@ const ConsoleMainApp: React.FC = () => {
         }
       })
       .catch(() => { });
+
+    let rawLocalVisibility: string | null = null;
+    try {
+      rawLocalVisibility = window.localStorage.getItem('simp_source_visibility_v2');
+    } catch { }
+    let rawLocalStats: string | null = null;
+    try {
+      rawLocalStats = window.localStorage.getItem('imp_stats_hud_enabled_v1');
+    } catch { }
+
+    fetchDaemonUiPrefs().then((prefs) => {
+      if (!prefs) return;
+      const remoteVis = prefs.source_visibility_v2;
+      if (remoteVis && typeof remoteVis === 'object' && !Array.isArray(remoteVis)) {
+        const v = remoteVis as Record<string, unknown>;
+        setSourceVisibility({
+          internet_archive: v.internet_archive !== false,
+          apple_music: v.apple_music !== false,
+          soundcloud: v.soundcloud !== false,
+          optical_drive: v.optical_drive === true,
+        });
+      } else if (rawLocalVisibility) {
+        try {
+          const parsed = JSON.parse(rawLocalVisibility);
+          if (parsed && typeof parsed === 'object') {
+            void saveDaemonUiPrefs({ source_visibility_v2: parsed });
+          }
+        } catch { }
+      }
+
+      if (typeof prefs.stats_hud_enabled_v1 === 'boolean') {
+        saveStatsHudEnabled(prefs.stats_hud_enabled_v1, false);
+      } else if (rawLocalStats !== null) {
+        void saveDaemonUiPrefs({
+          stats_hud_enabled_v1: rawLocalStats === '1' || rawLocalStats === 'true',
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -3185,6 +3230,7 @@ const ConsoleMainApp: React.FC = () => {
               try {
                 window.localStorage.setItem('simp_source_visibility_v2', JSON.stringify(next));
               } catch { }
+              void saveDaemonUiPrefs({ source_visibility_v2: next });
               if (key === 'internet_archive') {
                 defaultSimpClient.configureInternetArchive({
                   enabled: nextVal,

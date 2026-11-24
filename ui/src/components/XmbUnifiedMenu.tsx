@@ -8,7 +8,7 @@ import {
 } from '@imp/client';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { FolderChooserModal } from './FolderChooserModal';
-import { resolveDaemonUrl } from '../api/servicesCacheApi';
+import { deleteDaemonUiPrefs, resolveDaemonUrl, saveDaemonUiPrefs } from '../api/servicesCacheApi';
 import { loadStatsHudEnabled, saveStatsHudEnabled } from './StatsHudPill';
 import { XmbSourceSubPanel } from './XmbSourceSubPanel';
 import {
@@ -354,6 +354,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
       try {
         window.localStorage.setItem('simp_source_visibility_v2', JSON.stringify(next));
       } catch {}
+      void saveDaemonUiPrefs({ source_visibility_v2: next });
       if (key === 'internet_archive') {
         defaultSimpClient.configureInternetArchive({
           enabled: nextVal,
@@ -378,7 +379,11 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
     setSavedIaUsername(normalized);
     setIaEnabledLocal(nextEnabled);
     if (normalized) {
-      setSourceVisibility((p) => ({ ...p, internet_archive: true }));
+      setSourceVisibility((p) => {
+        const next = { ...p, internet_archive: true };
+        void saveDaemonUiPrefs({ source_visibility_v2: next });
+        return next;
+      });
     }
     showToast(normalized ? `Saved Archive @${normalized}` : 'Cleared Archive username');
     refreshLibraryData();
@@ -477,8 +482,12 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
       window.localStorage.removeItem('simp_factoids_enabled');
       window.localStorage.removeItem('simp_oobe_help_seen_v1');
       window.localStorage.removeItem('imp_update_channel_v1');
+      window.localStorage.removeItem('imp_stats_hud_enabled_v1');
       window.localStorage.setItem('simp.visualizer_mode', 'cycle');
     } catch {}
+    saveStatsHudEnabled(false, false);
+    setStatsHudEnabled(false);
+    void deleteDaemonUiPrefs(['source_visibility_v2', 'stats_hud_enabled_v1']);
     setBrightnessPct(100);
     setSourceVisibility({
       internet_archive: true,

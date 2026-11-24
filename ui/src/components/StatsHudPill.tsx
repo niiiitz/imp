@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { TrackMetadata } from '@imp/client';
-import { resolveDaemonUrl } from '../api/servicesCacheApi';
+import { resolveDaemonUrl, saveDaemonUiPrefs } from '../api/servicesCacheApi';
 import { extractAudioFormat } from '../views/library/libraryHelpers';
 
 const STATS_HUD_STORAGE_KEY = 'imp_stats_hud_enabled_v1';
+const NARROW_DECK_VIEWPORT_BREAKPOINT_PX = 1420;
 
 interface StatsPerfSnapshot {
   cpu_percent: number;
@@ -13,18 +14,21 @@ interface StatsPerfSnapshot {
 export function loadStatsHudEnabled(): boolean {
   try {
     const raw = window.localStorage.getItem(STATS_HUD_STORAGE_KEY);
-    if (raw === '0' || raw === 'false') return false;
+    return raw === '1' || raw === 'true';
   } catch {
     // ignore storage errors
   }
-  return true;
+  return false;
 }
 
-export function saveStatsHudEnabled(enabled: boolean): void {
+export function saveStatsHudEnabled(enabled: boolean, persistToDaemon = true): void {
   try {
     window.localStorage.setItem(STATS_HUD_STORAGE_KEY, enabled ? '1' : '0');
   } catch {
     // ignore storage errors
+  }
+  if (persistToDaemon) {
+    void saveDaemonUiPrefs({ stats_hud_enabled_v1: enabled });
   }
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('imp-stats-hud-changed', { detail: { enabled } }));
@@ -53,14 +57,22 @@ export const StatsHudPill: React.FC<StatsHudPillProps> = ({ track, compact = fal
   const [enabled, setEnabled] = useState<boolean>(() => loadStatsHudEnabled());
   const [minimal, setMinimal] = useState<boolean>(false);
   const [perf, setPerf] = useState<StatsPerfSnapshot | null>(null);
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < NARROW_DECK_VIEWPORT_BREAKPOINT_PX : false
+  );
 
   useEffect(() => {
     const syncEnabled = () => setEnabled(loadStatsHudEnabled());
+    const syncViewport = () =>
+      setIsNarrowViewport(window.innerWidth < NARROW_DECK_VIEWPORT_BREAKPOINT_PX);
+    syncViewport();
     window.addEventListener('imp-stats-hud-changed', syncEnabled);
     window.addEventListener('storage', syncEnabled);
+    window.addEventListener('resize', syncViewport);
     return () => {
       window.removeEventListener('imp-stats-hud-changed', syncEnabled);
       window.removeEventListener('storage', syncEnabled);
+      window.removeEventListener('resize', syncViewport);
     };
   }, []);
 
@@ -127,8 +139,12 @@ export const StatsHudPill: React.FC<StatsHudPillProps> = ({ track, compact = fal
       <span style={{ color: '#6ee7b7' }}>CPU {cpuStr}</span>
       {!minimal && (
         <>
-          <span style={{ opacity: 0.45 }}>·</span>
-          <span style={{ color: 'var(--imp-text-primary, #eef0f4)' }}>{ramStr}</span>
+          {!isNarrowViewport && (
+            <>
+              <span style={{ opacity: 0.45 }}>·</span>
+              <span style={{ color: 'var(--imp-text-primary, #eef0f4)' }}>{ramStr}</span>
+            </>
+          )}
           {fmtBadge && (
             <>
               <span style={{ opacity: 0.45 }}>·</span>

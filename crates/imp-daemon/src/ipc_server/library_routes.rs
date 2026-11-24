@@ -686,6 +686,7 @@ pub(super) async fn cache_shelves_post_handler(
 
 pub(super) async fn fyp_shelves_get_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
     let now_unix = imp_core::library::services_cache::current_unix_sec();
+    let seeded = state.services_cache.is_fyp_seeded().unwrap_or(false);
     match (
         state.services_cache.list_fyp_shelves(),
         state.services_cache.list_cached_shelves(None),
@@ -693,6 +694,7 @@ pub(super) async fn fyp_shelves_get_handler(State(state): State<DaemonIpcState>)
         (Ok(shelves), Ok(snapshots)) => Json(serde_json::json!({
             "ok": true,
             "now_unix": now_unix,
+            "seeded": seeded,
             "shelves": shelves,
             "snapshots": snapshots,
         })),
@@ -706,6 +708,7 @@ pub(super) struct FypShelvesPostBody {
     shelf: Option<imp_core::library::services_cache::FypShelfRecord>,
     snapshot: Option<imp_core::library::services_cache::CachedShelfRecord>,
     shelf_uid: Option<String>,
+    enabled: Option<bool>,
     shelves: Option<Vec<imp_core::library::services_cache::FypShelfRecord>>,
 }
 
@@ -728,6 +731,19 @@ pub(super) async fn fyp_shelves_post_handler(
                     state.services_cache.delete_fyp_shelf(uid)?;
                 }
             }
+            "toggle_enabled" => {
+                let uid = body
+                    .shelf_uid
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("Missing shelf_uid for toggle_enabled"))?;
+                let enabled = body.enabled.unwrap_or(true);
+                state.services_cache.set_fyp_shelf_enabled(uid, enabled)?;
+            }
+            "mark_seeded" => {
+                state.services_cache.mark_fyp_seeded()?;
+            }
             "save_all" => {
                 if let Some(list) = &body.shelves {
                     state.services_cache.save_fyp_shelves(list)?;
@@ -745,6 +761,7 @@ pub(super) async fn fyp_shelves_post_handler(
     }
 
     let now_unix = imp_core::library::services_cache::current_unix_sec();
+    let seeded = state.services_cache.is_fyp_seeded().unwrap_or(false);
     match (
         state.services_cache.list_fyp_shelves(),
         state.services_cache.list_cached_shelves(None),
@@ -752,10 +769,69 @@ pub(super) async fn fyp_shelves_post_handler(
         (Ok(shelves), Ok(snapshots)) => Json(serde_json::json!({
             "ok": true,
             "now_unix": now_unix,
+            "seeded": seeded,
             "shelves": shelves,
             "snapshots": snapshots,
         })),
         (Err(e), _) | (_, Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct UiPrefsPostBody {
+    #[serde(default)]
+    prefs: std::collections::HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    delete: Vec<String>,
+}
+
+fn load_parsed_ui_prefs(
+    cache: &imp_core::library::services_cache::ServicesCacheDatabase,
+) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    let raw = cache.list_ui_prefs()?;
+    let mut map = serde_json::Map::new();
+    for (k, v_json) in raw {
+        let parsed = serde_json::from_str::<serde_json::Value>(&v_json)
+            .unwrap_or_else(|_| serde_json::Value::String(v_json));
+        map.insert(k, parsed);
+    }
+    Ok(map)
+}
+
+pub(super) async fn ui_prefs_get_handler(State(state): State<DaemonIpcState>) -> impl IntoResponse {
+    match load_parsed_ui_prefs(&state.services_cache) {
+        Ok(prefs) => Json(serde_json::json!({ "ok": true, "prefs": prefs })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub(super) async fn ui_prefs_post_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<UiPrefsPostBody>,
+) -> impl IntoResponse {
+    let op_res: anyhow::Result<()> = (|| {
+        for (key, value) in &body.prefs {
+            let trimmed = key.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let encoded = serde_json::to_string(value)?;
+            state.services_cache.set_ui_pref(trimmed, &encoded)?;
+        }
+        for key in &body.delete {
+            let trimmed = key.trim();
+            if !trimmed.is_empty() {
+                state.services_cache.delete_ui_pref(trimmed)?;
+            }
+        }
+        Ok(())
+    })();
+    if let Err(e) = op_res {
+        return Json(serde_json::json!({ "ok": false, "error": e.to_string() }));
+    }
+    match load_parsed_ui_prefs(&state.services_cache) {
+        Ok(prefs) => Json(serde_json::json!({ "ok": true, "prefs": prefs })),
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
     }
 }
 
