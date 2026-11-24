@@ -5,6 +5,7 @@ import pwd
 import shutil
 import socket
 import subprocess
+import time
 
 SERVICE_UNIT_TEMPLATE = """[Unit]
 Description=Imp (Interactive Media Player) Background Audio & UI Daemon
@@ -355,7 +356,7 @@ def _provision_and_start_userland():
     _run_as_user(["systemctl", "--user", "disable", "--now", "simp.service"], user, home, uid, gid)
     _run_as_user(["systemctl", "--user", "enable", "imp.service"], user, home, uid, gid)
     if binary_updated or not _is_daemon_listening():
-        _run_as_user(
+        systemctl_res = _run_as_user(
             ["systemctl", "--user", "restart", "imp.service"],
             user,
             home,
@@ -363,7 +364,7 @@ def _provision_and_start_userland():
             gid,
         )
     else:
-        _run_as_user(
+        systemctl_res = _run_as_user(
             ["systemctl", "--user", "start", "imp.service"],
             user,
             home,
@@ -371,8 +372,13 @@ def _provision_and_start_userland():
             gid,
         )
 
-    # 5. Fallback direct spawn if user systemd bus wasn't reachable yet
-    if not _is_daemon_listening() and os.path.isfile(dest_bin):
+    if systemctl_res.returncode == 0:
+        for _ in range(15):
+            if _is_daemon_listening():
+                break
+            time.sleep(0.2)
+    elif not _is_daemon_listening() and os.path.isfile(dest_bin):
+        # 5. Fallback direct spawn ONLY when user systemd bus wasn't reachable
         env = os.environ.copy()
         env["HOME"] = home
         env["USER"] = user

@@ -588,11 +588,13 @@ pub fn spawn_delayed_daemon_restart() {
             kill -9 {self_pid} 2>/dev/null || true; \
             pkill -9 -f 'imp --daemon' 2>/dev/null || true; \
             pkill -9 -f 'simp --daemon' 2>/dev/null || true; \
+            systemd_ok=0; \
             if command -v systemctl >/dev/null 2>&1 && [ -f \"$HOME/.config/systemd/user/imp.service\" ]; then \
-              systemctl --user restart imp.service 2>/dev/null || systemctl --user start imp.service 2>/dev/null || true; \
-              sleep 0.6; \
+              if systemctl --user restart imp.service 2>/dev/null || systemctl --user start imp.service 2>/dev/null; then \
+                systemd_ok=1; \
+              fi; \
             fi; \
-            if ! curl -fsS --max-time 2 http://127.0.0.1:18888/health >/dev/null 2>&1; then \
+            if [ \"$systemd_ok\" = \"0\" ]; then \
               nohup \"$HOME/.local/share/imp/bin/imp\" --daemon >/dev/null 2>&1 & \
             fi"
         );
@@ -791,19 +793,28 @@ pub fn restart_daemon_synchronously() -> Result<String> {
                 .status();
         }
 
+        let mut systemd_started = false;
         if service_file.is_file() {
-            let _ = Command::new("systemctl")
+            systemd_started = Command::new("systemctl")
                 .env("XDG_RUNTIME_DIR", &runtime_dir)
                 .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
                 .args(["--user", "start", "imp.service"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            std::thread::sleep(Duration::from_millis(450));
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
         }
 
-        if probe_health().is_none() && installed_bin.is_file() {
+        if systemd_started {
+            for _ in 0..20 {
+                if probe_health().is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(125));
+            }
+        } else if probe_health().is_none() && installed_bin.is_file() {
             let _ = Command::new(&installed_bin)
                 .arg("--daemon")
                 .env("XDG_RUNTIME_DIR", &runtime_dir)

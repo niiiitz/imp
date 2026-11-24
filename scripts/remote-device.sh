@@ -137,7 +137,7 @@ if [[ -z "${KEY_PATH}" && -f "${HOME}/.ssh/id_ed25519_imp" ]]; then
   KEY_PATH="${HOME}/.ssh/id_ed25519_imp"
 fi
 if [[ "${KEY_PATH}" == "~/"* ]]; then
-  KEY_PATH="${HOME}/${KEY_PATH#~/}"
+  KEY_PATH="${HOME}/${KEY_PATH:2}"
 fi
 
 SSH_COMMON_OPTS=(
@@ -257,7 +257,7 @@ cmd_check_ssh() {
   echo "✓ SSH connection succeeded"
 
   remote_sh '
-    echo "• Identity:       $(whoami)@$(hostname) ($(uname -m))"
+    echo "• Identity:       $(whoami)@$(uname -n) ($(uname -m))"
     if systemctl --user status >/dev/null 2>&1; then
       echo "✓ systemd --user: reachable"
     else
@@ -297,7 +297,7 @@ cmd_check_ssh() {
 cmd_status() {
   remote_sh '
     echo "=== Host ==="
-    echo "$(whoami)@$(hostname) | arch=$(uname -m) | $(uname -r)"
+    echo "$(whoami)@$(uname -n) | arch=$(uname -m) | $(uname -r)"
     if [[ -x "${HOME}/.local/share/imp/bin/imp" ]]; then
       echo "Binary: $("${HOME}/.local/share/imp/bin/imp" --version 2>/dev/null || echo unknown)"
     else
@@ -510,6 +510,12 @@ cmd_deploy_bin() {
     mv -f "${HOME}/.local/share/imp/bin/imp.new" "${HOME}/.local/share/imp/bin/imp"
     chmod 0644 "${HOME}/.config/systemd/user/imp.service" 2>/dev/null || true
     systemctl --user daemon-reload
+    systemctl --user stop imp.service 2>/dev/null || true
+    pkill -TERM -f "imp --daemon" 2>/dev/null || true
+    pkill -TERM -f "simp --daemon" 2>/dev/null || true
+    sleep 0.3
+    pkill -9 -f "imp --daemon" 2>/dev/null || true
+    pkill -9 -f "simp --daemon" 2>/dev/null || true
     systemctl --user restart imp.service
     sleep 1
     echo "Version: $("${HOME}/.local/share/imp/bin/imp" --version 2>/dev/null || echo unknown)"
@@ -550,6 +556,12 @@ cmd_deploy() {
 cmd_restart() {
   remote_sh '
     systemctl --user daemon-reload
+    systemctl --user stop imp.service 2>/dev/null || true
+    pkill -TERM -f "imp --daemon" 2>/dev/null || true
+    pkill -TERM -f "simp --daemon" 2>/dev/null || true
+    sleep 0.3
+    pkill -9 -f "imp --daemon" 2>/dev/null || true
+    pkill -9 -f "simp --daemon" 2>/dev/null || true
     systemctl --user restart imp.service
     sleep 1
     systemctl --user is-active imp.service
