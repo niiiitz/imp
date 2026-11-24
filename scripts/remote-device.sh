@@ -155,6 +155,16 @@ SCP_ARGS=("${SSH_COMMON_OPTS[@]}" -P "${PORT}")
 printf -v RSYNC_RSH '%q ' ssh "${SSH_ARGS[@]}"
 
 REMOTE_USER_ENV='uid=$(id -u); export XDG_RUNTIME_DIR="/run/user/${uid}" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${uid}/bus"; '
+REMOTE_STOP_ORPHANS_SH='
+systemctl --user stop imp.service 2>/dev/null || true
+for pid in $(ps -eo pid=,args= | awk "(\$2 ~ /(^|\/)(imp|simp)\$/ && \$3 == \"--daemon\") {print \$1}"); do
+  kill -TERM "${pid}" 2>/dev/null || true
+done
+sleep 0.3
+for pid in $(ps -eo pid=,args= | awk "(\$2 ~ /(^|\/)(imp|simp)\$/ && \$3 == \"--daemon\") {print \$1}"); do
+  kill -9 "${pid}" 2>/dev/null || true
+done
+'
 
 remote_sh() {
   local script="$1"
@@ -505,25 +515,20 @@ cmd_deploy_bin() {
   fi
 
   echo "3/3 Swapping binary atomically and restarting imp.service..."
-  remote_sh '
-    chmod 0755 "${HOME}/.local/share/imp/bin/imp.new"
-    mv -f "${HOME}/.local/share/imp/bin/imp.new" "${HOME}/.local/share/imp/bin/imp"
-    chmod 0644 "${HOME}/.config/systemd/user/imp.service" 2>/dev/null || true
+  remote_sh "
+    chmod 0755 \"\${HOME}/.local/share/imp/bin/imp.new\"
+    mv -f \"\${HOME}/.local/share/imp/bin/imp.new\" \"\${HOME}/.local/share/imp/bin/imp\"
+    chmod 0644 \"\${HOME}/.config/systemd/user/imp.service\" 2>/dev/null || true
     systemctl --user daemon-reload
-    systemctl --user stop imp.service 2>/dev/null || true
-    pkill -TERM -f "imp --daemon" 2>/dev/null || true
-    pkill -TERM -f "simp --daemon" 2>/dev/null || true
-    sleep 0.3
-    pkill -9 -f "imp --daemon" 2>/dev/null || true
-    pkill -9 -f "simp --daemon" 2>/dev/null || true
+    ${REMOTE_STOP_ORPHANS_SH}
     systemctl --user restart imp.service
     sleep 1
-    echo "Version: $("${HOME}/.local/share/imp/bin/imp" --version 2>/dev/null || echo unknown)"
+    echo \"Version: \$(\"\${HOME}/.local/share/imp/bin/imp\" --version 2>/dev/null || echo unknown)\"
     if command -v curl >/dev/null 2>&1; then
       curl -fsS http://127.0.0.1:18888/api/v1/system/perf
-      echo ""
+      echo \"\"
     fi
-  '
+  "
   echo "✓ Binary deployed and imp.service restarted on ${TARGET}."
 }
 
@@ -554,22 +559,17 @@ cmd_deploy() {
 }
 
 cmd_restart() {
-  remote_sh '
+  remote_sh "
     systemctl --user daemon-reload
-    systemctl --user stop imp.service 2>/dev/null || true
-    pkill -TERM -f "imp --daemon" 2>/dev/null || true
-    pkill -TERM -f "simp --daemon" 2>/dev/null || true
-    sleep 0.3
-    pkill -9 -f "imp --daemon" 2>/dev/null || true
-    pkill -9 -f "simp --daemon" 2>/dev/null || true
+    ${REMOTE_STOP_ORPHANS_SH}
     systemctl --user restart imp.service
     sleep 1
     systemctl --user is-active imp.service
     if command -v curl >/dev/null 2>&1; then
       curl -fsS http://127.0.0.1:18888/api/v1/system/perf
-      echo ""
+      echo \"\"
     fi
-  '
+  "
 }
 
 cmd_exec() {
