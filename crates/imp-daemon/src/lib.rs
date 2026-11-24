@@ -117,11 +117,12 @@ pub async fn run_daemon() -> anyhow::Result<()> {
         let _ = cmd_tx.send(AudioCommand::RescanStorage);
     }
 
-    // Drain any offline path refreshes queued by external curating tools (`imp-librarian`)
+    // Drain any offline path refreshes or pre-fetched enrichment bundles queued by `imp-librarian`
     {
         let drain_db = db.clone();
         let drain_bcast = broadcast_tx.clone();
         tokio::task::spawn_blocking(move || {
+            let mut changed = false;
             let queue_path = imp_core::library::indexer::pending_refresh_queue_path();
             match imp_core::library::indexer::drain_pending_refresh_queue(&drain_db, &queue_path) {
                 Ok(refreshed) if refreshed > 0 => {
@@ -130,16 +131,36 @@ pub async fn run_daemon() -> anyhow::Result<()> {
                         refreshed,
                         queue_path.display()
                     );
-                    if let Ok((total_albums, total_tracks)) = drain_db.get_library_counts() {
-                        let _ = drain_bcast.send(PlaybackEvent::LibraryUpdated {
-                            total_albums,
-                            total_tracks,
-                        });
-                    }
+                    changed = true;
                 }
                 Ok(_) => {}
                 Err(e) => {
                     tracing::warn!("Failed to drain {}: {e}", queue_path.display());
+                }
+            }
+
+            let enrich_path = imp_core::library::indexer::pending_enrichment_queue_path();
+            match imp_core::library::indexer::drain_pending_enrichment_queue(&drain_db, &enrich_path) {
+                Ok(imported) if imported > 0 => {
+                    tracing::info!(
+                        "Drained {} pending enrichment item(s) from {}",
+                        imported,
+                        enrich_path.display()
+                    );
+                    changed = true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("Failed to drain {}: {e}", enrich_path.display());
+                }
+            }
+
+            if changed {
+                if let Ok((total_albums, total_tracks)) = drain_db.get_library_counts() {
+                    let _ = drain_bcast.send(PlaybackEvent::LibraryUpdated {
+                        total_albums,
+                        total_tracks,
+                    });
                 }
             }
         });

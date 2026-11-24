@@ -1,4 +1,5 @@
 mod apple_routes;
+mod librarian_routes;
 mod library_routes;
 mod media_routes;
 mod soundcloud_routes;
@@ -276,6 +277,7 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
         .route("/api/dvd/stream", get(dvd_stream_handler))
         .route("/apple-worker", get(apple_worker_html_handler))
         .route("/ws", get(ws_handler))
+        .nest("/api/librarian", librarian_routes::librarian_router())
         .nest_service("/art", ServeDir::new(art_cache_dir));
 
     if let Some(ui_dir) = resolve_ui_dir() {
@@ -343,7 +345,11 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
             imp_core::sinks::apple::AppleMusicSink::ensure_headless_widevine_worker();
         });
     }
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
