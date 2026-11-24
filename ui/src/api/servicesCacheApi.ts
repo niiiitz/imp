@@ -158,20 +158,55 @@ export const TTL_STRUCTURAL_ARTIST_SEC = 172800; // 48 hours
 export function resolveDaemonUrl(path: string): string {
   if (typeof window !== 'undefined' && window.location?.hostname) {
     const host = window.location.hostname;
-    if (
-      window.location.protocol === 'http:' &&
-      host !== 'steamloopback.host' &&
-      host !== '127.0.0.1' &&
-      host !== 'localhost'
-    ) {
+    if (window.location.protocol === 'http:' && host !== 'steamloopback.host') {
       const port = window.location.port === '1420' ? '18888' : window.location.port || '18888';
-      return `http://${host}:${port}${path}`;
+      if (host !== '127.0.0.1' && host !== 'localhost') {
+        return `http://${host}:${port}${path}`;
+      }
+      if (port !== '18888' && window.location.port !== '1420') {
+        return `http://${host}:${port}${path}`;
+      }
     }
     if (window.location.port === '18888') {
       return path;
     }
   }
   return `http://127.0.0.1:18888${path}`;
+}
+
+export type ExpiredAuthProvider = 'apple' | 'soundcloud';
+
+export function isAuthExpiredErrorMessage(raw: unknown): boolean {
+  const msg = String(raw || '').toLowerCase();
+  if (!msg) return false;
+  return (
+    msg.includes('401') ||
+    msg.includes('403') ||
+    msg.includes('expired') ||
+    msg.includes('unauthorized') ||
+    msg.includes('re-sign') ||
+    msg.includes('sign in') ||
+    msg.includes('reauth') ||
+    msg.includes('invalid_grant') ||
+    msg.includes('not authenticated') ||
+    msg.includes('token revoked')
+  );
+}
+
+export function emitAuthExpired(provider: ExpiredAuthProvider, reason?: string): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('imp-auth-expired', { detail: { provider, reason } })
+    );
+  }
+}
+
+export function emitAuthRestored(provider: ExpiredAuthProvider): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('imp-auth-restored', { detail: { provider } })
+    );
+  }
 }
 
 export function emitSimpToast(message: string): void {
@@ -583,6 +618,7 @@ export interface FypStoreSnapshot {
   nowUnix: number;
   loaded: boolean;
   revalidatingKeys: string[];
+  authErrorKeys: Record<string, string>;
 }
 
 const fypStore: FypStoreSnapshot = {
@@ -591,6 +627,7 @@ const fypStore: FypStoreSnapshot = {
   nowUnix: Math.floor(Date.now() / 1000),
   loaded: false,
   revalidatingKeys: [],
+  authErrorKeys: {},
 };
 
 const listeners = new Set<() => void>();
@@ -997,6 +1034,11 @@ export function queueFypRevalidation(descriptor: FypShelfDescriptor, force = fal
       const items = await fetchLiveItemsForSpec(descriptor.fetchSpec);
       if (Array.isArray(items)) {
         const fetchedAt = Math.floor(Date.now() / 1000);
+        if (fypStore.authErrorKeys[descriptor.cacheKey]) {
+          const nextErrors = { ...fypStore.authErrorKeys };
+          delete nextErrors[descriptor.cacheKey];
+          fypStore.authErrorKeys = nextErrors;
+        }
         fypStore.snapshots = {
           ...fypStore.snapshots,
           [descriptor.cacheKey]: {
@@ -1023,8 +1065,22 @@ export function queueFypRevalidation(descriptor: FypShelfDescriptor, force = fal
           },
         ]);
       }
-    } catch {
-      // Preserve last-known cached items on transient network error
+    } catch (err: any) {
+      const msg = err?.message || String(err || '');
+      if (
+        isAuthExpiredErrorMessage(msg) &&
+        (descriptor.provider === 'soundcloud' || descriptor.provider === 'apple_music')
+      ) {
+        fypStore.authErrorKeys = {
+          ...fypStore.authErrorKeys,
+          [descriptor.cacheKey]: msg,
+        };
+        emitAuthExpired(
+          descriptor.provider === 'apple_music' ? 'apple' : 'soundcloud',
+          msg
+        );
+      }
+      // Preserve last-known cached items on transient network or auth error
     } finally {
       inFlightCacheKeys.delete(descriptor.cacheKey);
       fypStore.revalidatingKeys = Array.from(inFlightCacheKeys);
@@ -1032,6 +1088,30 @@ export function queueFypRevalidation(descriptor: FypShelfDescriptor, force = fal
     }
   });
   pumpRevalidationQueue();
+}
+
+export function clearFypProviderAuthErrorsAndRevalidate(provider: FypProvider): void {
+  let changed = false;
+  const nextErrors = { ...fypStore.authErrorKeys };
+  for (const rec of fypStore.shelves) {
+    if (rec.provider !== provider) continue;
+    try {
+      const desc = JSON.parse(rec.descriptor_json) as FypShelfDescriptor;
+      if (nextErrors[desc.cacheKey]) {
+        delete nextErrors[desc.cacheKey];
+        changed = true;
+      }
+      if (rec.enabled) {
+        queueFypRevalidation(desc, true);
+      }
+    } catch {
+      // ignore invalid descriptor json
+    }
+  }
+  if (changed) {
+    fypStore.authErrorKeys = nextErrors;
+    notifyFypListeners();
+  }
 }
 
 export function useFypShelves(): FypStoreSnapshot & {

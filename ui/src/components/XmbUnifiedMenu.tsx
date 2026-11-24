@@ -86,6 +86,7 @@ export interface XmbUnifiedMenuProps {
   isDeckyEmbedded?: boolean;
   desktopMode?: boolean;
   onToggleDesktopMode?: (next: boolean) => void;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
 }
 
 const smallStepBtnStyle: React.CSSProperties = {
@@ -163,6 +164,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
   isDeckyEmbedded = false,
   desktopMode = false,
   onToggleDesktopMode,
+  expiredAuthProviders = [],
 }) => {
   const [activeCol, setActiveCol] = useState<XmbColumnId>(
     initialOpenFoldersAccounts ? 'audio_sources' : lastXmbColMemory
@@ -435,6 +437,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
     sourceVisibility,
     appleConnected: Boolean(snap?.apple_authenticated),
     soundCloudUserLabel,
+    expiredAuthProviders,
     brightnessPct,
     gamepadPolicy,
     networkedRetrieval,
@@ -861,9 +864,32 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
                     fontWeight: selected ? 800 : 600,
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 5,
                   }}
                 >
-                  {col.label}
+                  <span>{col.label}</span>
+                  {col.attention && (
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#ef4444',
+                        color: '#ffffff',
+                        fontSize: 9.5,
+                        fontWeight: 900,
+                        lineHeight: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      !
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -945,14 +971,37 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
                       textAlign: 'left',
                     }}
                   >
-                    <span>{item.label}</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span>{item.label}</span>
+                      {item.attention && (
+                        <span
+                          style={{
+                            width: 14,
+                            height: 14,
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            color: '#ffffff',
+                            fontSize: 9.5,
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          !
+                        </span>
+                      )}
+                    </span>
                     {item.value !== undefined && (
                       <span
                         style={{
                           fontFamily: 'monospace',
                           fontSize: 11,
                           fontWeight: 700,
-                          color: item.active
+                          color: item.attention
+                            ? '#fca5a5'
+                            : item.active
                             ? 'var(--imp-accent-active-text, #f5e1be)'
                             : 'var(--imp-text-secondary, #8b92a1)',
                         }}

@@ -38,6 +38,7 @@ export interface LibrarySourceFilterPillsProps {
   sourceVisibility: SourceVisibilityPrefs;
   snap: SimpStateSnapshot | null;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  scAuthState?: "connected" | "reauth_required" | "public";
   pushCurrentNavState: () => void;
 }
 
@@ -49,6 +50,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
   sourceVisibility,
   snap,
   appleAuthState,
+  scAuthState = 'public',
   pushCurrentNavState,
 }) => {
   const lastPillTapRef = React.useRef<{ id: string; ts: number; wasAll: boolean } | null>(null);
@@ -74,7 +76,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
       ? [
           {
             id: 'soundcloud' as const,
-            label: 'SC',
+            label: scAuthState === 'reauth_required' ? 'SC!' : 'SC',
             icon: 'soundcloud' as const,
             accent: 'soundcloud' as const,
           },
@@ -264,6 +266,8 @@ export interface LibraryXmbLeftColumnProps {
   sourceVisibility: SourceVisibilityPrefs;
   snap: SimpStateSnapshot | null;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  scAuthState?: "connected" | "reauth_required" | "public";
+  onOpenConnectedAccounts?: () => void;
   pushCurrentNavState: () => void;
   localSubTab: LocalSubTab;
   setLocalSubTab: React.Dispatch<React.SetStateAction<LocalSubTab>>;
@@ -340,6 +344,8 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   sourceVisibility,
   snap,
   appleAuthState,
+  scAuthState = 'public',
+  onOpenConnectedAccounts,
   pushCurrentNavState,
   localSubTab,
   setLocalSubTab,
@@ -2295,7 +2301,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               ⚠️ Apple Music session signed out
             </span>
             <button
-              onClick={() => setSourceModalOpen(true)}
+              onClick={() =>
+                onOpenConnectedAccounts ? onOpenConnectedAccounts() : setSourceModalOpen(true)
+              }
               style={{
                 padding: '4px 8px',
                 borderRadius: 6,
@@ -2312,6 +2320,46 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             </button>
           </div>
         )}
+
+        {/* SoundCloud Re-Auth Prompt Pill */}
+        {scAuthState === 'reauth_required' &&
+          sourceVisibility.soundcloud &&
+          browserSourceFilter !== 'local' && (
+            <div
+              style={{
+                padding: '8px 10px',
+                borderRadius: 10,
+                background: '#1f1410',
+                border: '1px solid #9a3412',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 11, color: '#fdba74', fontWeight: 700 }}>
+                ⚠️ SoundCloud session expired
+              </span>
+              <button
+                onClick={() =>
+                  onOpenConnectedAccounts ? onOpenConnectedAccounts() : setSourceModalOpen(true)
+                }
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  background: '#2a1409',
+                  border: '1px solid #ea580c',
+                  color: '#fed7aa',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                Reconnect
+              </button>
+            </div>
+          )}
 
         {/* =================================================================
             COLLAPSIBLE BUCKET 1: ▾ SIMP PLAYLISTS (HYBRID & PINNED) + Embedded [+]

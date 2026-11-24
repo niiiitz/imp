@@ -4,6 +4,11 @@ import {
   PlaylistRecord,
   TrackMetadata,
 } from '@imp/client';
+import {
+  emitAuthExpired,
+  isAuthExpiredErrorMessage,
+  resolveDaemonUrl,
+} from '../api/servicesCacheApi';
 import { markTrackLyricsStatus } from '../views/library/libraryHelpers';
 
 declare global {
@@ -384,10 +389,14 @@ export async function disconnectAppleMusicCleanSlate(
 }
 
 async function fetchAppleDaemonJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const r = await fetch(`http://127.0.0.1:18888${endpoint}`, options);
+  const r = await fetch(resolveDaemonUrl(endpoint), options);
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
-    throw new Error(j.error || `Apple Music daemon request failed (${endpoint})`);
+    const errMsg = j.error || `Apple Music daemon request failed (${endpoint})`;
+    if (r.status === 401 || r.status === 403 || isAuthExpiredErrorMessage(errMsg)) {
+      emitAuthExpired('apple', errMsg);
+    }
+    throw new Error(errMsg);
   }
   if (typeof window !== 'undefined' && typeof j.synced_pinned === 'number' && j.synced_pinned > 0) {
     window.dispatchEvent(
@@ -413,7 +422,7 @@ export async function addTracksToAppleCloudPlaylist(
   playlistId: string,
   trackIds: string[]
 ): Promise<void> {
-  const r = await fetch('http://127.0.0.1:18888/api/apple/playlist-add-tracks', {
+  const r = await fetch(resolveDaemonUrl('/api/apple/playlist-add-tracks'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -567,7 +576,9 @@ export async function fetchAppleRecentPlayedPage(offset: number): Promise<{
   next_offset: number | null;
 }> {
   const r = await fetch(
-    `http://127.0.0.1:18888/api/apple/recent-played?kind=items&offset=${encodeURIComponent(String(offset))}`
+    resolveDaemonUrl(
+      `/api/apple/recent-played?kind=items&offset=${encodeURIComponent(String(offset))}`
+    )
   );
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok || !j.shelf) {
@@ -584,7 +595,9 @@ export async function fetchAppleRecentPlayedTracksPage(offset: number): Promise<
   next_offset: number | null;
 }> {
   const r = await fetch(
-    `http://127.0.0.1:18888/api/apple/recent-played?kind=tracks&offset=${encodeURIComponent(String(offset))}`
+    resolveDaemonUrl(
+      `/api/apple/recent-played?kind=tracks&offset=${encodeURIComponent(String(offset))}`
+    )
   );
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
@@ -628,7 +641,7 @@ export async function fetchTrackLyrics(params: {
   if (params.duration_ms && params.duration_ms > 0) {
     qs.set('duration_ms', String(Math.round(params.duration_ms)));
   }
-  const r = await fetch(`http://127.0.0.1:18888/api/lyrics?${qs.toString()}`);
+  const r = await fetch(resolveDaemonUrl(`/api/lyrics?${qs.toString()}`));
   const j = await r.json().catch(() => ({ ok: false }));
   if (!r.ok || !j.ok || !j.data) {
     return {
@@ -704,7 +717,7 @@ export async function fetchLocalArtistProfile(
   artistName: string
 ): Promise<LocalArtistProfileResponse> {
   const r = await fetch(
-    `http://127.0.0.1:18888/api/local/artist?name=${encodeURIComponent(artistName.trim())}`
+    resolveDaemonUrl(`/api/local/artist?name=${encodeURIComponent(artistName.trim())}`)
   );
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
@@ -728,7 +741,7 @@ export async function setAppleItemFavorited(
     kind,
     favorited: favorited ? '1' : '0',
   });
-  const r = await fetch(`http://127.0.0.1:18888/api/apple/rate?${qs.toString()}`, {
+  const r = await fetch(resolveDaemonUrl(`/api/apple/rate?${qs.toString()}`), {
     method: 'POST',
   });
   const j = await r.json().catch(() => ({ ok: false }));
@@ -756,7 +769,7 @@ export async function addAppleItemToCloudLibrary(
     id: idOrUri.trim(),
     kind,
   });
-  const r = await fetch(`http://127.0.0.1:18888/api/apple/library-add?${qs.toString()}`, {
+  const r = await fetch(resolveDaemonUrl(`/api/apple/library-add?${qs.toString()}`), {
     method: 'POST',
   });
   const j = await r.json().catch(() => ({ ok: false }));
@@ -819,7 +832,7 @@ export async function resolveReplacementCatalogSongId(rawId: string): Promise<st
       if (cur?.title) qs.set('title', cur.title);
       if (cur?.artists?.[0]) qs.set('artist', cur.artists[0]);
     }
-    const r = await fetch(`http://127.0.0.1:18888/api/apple/resolve-track?${qs.toString()}`);
+    const r = await fetch(resolveDaemonUrl(`/api/apple/resolve-track?${qs.toString()}`));
     if (r.ok) {
       const j = await r.json();
       if (j.ok && j.catalog_id) {

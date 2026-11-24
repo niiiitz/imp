@@ -56,6 +56,7 @@ Subcommands:
                           Build release imp binary, upload atomically, restart imp.service
   deploy [version]        Run package-release.sh, upload tarball, run install-steamos.sh
   restart                 daemon-reload + restart imp.service and check :18888 health
+  tunnel [port]           Open foreground SSH tunnel (http://127.0.0.1:<port> -> :18888, default 18889)
   exec <cmd...>           Run arbitrary command remotely with user systemd env exported
 
 .env configuration example (gitignored; no sudo password needed):
@@ -577,6 +578,16 @@ cmd_exec() {
   remote_sh "$*"
 }
 
+cmd_tunnel() {
+  local local_port="${1:-18889}"
+  if [[ ! "${local_port}" =~ ^[0-9]+$ ]] || (( local_port < 1 || local_port > 65535 )); then
+    echo "Error: Invalid local port '${local_port}' (expected 1..65535)" >&2
+    exit 1
+  fi
+  echo "Tunneling http://127.0.0.1:${local_port}/ -> ${TARGET} (127.0.0.1:18888) — Ctrl+C to close"
+  exec ssh "${SSH_ARGS[@]}" -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -L "127.0.0.1:${local_port}:127.0.0.1:18888" "${TARGET}"
+}
+
 case "${SUBCMD}" in
   check-ssh)    cmd_check_ssh "$@" ;;
   status)       cmd_status "$@" ;;
@@ -588,6 +599,7 @@ case "${SUBCMD}" in
   deploy-bin)   cmd_deploy_bin "$@" ;;
   deploy)       cmd_deploy "$@" ;;
   restart)      cmd_restart "$@" ;;
+  tunnel)       cmd_tunnel "$@" ;;
   exec)         cmd_exec "$@" ;;
   *)
     echo "Error: Unknown subcommand '${SUBCMD}'" >&2

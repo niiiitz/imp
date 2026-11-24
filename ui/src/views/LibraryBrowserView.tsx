@@ -62,6 +62,7 @@ import {
   LocalDiscoverResponse,
   LocalSmartStation,
   readProviderCachedShelves,
+  resolveDaemonUrl as resolveSharedDaemonUrl,
   TTL_ARCHIVE_SEC,
   writeCachedShelves,
 } from '../api/servicesCacheApi';
@@ -330,6 +331,8 @@ export interface LibraryBrowserViewProps {
   sourceModalOpen: boolean;
   powerModalOpen: boolean;
   setPowerModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
+  onOpenConnectedAccounts?: () => void;
 }
 
 export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
@@ -468,6 +471,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   sourceModalOpen,
   powerModalOpen,
   setPowerModalOpen,
+  expiredAuthProviders = [],
+  onOpenConnectedAccounts,
 }) => {
   // Left Sidebar Collapsible Section States (persisted in localStorage)
   const [placesOpen, setPlacesOpen] = useState<boolean>(() => {
@@ -873,24 +878,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     }
   }, [isSourceIncluded, activeMountRoot]);
 
-  const resolveDaemonUrl = useCallback((path: string): string => {
-    if (typeof window !== 'undefined' && window.location?.hostname) {
-      const host = window.location.hostname;
-      if (
-        window.location.protocol === 'http:' &&
-        host !== 'steamloopback.host' &&
-        host !== '127.0.0.1' &&
-        host !== 'localhost'
-      ) {
-        const port = window.location.port === '1420' ? '18888' : window.location.port || '18888';
-        return `http://${host}:${port}${path}`;
-      }
-      if (window.location.port === '18888') {
-        return path;
-      }
-    }
-    return `http://127.0.0.1:18888${path}`;
-  }, []);
+  const resolveDaemonUrl = useCallback(
+    (path: string): string => resolveSharedDaemonUrl(path),
+    []
+  );
 
   // Fetch Internet Archive discovery hub items (page 1, Stale-While-Revalidate via servicesCache.db)
   const iaSwrLastFetchedRef = useRef<Record<string, number>>({});
@@ -1766,11 +1757,20 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const pinnedApplePlaylistCount = playlists.filter((p) => p.origin === 'apple_remote').length;
   const pinnedAppleAlbumCount = albums.filter((a) => a.id.startsWith('applemusic:album:')).length;
   const hasPinnedAppleContent = pinnedApplePlaylistCount + pinnedAppleAlbumCount > 0;
-  const appleAuthState: 'connected' | 'reauth_required' | 'never_used' = snap?.apple_authenticated
-    ? 'connected'
-    : hasPinnedAppleContent
-    ? 'reauth_required'
-    : 'never_used';
+  const appleAuthState: 'connected' | 'reauth_required' | 'never_used' =
+    expiredAuthProviders.includes('apple')
+      ? 'reauth_required'
+      : snap?.apple_authenticated
+      ? 'connected'
+      : hasPinnedAppleContent
+      ? 'reauth_required'
+      : 'never_used';
+  const scAuthState: 'connected' | 'reauth_required' | 'public' =
+    expiredAuthProviders.includes('soundcloud')
+      ? 'reauth_required'
+      : snap?.soundcloud_authenticated
+      ? 'connected'
+      : 'public';
 
   const selectedAlbumObj =
     browserTarget?.kind === 'album'
@@ -4053,6 +4053,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
           sourceVisibility={sourceVisibility}
           snap={snap}
           appleAuthState={appleAuthState}
+          scAuthState={scAuthState}
           pushCurrentNavState={pushCurrentNavState}
         />
       </div>
@@ -4078,6 +4079,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         powerModalOpen={powerModalOpen}
         setSourceModalOpen={setSourceModalOpen}
         setPowerModalOpen={setPowerModalOpen}
+        expiredAuthProviders={expiredAuthProviders}
       />
       <LibraryXmbLeftColumn
         browserSourceFilter={browserSourceFilter}
@@ -4087,6 +4089,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         sourceVisibility={sourceVisibility}
         snap={snap}
         appleAuthState={appleAuthState}
+        scAuthState={scAuthState}
+        onOpenConnectedAccounts={onOpenConnectedAccounts}
         pushCurrentNavState={pushCurrentNavState}
         localSubTab={localSubTab}
         setLocalSubTab={setLocalSubTab}
@@ -4283,6 +4287,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             activeSmartFacet={activeSmartFacet}
             setActiveSmartFacet={setActiveSmartFacet}
             appleAuthState={appleAuthState}
+            expiredAuthProviders={expiredAuthProviders}
+            onOpenConnectedAccounts={onOpenConnectedAccounts}
             browseHubTarget={browseHubTarget}
             impFypActive={impFypActive}
             onOpenFilters={openFilterModal}

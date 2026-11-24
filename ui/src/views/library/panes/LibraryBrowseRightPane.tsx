@@ -75,6 +75,8 @@ export interface LibraryBrowseRightPaneProps {
   activeSmartFacet: SmartFacetKind;
   setActiveSmartFacet: React.Dispatch<React.SetStateAction<SmartFacetKind>>;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
+  onOpenConnectedAccounts?: () => void;
   browseHubTarget: BrowseHubTarget;
   impFypActive: boolean;
   onOpenFilters?: () => void;
@@ -242,6 +244,8 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   activeSmartFacet,
   setActiveSmartFacet,
   appleAuthState,
+  expiredAuthProviders = [],
+  onOpenConnectedAccounts,
   browseHubTarget,
   impFypActive,
   onOpenFilters,
@@ -652,6 +656,8 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 mediaTypeFilter={mediaTypeFilter}
                 onOpenFilters={onOpenFilters}
                 snap={snap}
+                expiredAuthProviders={expiredAuthProviders}
+                onOpenConnectedAccounts={onOpenConnectedAccounts}
                 localDiscover={localDiscover}
                 tileGridStyle={tileGridStyle}
                 renderSingleSongRow={renderSingleSongRow}
