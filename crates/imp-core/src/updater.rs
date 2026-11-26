@@ -434,6 +434,27 @@ fn copy_dir_contents(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn apply_decky_tree_permissions(root: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if !root.exists() {
+        return;
+    }
+    let _ = std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o755));
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                apply_decky_tree_permissions(&p);
+            } else {
+                let is_exec = p.file_name().and_then(|n| n.to_str()) == Some("main.py");
+                let mode = if is_exec { 0o755 } else { 0o644 };
+                let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode));
+            }
+        }
+    }
+}
+
 /// Spawns a detached background shell that waits 450ms (allowing the HTTP 200 OK response to flush
 /// to the UI / Decky QAM client) and then cleanly restarts `imp.service` (or the daemon process).
 pub fn spawn_delayed_daemon_restart() {
@@ -567,11 +588,13 @@ pub fn spawn_delayed_daemon_restart() {
             kill -9 {self_pid} 2>/dev/null || true; \
             pkill -9 -f 'imp --daemon' 2>/dev/null || true; \
             pkill -9 -f 'simp --daemon' 2>/dev/null || true; \
+            systemd_ok=0; \
             if command -v systemctl >/dev/null 2>&1 && [ -f \"$HOME/.config/systemd/user/imp.service\" ]; then \
-              systemctl --user restart imp.service 2>/dev/null || systemctl --user start imp.service 2>/dev/null || true; \
-              sleep 0.6; \
+              if systemctl --user restart imp.service 2>/dev/null || systemctl --user start imp.service 2>/dev/null; then \
+                systemd_ok=1; \
+              fi; \
             fi; \
-            if ! curl -fsS --max-time 2 http://127.0.0.1:18888/health >/dev/null 2>&1; then \
+            if [ \"$systemd_ok\" = \"0\" ]; then \
               nohup \"$HOME/.local/share/imp/bin/imp\" --daemon >/dev/null 2>&1 & \
             fi"
         );
@@ -770,19 +793,28 @@ pub fn restart_daemon_synchronously() -> Result<String> {
                 .status();
         }
 
+        let mut systemd_started = false;
         if service_file.is_file() {
-            let _ = Command::new("systemctl")
+            systemd_started = Command::new("systemctl")
                 .env("XDG_RUNTIME_DIR", &runtime_dir)
                 .env("DBUS_SESSION_BUS_ADDRESS", &dbus_addr)
                 .args(["--user", "start", "imp.service"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
-                .status();
-            std::thread::sleep(Duration::from_millis(450));
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
         }
 
-        if probe_health().is_none() && installed_bin.is_file() {
+        if systemd_started {
+            for _ in 0..20 {
+                if probe_health().is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(125));
+            }
+        } else if probe_health().is_none() && installed_bin.is_file() {
             let _ = Command::new(&installed_bin)
                 .arg("--daemon")
                 .env("XDG_RUNTIME_DIR", &runtime_dir)
@@ -954,32 +986,13 @@ pub fn apply_self_update(
     }
 
     // 1. Atomically replace `~/.local/share/imp/bin/imp` using a `.new` temp file + rename
-    // Runs 100% in userland (`~/.local/share/imp`); only tries non-interactive `sudo -n` if an older
-    // root-run script left root-owned files behind, never prompting interactively with `sudo` or `pkexec`.
+    // Runs 100% in userland (`~/.local/share/imp`) with zero sudo escalation.
     let dest_bin = bin_dest_dir.join("imp");
     let dest_bin_new = bin_dest_dir.join("imp.new");
     let _ = std::fs::remove_file(&dest_bin_new);
-    if std::fs::copy(&src_bin, &dest_bin_new).is_err() {
-        #[cfg(unix)]
-        {
-            let uid = unsafe { libc::getuid() };
-            let gid = unsafe { libc::getgid() };
-            let install_str = install_root.to_string_lossy().to_string();
-            let systemd_str = home.join(".config/systemd").to_string_lossy().to_string();
-            let fix_userland_cmd = format!(
-                "chown -R {uid}:{gid} \"{install_str}\" \"{systemd_str}\" 2>/dev/null || true"
-            );
-            let _ = Command::new("sudo")
-                .args(["-n", "sh", "-c", &fix_userland_cmd])
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-    }
     std::fs::copy(&src_bin, &dest_bin_new).with_context(|| {
         format!(
-            "Failed to write {} (if previously installed with sudo, run: sudo chown -R $USER:$USER ~/.local/share/imp)",
+            "Failed to write {} (if previously installed as root, ensure ownership of ~/.local/share/imp matches the user)",
             dest_bin_new.display()
         )
     })?;
@@ -1060,11 +1073,13 @@ pub fn apply_self_update(
 
     // 3. Stage Decky plugin into `~/.local/share/imp/decky-staged/` (if present in bundle)
     let mut decky_updated = false;
-    let mut plugin_loader_restarted = false;
     let decky_staged = install_root.join("decky-staged");
     if src_decky.is_dir() {
         let _ = std::fs::remove_dir_all(&decky_staged);
-        let _ = copy_dir_contents(&src_decky, &decky_staged);
+        if copy_dir_contents(&src_decky, &decky_staged).is_ok() {
+            #[cfg(unix)]
+            apply_decky_tree_permissions(&decky_staged);
+        }
     }
 
     let homebrew_dir = home.join("homebrew");
@@ -1073,72 +1088,17 @@ pub fn apply_self_update(
     let decky_env_present = src_decky.is_dir()
         && (decky_target.is_dir() || decky_plugins_dir.is_dir() || homebrew_dir.is_dir());
     if decky_env_present {
-        // Clean any nested/legacy subdirectories inside imp-decky so stale binaries never linger
+        // Attempt direct unprivileged copy if `~/homebrew/plugins` or `imp-decky` is user-writable;
+        // otherwise rely on Decky Loader's `main.py` watcher syncing from `~/.local/share/imp/decky-staged/`.
         let _ = std::fs::remove_dir_all(decky_target.join("imp-decky"));
         let _ = std::fs::remove_dir_all(decky_target.join("simp-decky"));
         let _ = std::fs::remove_dir_all(decky_target.join("bin"));
         let _ = std::fs::remove_dir_all(decky_target.join("ui"));
 
         if copy_dir_contents(&src_decky, &decky_target).is_ok() {
+            #[cfg(unix)]
+            apply_decky_tree_permissions(&decky_target);
             decky_updated = true;
-        } else {
-            #[cfg(unix)]
-            {
-                let uid = unsafe { libc::getuid() };
-                let gid = unsafe { libc::getgid() };
-                let target_str = decky_target.to_string_lossy().to_string();
-                let plugins_str = decky_plugins_dir.to_string_lossy().to_string();
-                let uid_str = uid.to_string();
-                let gid_str = gid.to_string();
-                let fix_perms_cmd =
-                    "mkdir -p \"$1\" && chown -R \"$2:$3\" \"$4\" \"$1\" && chmod 0755 \"$4\" \"$1\"";
-
-                // 3a. Only try non-interactive `sudo -n` (never prompt with interactive `sudo` or `pkexec`!).
-                // If `~/homebrew/plugins` is owned by root and passwordless sudo is not enabled,
-                // `~/.local/share/imp/decky-staged/` is already updated in userland and Decky Loader's
-                // root `main.py` (`_sync_staged_decky_plugin`) automatically syncs it without sudo.
-                let _ = Command::new("sudo")
-                    .args([
-                        "-n",
-                        "sh",
-                        "-c",
-                        fix_perms_cmd,
-                        "--",
-                        &target_str,
-                        &uid_str,
-                        &gid_str,
-                        &plugins_str,
-                    ])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-
-                if copy_dir_contents(&src_decky, &decky_target).is_ok() {
-                    decky_updated = true;
-                }
-            }
-        }
-
-        if decky_updated {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let main_py = decky_target.join("main.py");
-                if main_py.is_file() {
-                    let _ =
-                        std::fs::set_permissions(&main_py, std::fs::Permissions::from_mode(0o755));
-                }
-                // Best-effort non-interactive reload of Decky's plugin_loader service if passwordless sudo is enabled
-                plugin_loader_restarted = Command::new("sudo")
-                    .args(["-n", "systemctl", "restart", "plugin_loader"])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false);
-            }
         }
     }
 
@@ -1150,12 +1110,10 @@ pub fn apply_self_update(
     }
 
     let decky_staged_only = decky_env_present && !decky_updated;
-    let msg = if decky_updated && plugin_loader_restarted {
+    let msg = if decky_updated {
         format!("Updated Imp ({arch} Daemon + UI + Decky QAM) to v{target_ver}")
-    } else if decky_updated {
-        format!("Updated Imp ({arch} Daemon + UI + Decky QAM) to v{target_ver} (restart Decky/Steam or run 'sudo systemctl restart plugin_loader' to reload QAM)")
     } else if decky_staged_only {
-        format!("Updated Imp ({arch} Daemon + UI) to v{target_ver} — Decky QAM staged at ~/.local/share/imp/decky-staged (needs sudo to install into ~/homebrew/plugins/imp-decky)")
+        format!("Updated Imp ({arch} Daemon + UI) to v{target_ver} — Decky QAM staged for automatic sync via Decky Loader")
     } else {
         format!("Updated Imp ({arch} Daemon + UI) to v{target_ver}")
     };

@@ -194,6 +194,7 @@ export interface MenuItemDescriptor {
   value?: string;
   kind: MenuItemKind;
   active?: boolean;
+  attention?: boolean;
   danger?: boolean;
   hidden?: boolean;
   subPanelId?: XmbSourceSubPanelId;
@@ -202,6 +203,7 @@ export interface MenuItemDescriptor {
 export interface MenuColumnDescriptor {
   id: XmbColumnId;
   label: string;
+  attention?: boolean;
   items: MenuItemDescriptor[];
 }
 
@@ -217,6 +219,7 @@ export interface BuildMenuCorpusContext {
   sourceVisibility: SourceVisibilityPrefs;
   appleConnected: boolean;
   soundCloudUserLabel: string;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
   brightnessPct: number;
   gamepadPolicy: GamepadFocusPolicy;
   networkedRetrieval: NetworkedRetrievalPrefs;
@@ -236,12 +239,19 @@ export function buildMenuCorpus(ctx: BuildMenuCorpusContext): MenuColumnDescript
           ? 'Switch to Stable'
           : 'Check for Updates...';
 
+  const hasExpiredAuth = Boolean(
+    ctx.expiredAuthProviders && ctx.expiredAuthProviders.length > 0
+  );
   const activeAccountBadges = [
     ctx.sourceVisibility.apple_music ? (ctx.appleConnected ? 'Apple★' : 'Apple') : null,
     ctx.sourceVisibility.soundcloud ? 'SC' : null,
     ctx.sourceVisibility.internet_archive ? 'IA' : null,
   ].filter(Boolean);
-  const accountsSummary = activeAccountBadges.length > 0 ? activeAccountBadges.join(' · ') : 'Hidden';
+  const accountsSummary = hasExpiredAuth
+    ? 'Re-sign in'
+    : activeAccountBadges.length > 0
+      ? activeAccountBadges.join(' · ')
+      : 'Hidden';
 
   const retrievalFlags = Object.values(ctx.networkedRetrieval);
   const retrievalEnabledCount = retrievalFlags.filter(Boolean).length;
@@ -415,6 +425,7 @@ export function buildMenuCorpus(ctx: BuildMenuCorpusContext): MenuColumnDescript
     {
       id: 'audio_sources',
       label: 'Audio & Sources',
+      attention: hasExpiredAuth,
       items: [
         {
           id: 'equalizer',
@@ -430,6 +441,7 @@ export function buildMenuCorpus(ctx: BuildMenuCorpusContext): MenuColumnDescript
           value: accountsSummary,
           kind: 'submenu',
           active: activeAccountBadges.length > 0,
+          attention: hasExpiredAuth,
           subPanelId: 'accounts',
         },
         {

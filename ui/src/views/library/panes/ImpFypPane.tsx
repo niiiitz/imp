@@ -24,6 +24,8 @@ export interface ImpFypPaneProps {
   mediaTypeFilter?: 'all' | 'video' | 'audio';
   onOpenFilters?: () => void;
   snap: SimpStateSnapshot | null;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
+  onOpenConnectedAccounts?: () => void;
   localDiscover: LocalDiscoverResponse;
   tileGridStyle: React.CSSProperties;
   renderSingleSongRow: (
@@ -61,6 +63,8 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
   mediaTypeFilter = 'all',
   onOpenFilters,
   snap,
+  expiredAuthProviders = [],
+  onOpenConnectedAccounts,
   localDiscover,
   renderSingleSongRow,
   renderSimpAlbumCard,
@@ -81,11 +85,34 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
     snapshots,
     loaded,
     revalidatingKeys,
+    authErrorKeys,
     saveAllShelves,
+    toggleShelfEnabled,
     unpinShelf,
     restoreDefaultShelves,
   } = useFypShelves();
   const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const isShelfAuthExpired = (descriptor: FypShelfDescriptor): boolean => {
+    if (authErrorKeys[descriptor.cacheKey]) return true;
+    if (
+      descriptor.provider === 'apple_music' &&
+      (expiredAuthProviders.includes('apple') || !snap?.apple_authenticated)
+    ) {
+      return true;
+    }
+    if (descriptor.provider === 'soundcloud' && expiredAuthProviders.includes('soundcloud')) {
+      const k = descriptor.fetchSpec.kind;
+      if (
+        k === 'sc_likes' ||
+        k === 'sc_stream' ||
+        (k === 'sc_discover' && descriptor.fetchSpec.section === 'more_of_what_you_like')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   // Viewport-Lazy Stale-While-Revalidate via IntersectionObserver
   const descriptorsByElRef = useRef<Map<Element, FypShelfDescriptor>>(new Map());
@@ -258,7 +285,9 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
 
   const renderShelfBody = (descriptor: FypShelfDescriptor, items: unknown[]) => {
     if (items.length === 0) {
-      const unauthApple = descriptor.provider === 'apple_music' && !snap?.apple_authenticated;
+      const authExpired = isShelfAuthExpired(descriptor);
+      const providerLabel =
+        descriptor.provider === 'soundcloud' ? 'SoundCloud' : 'Apple Music';
       const isLoading = revalidatingKeys.includes(descriptor.cacheKey);
       return (
         <div
@@ -266,18 +295,43 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
             padding: '12px 14px',
             borderRadius: 10,
             background: '#0a0b10',
-            border: '1px solid #181a24',
-            color: '#8e8e99',
+            border: authExpired ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid #181a24',
+            color: authExpired ? '#fecaca' : '#8e8e99',
             fontSize: 11.5,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 10,
+            flexWrap: 'wrap',
           }}
         >
-          {unauthApple
-            ? 'Sign in to Apple Music in Settings → Folders & Accounts to hydrate this shelf.'
-            : isLoading
-              ? '⏳ Refreshing shelf items...'
-              : descriptor.provider === 'local'
-                ? 'Index local music folders in Settings to populate this Local discovery shelf.'
-                : 'No items cached yet — click Refresh Stale to load.'}
+          <span>
+            {authExpired
+              ? `Sign in to ${providerLabel} in Settings → Accounts to hydrate this shelf.`
+              : isLoading
+                ? '⏳ Refreshing shelf items...'
+                : descriptor.provider === 'local'
+                  ? 'Index local music folders in Settings to populate this Local discovery shelf.'
+                  : 'No items cached yet — click Refresh Stale to load.'}
+          </span>
+          {authExpired && onOpenConnectedAccounts && (
+            <button
+              type="button"
+              onClick={onOpenConnectedAccounts}
+              style={{
+                padding: '4px 9px',
+                borderRadius: 7,
+                background: '#2a131c',
+                border: '1px solid rgba(239, 68, 68, 0.7)',
+                color: '#fecaca',
+                fontSize: 10.5,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              🔑 Re-sign in
+            </button>
+          )}
         </div>
       );
     }
@@ -622,10 +676,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                   data-fyp-action="toggle"
                   onClick={(e) => {
                     const btn = e.currentTarget;
-                    const next = shelves.map((s) =>
-                      s.shelf_uid === rec.shelf_uid ? { ...s, enabled: !s.enabled } : s
-                    );
-                    saveAllShelves(next);
+                    toggleShelfEnabled(rec.shelf_uid, !rec.enabled);
                     window.requestAnimationFrame(() => {
                       if (btn.isConnected) {
                         window.dispatchEvent(
@@ -743,6 +794,7 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
           if (!descriptor) return null;
           const items = resolveShelfItems(descriptor);
           const isUpdating = revalidatingKeys.includes(descriptor.cacheKey);
+          const authExpired = isShelfAuthExpired(descriptor);
           return (
             <section
               key={rec.shelf_uid}
@@ -773,6 +825,31 @@ export const ImpFypPane: React.FC<ImpFypPaneProps> = ({
                 }
                 trailing={
                   <>
+                    {authExpired && (
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        data-no-dpad-focus="true"
+                        data-right-filter-pill="true"
+                        onClick={() => onOpenConnectedAccounts?.()}
+                        title={`${
+                          descriptor.provider === 'soundcloud' ? 'SoundCloud' : 'Apple Music'
+                        } session expired — open Connected Accounts to re-sign in`}
+                        style={{
+                          minHeight: 26,
+                          padding: '0 8px',
+                          borderRadius: 7,
+                          background: '#2a1216',
+                          border: '1px solid rgba(239, 68, 68, 0.7)',
+                          color: '#fca5a5',
+                          fontSize: 10.5,
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🔑 Re-sign in
+                      </button>
+                    )}
                     <button
                       type="button"
                       tabIndex={-1}

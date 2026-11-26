@@ -47,6 +47,7 @@ export interface LibraryMiniPlayerBarProps {
   powerModalOpen: boolean;
   setSourceModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setPowerModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
 }
 
 const MiniSpectrumCanvas: React.FC<{
@@ -189,6 +190,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   powerModalOpen,
   setSourceModalOpen,
   setPowerModalOpen,
+  expiredAuthProviders = [],
 }) => {
   const theme = getSourceThemeForTrack(track?.uri, track?.source);
   const [vizMode, setVizMode] = useState<VisualizerMode>(() => readSavedVizMode());
@@ -734,8 +736,15 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
               type="button"
               data-row-aux="true"
               onClick={toggleStartSettings}
-              title="Settings Menu (START)"
+              title={
+                expiredAuthProviders.length > 0
+                  ? `Settings Menu (START) — Re-sign in required (${expiredAuthProviders
+                      .map((p) => (p === 'apple' ? 'Apple Music' : 'SoundCloud'))
+                      .join(', ')})`
+                  : 'Settings Menu (START)'
+              }
               style={{
+                position: 'relative',
                 height: 24,
                 padding: '0 8px',
                 borderRadius: 6,
@@ -743,6 +752,8 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 border:
                   sourceModalOpen || powerModalOpen
                     ? '1px solid #383c52'
+                    : expiredAuthProviders.length > 0
+                    ? '1px solid rgba(239, 68, 68, 0.65)'
                     : '1px solid #222634',
                 color: sourceModalOpen || powerModalOpen ? '#e2e8f0' : '#d4d4dc',
                 fontSize: 12,
@@ -767,6 +778,32 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                 START
               </span>
               <span style={{ lineHeight: 1 }}>☰</span>
+              {expiredAuthProviders.length > 0 && (
+                <span
+                  aria-label="Account sign-in attention"
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: -5,
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: '#ef4444',
+                    border: '1.5px solid #0b0d14',
+                    color: '#ffffff',
+                    fontSize: 9.5,
+                    fontWeight: 900,
+                    lineHeight: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 6px rgba(239, 68, 68, 0.6)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  !
+                </span>
+              )}
             </button>
         </div>
       </div>

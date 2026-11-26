@@ -10,7 +10,17 @@ import {
   TrackMetadata,
 } from '@imp/client';
 import { CompanionPairView } from './components/CompanionPairView';
-import { quitNativeAppWindow, toggleAppFullscreen } from './api/servicesCacheApi';
+import {
+  clearFypProviderAuthErrorsAndRevalidate,
+  deleteDaemonUiPrefs,
+  ExpiredAuthProvider,
+  fetchDaemonUiPrefs,
+  quitNativeAppWindow,
+  resolveDaemonUrl,
+  saveDaemonUiPrefs,
+  toggleAppFullscreen,
+} from './api/servicesCacheApi';
+import { saveStatsHudEnabled } from './components/StatsHudPill';
 import type { BrowseHubTarget } from './views/library/libraryHelpers';
 import { computeRelativeSubpath } from './views/library/localFolderTree';
 import {
@@ -258,7 +268,7 @@ const ConsoleMainApp: React.FC = () => {
 
   // Hydrate persistent SQLite `play_history` and `local_favorites` on mount
   useEffect(() => {
-    fetch('http://127.0.0.1:18888/api/history?limit=40')
+    fetch(resolveDaemonUrl('/api/history?limit=40'))
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.data) && d.data.length > 0) {
@@ -281,7 +291,7 @@ const ConsoleMainApp: React.FC = () => {
       })
       .catch(() => { });
 
-    fetch('http://127.0.0.1:18888/api/favorites')
+    fetch(resolveDaemonUrl('/api/favorites'))
       .then((r) => r.json())
       .then((d) => {
         if (d?.ok && Array.isArray(d.uris)) {
@@ -289,12 +299,50 @@ const ConsoleMainApp: React.FC = () => {
         }
       })
       .catch(() => { });
+
+    let rawLocalVisibility: string | null = null;
+    try {
+      rawLocalVisibility = window.localStorage.getItem('simp_source_visibility_v2');
+    } catch { }
+    let rawLocalStats: string | null = null;
+    try {
+      rawLocalStats = window.localStorage.getItem('imp_stats_hud_enabled_v1');
+    } catch { }
+
+    fetchDaemonUiPrefs().then((prefs) => {
+      if (!prefs) return;
+      const remoteVis = prefs.source_visibility_v2;
+      if (remoteVis && typeof remoteVis === 'object' && !Array.isArray(remoteVis)) {
+        const v = remoteVis as Record<string, unknown>;
+        setSourceVisibility({
+          internet_archive: v.internet_archive !== false,
+          apple_music: v.apple_music !== false,
+          soundcloud: v.soundcloud !== false,
+          optical_drive: v.optical_drive === true,
+        });
+      } else if (rawLocalVisibility) {
+        try {
+          const parsed = JSON.parse(rawLocalVisibility);
+          if (parsed && typeof parsed === 'object') {
+            void saveDaemonUiPrefs({ source_visibility_v2: parsed });
+          }
+        } catch { }
+      }
+
+      if (typeof prefs.stats_hud_enabled_v1 === 'boolean') {
+        saveStatsHudEnabled(prefs.stats_hud_enabled_v1, false);
+      } else if (rawLocalStats !== null) {
+        void saveDaemonUiPrefs({
+          stats_hud_enabled_v1: rawLocalStats === '1' || rawLocalStats === 'true',
+        });
+      }
+    });
   }, []);
 
   useEffect(() => {
     const cur = snap?.current_track;
     if (!cur?.uri || !snap?.is_playing) return;
-    fetch('http://127.0.0.1:18888/api/history', {
+    fetch(resolveDaemonUrl('/api/history'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cur),
@@ -597,21 +645,7 @@ const ConsoleMainApp: React.FC = () => {
     }
   }, [snap?.daemon_version]);
 
-  const resolveDaemonBaseUrl = useCallback(() => {
-    if (typeof window !== 'undefined' && window.location?.hostname) {
-      const host = window.location.hostname;
-      if (
-        window.location.protocol === 'http:' &&
-        host !== 'steamloopback.host' &&
-        host !== '127.0.0.1' &&
-        host !== 'localhost'
-      ) {
-        const port = window.location.port === '1420' ? '18888' : window.location.port || '18888';
-        return `http://${host}:${port}`;
-      }
-    }
-    return 'http://127.0.0.1:18888';
-  }, []);
+  const resolveDaemonBaseUrl = useCallback(() => resolveDaemonUrl(''), []);
 
   const compareSemverStrings = useCallback((currentRaw: string, candidateRaw: string): boolean => {
     const parseTuple = (v: string): [number, number, number, number, number] => {
@@ -960,7 +994,7 @@ const ConsoleMainApp: React.FC = () => {
           !scAutoClientAuthRef.current
         ) {
           scAutoClientAuthRef.current = true;
-          fetch('/api/soundcloud/client-auth', { method: 'POST' })
+          fetch(resolveDaemonUrl('/api/soundcloud/client-auth'), { method: 'POST' })
             .then(() => defaultSimpClient.getSoundCloudAuthConfig())
             .then((nextCfg) => setSoundcloudAuthCfg(nextCfg))
             .catch(() => { });
@@ -2030,10 +2064,48 @@ const ConsoleMainApp: React.FC = () => {
   const [trackPropertiesTarget, setTrackPropertiesTarget] =
     useState<TrackPropertiesTarget | null>(null);
   const [expiredAuthAlert, setExpiredAuthAlert] = useState<{
-    provider: 'apple' | 'soundcloud';
+    provider: ExpiredAuthProvider;
     label: string;
     reason?: string;
   } | null>(null);
+  const [expiredAuthProviders, setExpiredAuthProviders] = useState<ExpiredAuthProvider[]>([]);
+  const toastedExpiredProvidersRef = useRef<Set<ExpiredAuthProvider>>(new Set());
+
+  const openConnectedAccountsModal = useCallback(() => {
+    setVolumePopoverOpen(false);
+    setBrightnessPopoverOpen(false);
+    setPowerModalOpen(false);
+    setInitialOpenFoldersAccounts(true);
+    setSourceModalOpen(true);
+  }, []);
+
+  const markProviderExpired = useCallback(
+    (provider: ExpiredAuthProvider, _reason?: string) => {
+      setExpiredAuthProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
+      if (!toastedExpiredProvidersRef.current.has(provider)) {
+        toastedExpiredProvidersRef.current.add(provider);
+        const label = provider === 'apple' ? 'Apple Music' : 'SoundCloud';
+        showToast(`${label} session expired — open START → Accounts to reconnect`);
+      }
+    },
+    [showToast]
+  );
+
+  const clearProviderExpired = useCallback(
+    (provider: ExpiredAuthProvider, triggerRevalidate = true) => {
+      toastedExpiredProvidersRef.current.delete(provider);
+      setExpiredAuthProviders((prev) =>
+        prev.includes(provider) ? prev.filter((p) => p !== provider) : prev
+      );
+      setExpiredAuthAlert((prev) => (prev && prev.provider === provider ? null : prev));
+      if (triggerRevalidate) {
+        clearFypProviderAuthErrorsAndRevalidate(
+          provider === 'apple' ? 'apple_music' : 'soundcloud'
+        );
+      }
+    },
+    []
+  );
   const [pendingDroppedFolder, setPendingDroppedFolder] = useState<string | null>(null);
   const mountsRef = useRef<Array<{ mount_root: string }>>([]);
   mountsRef.current = snap?.mounts || [];
@@ -2100,15 +2172,26 @@ const ConsoleMainApp: React.FC = () => {
     return () => window.removeEventListener('simp-open-track-properties', onOpenTrackProps);
   }, []);
 
-  // Proactive Auth Probe (startup + every 30 minutes)
+  // Proactive Auth Probe (startup + every 30 minutes) + reactive auth expiry/restore listeners
   useEffect(() => {
     const runProbe = async () => {
-      if (localStorage.getItem('simp_mute_auth_reminders') === '1') return;
       try {
-        const resp = await fetch('http://127.0.0.1:18888/api/auth/probe');
+        const resp = await fetch(resolveDaemonUrl('/api/auth/probe'));
         const json = await resp.json();
         if (!json?.ok || !json.data) return;
         const { apple, soundcloud } = json.data;
+        if (apple?.was_connected && apple?.expired) {
+          markProviderExpired('apple', apple.reason);
+        } else if (apple?.was_connected && !apple?.expired) {
+          clearProviderExpired('apple', false);
+        }
+        if (soundcloud?.was_connected && soundcloud?.expired) {
+          markProviderExpired('soundcloud', soundcloud.reason);
+        } else if (soundcloud?.was_connected && !soundcloud?.expired) {
+          clearProviderExpired('soundcloud', false);
+        }
+
+        if (localStorage.getItem('simp_mute_auth_reminders') === '1') return;
         if (apple?.was_connected && apple?.expired) {
           setExpiredAuthAlert({
             provider: 'apple',
@@ -2126,11 +2209,49 @@ const ConsoleMainApp: React.FC = () => {
     };
     const initialTimer = window.setTimeout(runProbe, 3500);
     const interval = window.setInterval(runProbe, 30 * 60 * 1000);
+    const onAuthExpired = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ provider?: ExpiredAuthProvider; reason?: string }>)
+        .detail;
+      if (detail?.provider === 'apple' || detail?.provider === 'soundcloud') {
+        markProviderExpired(detail.provider, detail.reason);
+      }
+    };
+    const onAuthRestored = (ev: Event) => {
+      const detail = (ev as CustomEvent<{ provider?: ExpiredAuthProvider }>).detail;
+      if (detail?.provider === 'apple' || detail?.provider === 'soundcloud') {
+        clearProviderExpired(detail.provider, true);
+      }
+    };
+    window.addEventListener('imp-auth-expired', onAuthExpired);
+    window.addEventListener('imp-auth-restored', onAuthRestored);
     return () => {
       window.clearTimeout(initialTimer);
       window.clearInterval(interval);
+      window.removeEventListener('imp-auth-expired', onAuthExpired);
+      window.removeEventListener('imp-auth-restored', onAuthRestored);
     };
-  }, []);
+  }, [markProviderExpired, clearProviderExpired]);
+
+  useEffect(() => {
+    if (snap?.apple_authenticated && expiredAuthProviders.includes('apple')) {
+      clearProviderExpired('apple', true);
+    }
+  }, [snap?.apple_authenticated, expiredAuthProviders, clearProviderExpired]);
+
+  useEffect(() => {
+    if (
+      soundcloudAuthCfg?.soundcloud_authenticated &&
+      soundcloudAuthCfg?.auth_mode === 'user' &&
+      expiredAuthProviders.includes('soundcloud')
+    ) {
+      clearProviderExpired('soundcloud', true);
+    }
+  }, [
+    soundcloudAuthCfg?.soundcloud_authenticated,
+    soundcloudAuthCfg?.auth_mode,
+    expiredAuthProviders,
+    clearProviderExpired,
+  ]);
 
   // Global Window Drag-and-Drop Interceptor (Folder Ingestion Only — Never Navigate or Play Unindexed Files)
   useEffect(() => {
@@ -2481,7 +2602,7 @@ const ConsoleMainApp: React.FC = () => {
           : [favTrack.uri, ...prev]
         : prev.filter((u) => u !== favTrack.uri)
     );
-    fetch(`http://127.0.0.1:18888/api/favorites?favorited=${nextFav ? '1' : '0'}`, {
+    fetch(resolveDaemonUrl(`/api/favorites?favorited=${nextFav ? '1' : '0'}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(favTrack),
@@ -2933,6 +3054,7 @@ const ConsoleMainApp: React.FC = () => {
           sourceModalOpen={sourceModalOpen}
           powerModalOpen={powerModalOpen}
           desktopMode={desktopMode}
+          expiredAuthProviders={expiredAuthProviders}
         />
       )}
 
@@ -3101,6 +3223,8 @@ const ConsoleMainApp: React.FC = () => {
         recentlyPlayed={recentlyPlayed}
         showToast={showToast}
         handleRemoveFolder={handleRemoveFolder}
+        expiredAuthProviders={expiredAuthProviders}
+        onOpenConnectedAccounts={openConnectedAccountsModal}
       />
 
       {/* Unified Top-Right 3-Column XMB START Menu */}
@@ -3143,6 +3267,7 @@ const ConsoleMainApp: React.FC = () => {
           refreshLibraryData={refreshLibraryData}
           applyFocusMarker={applyFocusMarker}
           showToast={showToast}
+          expiredAuthProviders={expiredAuthProviders}
           initialOpenFoldersAccounts={initialOpenFoldersAccounts}
           isDeckyEmbedded={isDeckyEmbedded}
           desktopMode={desktopMode}
@@ -3185,6 +3310,7 @@ const ConsoleMainApp: React.FC = () => {
               try {
                 window.localStorage.setItem('simp_source_visibility_v2', JSON.stringify(next));
               } catch { }
+              void saveDaemonUiPrefs({ source_visibility_v2: next });
               if (key === 'internet_archive') {
                 defaultSimpClient.configureInternetArchive({
                   enabled: nextVal,

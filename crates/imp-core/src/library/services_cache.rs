@@ -56,6 +56,8 @@ pub fn normalize_cache_provider(raw: &str) -> String {
     }
 }
 
+const FYP_SEEDED_PREF_KEY: &str = "fyp_seeded_v1";
+
 impl ServicesCacheDatabase {
     /// Opens or initializes `servicesCache.db` in SQLite WAL mode.
     pub fn open(db_path: &Path) -> Result<Self> {
@@ -98,11 +100,29 @@ impl ServicesCacheDatabase {
             CREATE INDEX IF NOT EXISTS idx_fyp_shelves_order
                 ON fyp_shelves(sort_order ASC, shelf_uid ASC);
 
+            CREATE TABLE IF NOT EXISTS ui_prefs (
+                pref_key   TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             ",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    fn mark_fyp_seeded_conn(conn: &Connection) -> Result<()> {
+        conn.execute(
+            "INSERT INTO ui_prefs (pref_key, value_json, updated_at)
+             VALUES (?1, 'true', ?2)
+             ON CONFLICT(pref_key) DO UPDATE SET
+                 value_json = excluded.value_json,
+                 updated_at = excluded.updated_at",
+            params![FYP_SEEDED_PREF_KEY, current_unix_sec()],
+        )?;
+        Ok(())
     }
 
     pub fn get_cached_shelf(&self, cache_key: &str) -> Result<Option<CachedShelfRecord>> {
@@ -226,6 +246,7 @@ impl ServicesCacheDatabase {
                 ])?;
             }
         }
+        Self::mark_fyp_seeded_conn(&tx)?;
         tx.commit()?;
         Ok(())
     }
@@ -271,6 +292,7 @@ impl ServicesCacheDatabase {
                 if shelf.enabled { 1i64 } else { 0i64 }
             ],
         )?;
+        Self::mark_fyp_seeded_conn(&conn)?;
         Ok(())
     }
 
@@ -279,6 +301,97 @@ impl ServicesCacheDatabase {
         let deleted = conn.execute(
             "DELETE FROM fyp_shelves WHERE shelf_uid = ?1",
             params![shelf_uid],
+        )?;
+        Self::mark_fyp_seeded_conn(&conn)?;
+        Ok(deleted > 0)
+    }
+
+    pub fn set_fyp_shelf_enabled(&self, shelf_uid: &str, enabled: bool) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let updated = conn.execute(
+            "UPDATE fyp_shelves SET enabled = ?1 WHERE shelf_uid = ?2",
+            params![if enabled { 1i64 } else { 0i64 }, shelf_uid],
+        )?;
+        Self::mark_fyp_seeded_conn(&conn)?;
+        Ok(updated > 0)
+    }
+
+    pub fn is_fyp_seeded(&self) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let pref: Option<String> = conn
+            .query_row(
+                "SELECT value_json FROM ui_prefs WHERE pref_key = ?1",
+                params![FYP_SEEDED_PREF_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(raw) = pref {
+            let trimmed = raw.trim();
+            if trimmed == "true" || trimmed == "1" {
+                return Ok(true);
+            }
+            if trimmed == "false" || trimmed == "0" {
+                return Ok(false);
+            }
+        }
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM fyp_shelves", [], |r| r.get(0))
+            .unwrap_or(0);
+        Ok(count > 0)
+    }
+
+    pub fn mark_fyp_seeded(&self) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        Self::mark_fyp_seeded_conn(&conn)
+    }
+
+    pub fn get_ui_pref(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let val = conn
+            .query_row(
+                "SELECT value_json FROM ui_prefs WHERE pref_key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(val)
+    }
+
+    pub fn list_ui_prefs(&self) -> Result<std::collections::BTreeMap<String, String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT pref_key, value_json FROM ui_prefs ORDER BY pref_key ASC",
+        )?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+        let mut out = std::collections::BTreeMap::new();
+        for pair in rows.flatten() {
+            out.insert(pair.0, pair.1);
+        }
+        Ok(out)
+    }
+
+    pub fn set_ui_pref(&self, key: &str, value_json: &str) -> Result<()> {
+        let trimmed = key.trim();
+        if trimmed.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO ui_prefs (pref_key, value_json, updated_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(pref_key) DO UPDATE SET
+                 value_json = excluded.value_json,
+                 updated_at = excluded.updated_at",
+            params![trimmed, value_json, current_unix_sec()],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_ui_pref(&self, key: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM ui_prefs WHERE pref_key = ?1",
+            params![key],
         )?;
         Ok(deleted > 0)
     }
@@ -405,4 +518,59 @@ mod tests {
         let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
     }
 
+    #[test]
+    fn test_fyp_seeded_persists_after_delete_and_atomic_toggle() {
+        let db_path = temp_cache_db_path("fyp_seeded_toggle");
+        let db = ServicesCacheDatabase::open(&db_path).unwrap();
+        assert!(!db.is_fyp_seeded().unwrap());
+
+        let shelf = FypShelfRecord {
+            shelf_uid: "local:discover:recent".to_string(),
+            provider: "local".to_string(),
+            shelf_kind: "albums".to_string(),
+            title: "Recently Added Local Releases".to_string(),
+            descriptor_json: "{}".to_string(),
+            sort_order: 0,
+            enabled: true,
+        };
+        db.save_fyp_shelves(&[shelf]).unwrap();
+        assert!(db.is_fyp_seeded().unwrap());
+
+        assert!(db.set_fyp_shelf_enabled("local:discover:recent", false).unwrap());
+        let after_disable = db.list_fyp_shelves().unwrap();
+        assert_eq!(after_disable.len(), 1);
+        assert!(!after_disable[0].enabled);
+
+        assert!(db.delete_fyp_shelf("local:discover:recent").unwrap());
+        assert!(db.list_fyp_shelves().unwrap().is_empty());
+        assert!(db.is_fyp_seeded().unwrap());
+
+        let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+    }
+
+    #[test]
+    fn test_ui_prefs_roundtrip_and_delete() {
+        let db_path = temp_cache_db_path("ui_prefs");
+        let db = ServicesCacheDatabase::open(&db_path).unwrap();
+
+        assert!(db.get_ui_pref("stats_hud_enabled_v1").unwrap().is_none());
+        db.set_ui_pref("stats_hud_enabled_v1", "true").unwrap();
+        db.set_ui_pref(
+            "source_visibility_v2",
+            r#"{"apple_music":true,"soundcloud":false}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            db.get_ui_pref("stats_hud_enabled_v1").unwrap().as_deref(),
+            Some("true")
+        );
+        let listed = db.list_ui_prefs().unwrap();
+        assert_eq!(listed.len(), 2);
+
+        assert!(db.delete_ui_pref("stats_hud_enabled_v1").unwrap());
+        assert!(db.get_ui_pref("stats_hud_enabled_v1").unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+    }
 }

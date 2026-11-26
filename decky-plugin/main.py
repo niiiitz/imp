@@ -5,6 +5,7 @@ import pwd
 import shutil
 import socket
 import subprocess
+import time
 
 SERVICE_UNIT_TEMPLATE = """[Unit]
 Description=Imp (Interactive Media Player) Background Audio & UI Daemon
@@ -27,6 +28,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+UMask=0077
 
 [Install]
 WantedBy=default.target
@@ -44,6 +46,27 @@ def _resolve_target_user():
     except Exception:
         pass
     return user, home, uid, gid
+
+
+def _chmod_decky_tree(path: str):
+    if not os.path.exists(path):
+        return
+    try:
+        os.chmod(path, 0o755)
+    except Exception:
+        pass
+    for root, dirs, files in os.walk(path):
+        for d in dirs:
+            try:
+                os.chmod(os.path.join(root, d), 0o755)
+            except Exception:
+                pass
+        for f in files:
+            try:
+                mode = 0o755 if f == "main.py" else 0o644
+                os.chmod(os.path.join(root, f), mode)
+            except Exception:
+                pass
 
 
 def _chown_tree(path: str, uid: int, gid: int):
@@ -94,8 +117,11 @@ def _run_as_user(cmd: list[str], user: str, home: str, uid: int, gid: int):
 
     if os.geteuid() == 0:
         return subprocess.run(
-            ["sudo", "-u", user, "-E", *cmd],
+            cmd,
             env=env,
+            user=uid,
+            group=gid,
+            extra_groups=[],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -203,6 +229,7 @@ def _sync_staged_decky_plugin(plugin_dir: str, home: str, uid: int, gid: int) ->
         # Remove any stale bundled bin/ or ui/ from an older simp-decky.zip install
         shutil.rmtree(os.path.join(plugin_dir, "bin"), ignore_errors=True)
         shutil.rmtree(os.path.join(plugin_dir, "ui"), ignore_errors=True)
+        _chmod_decky_tree(plugin_dir)
         _chown_tree(plugin_dir, uid, gid)
         return True
     except Exception:
@@ -310,6 +337,9 @@ def _provision_and_start_userland():
             if os.path.lexists(symlink_path):
                 os.remove(symlink_path)
             os.symlink(dest_bin, symlink_path)
+            if os.geteuid() == 0:
+                os.chown(local_bin_dir, uid, gid)
+                os.lchown(symlink_path, uid, gid)
         except Exception:
             pass
 
@@ -326,7 +356,7 @@ def _provision_and_start_userland():
     _run_as_user(["systemctl", "--user", "disable", "--now", "simp.service"], user, home, uid, gid)
     _run_as_user(["systemctl", "--user", "enable", "imp.service"], user, home, uid, gid)
     if binary_updated or not _is_daemon_listening():
-        _run_as_user(
+        systemctl_res = _run_as_user(
             ["systemctl", "--user", "restart", "imp.service"],
             user,
             home,
@@ -334,7 +364,7 @@ def _provision_and_start_userland():
             gid,
         )
     else:
-        _run_as_user(
+        systemctl_res = _run_as_user(
             ["systemctl", "--user", "start", "imp.service"],
             user,
             home,
@@ -342,8 +372,13 @@ def _provision_and_start_userland():
             gid,
         )
 
-    # 5. Fallback direct spawn if user systemd bus wasn't reachable yet
-    if not _is_daemon_listening() and os.path.isfile(dest_bin):
+    if systemctl_res.returncode == 0:
+        for _ in range(15):
+            if _is_daemon_listening():
+                break
+            time.sleep(0.2)
+    elif not _is_daemon_listening() and os.path.isfile(dest_bin):
+        # 5. Fallback direct spawn ONLY when user systemd bus wasn't reachable
         env = os.environ.copy()
         env["HOME"] = home
         env["USER"] = user
@@ -353,8 +388,11 @@ def _provision_and_start_userland():
         env["SIMP_UI_DIR"] = ui_dest_dir
         if os.geteuid() == 0:
             subprocess.Popen(
-                ["sudo", "-u", user, "-E", dest_bin, "--daemon"],
+                [dest_bin, "--daemon"],
                 env=env,
+                user=uid,
+                group=gid,
+                extra_groups=[],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -391,8 +429,11 @@ class Plugin:
                     )
                     _user, home, uid, gid = _resolve_target_user()
                     install_root = os.path.join(home, ".local", "share", "imp")
-                    if os.path.isdir(install_root):
-                        _chown_tree(install_root, uid, gid)
+                    try:
+                        if os.path.isdir(install_root) and os.stat(install_root).st_uid != uid:
+                            _chown_tree(install_root, uid, gid)
+                    except Exception:
+                        pass
                     _sync_staged_decky_plugin(plugin_dir, home, uid, gid)
 
                 await loop.run_in_executor(None, _check_sync)

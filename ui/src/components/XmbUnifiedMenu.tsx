@@ -8,7 +8,7 @@ import {
 } from '@imp/client';
 import { OskTargetKind } from '../hooks/useGamepadNavigation';
 import { FolderChooserModal } from './FolderChooserModal';
-import { resolveDaemonUrl } from '../api/servicesCacheApi';
+import { deleteDaemonUiPrefs, resolveDaemonUrl, saveDaemonUiPrefs } from '../api/servicesCacheApi';
 import { loadStatsHudEnabled, saveStatsHudEnabled } from './StatsHudPill';
 import { XmbSourceSubPanel } from './XmbSourceSubPanel';
 import {
@@ -86,6 +86,7 @@ export interface XmbUnifiedMenuProps {
   isDeckyEmbedded?: boolean;
   desktopMode?: boolean;
   onToggleDesktopMode?: (next: boolean) => void;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
 }
 
 const smallStepBtnStyle: React.CSSProperties = {
@@ -163,6 +164,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
   isDeckyEmbedded = false,
   desktopMode = false,
   onToggleDesktopMode,
+  expiredAuthProviders = [],
 }) => {
   const [activeCol, setActiveCol] = useState<XmbColumnId>(
     initialOpenFoldersAccounts ? 'audio_sources' : lastXmbColMemory
@@ -354,6 +356,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
       try {
         window.localStorage.setItem('simp_source_visibility_v2', JSON.stringify(next));
       } catch {}
+      void saveDaemonUiPrefs({ source_visibility_v2: next });
       if (key === 'internet_archive') {
         defaultSimpClient.configureInternetArchive({
           enabled: nextVal,
@@ -378,7 +381,11 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
     setSavedIaUsername(normalized);
     setIaEnabledLocal(nextEnabled);
     if (normalized) {
-      setSourceVisibility((p) => ({ ...p, internet_archive: true }));
+      setSourceVisibility((p) => {
+        const next = { ...p, internet_archive: true };
+        void saveDaemonUiPrefs({ source_visibility_v2: next });
+        return next;
+      });
     }
     showToast(normalized ? `Saved Archive @${normalized}` : 'Cleared Archive username');
     refreshLibraryData();
@@ -430,6 +437,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
     sourceVisibility,
     appleConnected: Boolean(snap?.apple_authenticated),
     soundCloudUserLabel,
+    expiredAuthProviders,
     brightnessPct,
     gamepadPolicy,
     networkedRetrieval,
@@ -477,8 +485,12 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
       window.localStorage.removeItem('simp_factoids_enabled');
       window.localStorage.removeItem('simp_oobe_help_seen_v1');
       window.localStorage.removeItem('imp_update_channel_v1');
+      window.localStorage.removeItem('imp_stats_hud_enabled_v1');
       window.localStorage.setItem('simp.visualizer_mode', 'cycle');
     } catch {}
+    saveStatsHudEnabled(false, false);
+    setStatsHudEnabled(false);
+    void deleteDaemonUiPrefs(['source_visibility_v2', 'stats_hud_enabled_v1']);
     setBrightnessPct(100);
     setSourceVisibility({
       internet_archive: true,
@@ -852,9 +864,32 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
                     fontWeight: selected ? 800 : 600,
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 5,
                   }}
                 >
-                  {col.label}
+                  <span>{col.label}</span>
+                  {col.attention && (
+                    <span
+                      style={{
+                        width: 14,
+                        height: 14,
+                        borderRadius: '50%',
+                        background: '#ef4444',
+                        color: '#ffffff',
+                        fontSize: 9.5,
+                        fontWeight: 900,
+                        lineHeight: 1,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      !
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -936,14 +971,37 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
                       textAlign: 'left',
                     }}
                   >
-                    <span>{item.label}</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                      <span>{item.label}</span>
+                      {item.attention && (
+                        <span
+                          style={{
+                            width: 14,
+                            height: 14,
+                            borderRadius: '50%',
+                            background: '#ef4444',
+                            color: '#ffffff',
+                            fontSize: 9.5,
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          !
+                        </span>
+                      )}
+                    </span>
                     {item.value !== undefined && (
                       <span
                         style={{
                           fontFamily: 'monospace',
                           fontSize: 11,
                           fontWeight: 700,
-                          color: item.active
+                          color: item.attention
+                            ? '#fca5a5'
+                            : item.active
                             ? 'var(--imp-accent-active-text, #f5e1be)'
                             : 'var(--imp-text-secondary, #8b92a1)',
                         }}

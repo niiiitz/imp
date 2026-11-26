@@ -241,6 +241,10 @@ pub async fn run_ipc_server(ipc_state: DaemonIpcState) -> anyhow::Result<()> {
             "/api/fyp/shelves",
             get(fyp_shelves_get_handler).post(fyp_shelves_post_handler),
         )
+        .route(
+            "/api/ui/prefs",
+            get(ui_prefs_get_handler).post(ui_prefs_post_handler),
+        )
         .route("/api/auth/probe", get(auth_probe_handler))
         .route("/api/fs/roots", get(fs_roots_handler))
         .route("/api/fs/list", get(fs_list_handler))

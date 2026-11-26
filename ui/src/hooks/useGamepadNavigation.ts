@@ -852,17 +852,6 @@ export function useGamepadNavigation({
       }
 
       if (!oskTarget && !isModalOpen && (dir === 'left' || dir === 'right') && curCol) {
-        // PS3 XMB Drill-Right Action: If focused on a Left-Column drill-right row (`🍎 Apple Music ▸`, `☁️ SoundCloud ▸`, or `+ New Playlist`),
-        // pressing D-Pad Right triggers the drill-in / action directly!
-        if (curCol === 'left' && dir === 'right' && active.dataset.xmbDrillRight === 'true') {
-          const drillTarget =
-            active.parentElement?.querySelector<HTMLElement>(
-              '[data-xmb-drill-action="true"]:not([disabled])'
-            ) || active;
-          drillTarget.click();
-          return;
-        }
-
         // 1. First look for a sibling control on the SAME horizontal row in the SAME column
         const activeRail = active.closest<HTMLElement>('[data-h-rail="true"]');
         let bestSameRow: HTMLElement | null = null;

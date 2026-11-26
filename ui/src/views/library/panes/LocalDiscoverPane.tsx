@@ -33,17 +33,41 @@ import {
 import { CollectionTileCard } from '../cards/CollectionTileCard';
 import { HorizontalShelfRail } from '../HorizontalShelfRail';
 
+export interface LocalArtistFacet {
+  name: string;
+  albumCount: number;
+  trackCount: number;
+  artUrl: string | null;
+}
+
 export interface LocalFacetsSummary {
   genres: Array<{ genre: string; count: number }>;
   eras: Array<{ id: string; label: string; count: number }>;
   artworkCounts: { hasArt: number; missingArt: number };
   lyricsCounts: { synced: number; anyLyrics: number; missing: number };
-  artists: Array<{ name: string; albumCount: number; trackCount: number; artUrl: string | null }>;
+  artists: LocalArtistFacet[];
+  albumArtists: LocalArtistFacet[];
+  allTrackArtists: LocalArtistFacet[];
 }
 
 export function cleanAlbumArtistDisplay(raw: string): string {
   return stripAlbumFormatSuffix(raw);
 }
+
+const GENERIC_ALBUM_ARTISTS = new Set([
+  '',
+  'various artists',
+  'various',
+  'va',
+  'v.a.',
+  'soundtrack',
+  'original soundtrack',
+  'ost',
+  'steam soundtrack',
+  'local video',
+  'unknown artist',
+  'compilation',
+]);
 
 export function computeLocalFacetsSummary(
   localAlbums: AlbumRecord[],
@@ -61,16 +85,47 @@ export function computeLocalFacetsSummary(
   let anyLyrics = 0;
   let missingLyrics = 0;
 
-  const artistMap = new Map<
-    string,
-    { display: string; albums: Set<string>; tracks: Set<string>; artUrl: string | null }
-  >();
+  type MutableArtistEntry = {
+    display: string;
+    albums: Set<string>;
+    tracks: Set<string>;
+    artUrl: string | null;
+  };
+  const albumArtistMap = new Map<string, MutableArtistEntry>();
+  const allTrackArtistMap = new Map<string, MutableArtistEntry>();
+
+  const primaryTrackArtistsByAlbum = new Map<string, Set<string>>();
+  const audioTrackCountByAlbum = new Map<string, number>();
+  for (const t of audioTracks) {
+    if (!t.album_id) continue;
+    audioTrackCountByAlbum.set(t.album_id, (audioTrackCountByAlbum.get(t.album_id) || 0) + 1);
+    const primary = ((t.artists && t.artists[0]) || '').trim().toLowerCase();
+    if (primary && primary !== 'unknown artist') {
+      let set = primaryTrackArtistsByAlbum.get(t.album_id);
+      if (!set) {
+        set = new Set<string>();
+        primaryTrackArtistsByAlbum.set(t.album_id, set);
+      }
+      set.add(primary);
+    }
+  }
+
+  const albumPrimaryArtistByAlbumId = new Map<string, string>();
+  const compilationAlbumIds = new Set<string>();
 
   for (const alb of localAlbums) {
-    const cleanArtist = cleanAlbumArtistDisplay(alb.album_artist);
-    if (cleanArtist && cleanArtist.toLowerCase() !== 'steam soundtrack' && cleanArtist.toLowerCase() !== 'local video') {
-      const k = cleanArtist.toLowerCase();
-      const entry = artistMap.get(k) || {
+    const cleanArtist = cleanAlbumArtistDisplay(alb.album_artist).trim();
+    const lowerClean = cleanArtist.toLowerCase();
+    const distinctPrimary = primaryTrackArtistsByAlbum.get(alb.id)?.size || 0;
+    const albTrackCount = audioTrackCountByAlbum.get(alb.id) || 0;
+    const isCompilationOrOst =
+      GENERIC_ALBUM_ARTISTS.has(lowerClean) ||
+      (albTrackCount >= 4 &&
+        distinctPrimary >= 4 &&
+        (!cleanArtist || lowerClean === alb.title.trim().toLowerCase()));
+
+    if (cleanArtist && lowerClean !== 'steam soundtrack' && lowerClean !== 'local video') {
+      const entry = allTrackArtistMap.get(lowerClean) || {
         display: cleanArtist,
         albums: new Set<string>(),
         tracks: new Set<string>(),
@@ -78,7 +133,22 @@ export function computeLocalFacetsSummary(
       };
       entry.albums.add(alb.id);
       if (!entry.artUrl && alb.art_url) entry.artUrl = alb.art_url;
-      artistMap.set(k, entry);
+      allTrackArtistMap.set(lowerClean, entry);
+    }
+
+    if (isCompilationOrOst) {
+      compilationAlbumIds.add(alb.id);
+    } else if (cleanArtist) {
+      albumPrimaryArtistByAlbumId.set(alb.id, cleanArtist);
+      const entry = albumArtistMap.get(lowerClean) || {
+        display: cleanArtist,
+        albums: new Set<string>(),
+        tracks: new Set<string>(),
+        artUrl: alb.art_url || null,
+      };
+      entry.albums.add(alb.id);
+      if (!entry.artUrl && alb.art_url) entry.artUrl = alb.art_url;
+      albumArtistMap.set(lowerClean, entry);
     }
   }
 
@@ -108,11 +178,12 @@ export function computeLocalFacetsSummary(
     } else {
       missingLyrics += 1;
     }
+
     for (const rawArt of t.artists || []) {
       const name = rawArt.trim();
       if (!name || name.toLowerCase() === 'unknown artist') continue;
       const k = name.toLowerCase();
-      const entry = artistMap.get(k) || {
+      const entry = allTrackArtistMap.get(k) || {
         display: name,
         albums: new Set<string>(),
         tracks: new Set<string>(),
@@ -121,7 +192,37 @@ export function computeLocalFacetsSummary(
       entry.tracks.add(t.uri);
       if (t.album_id) entry.albums.add(t.album_id);
       if (!entry.artUrl && t.art_url) entry.artUrl = t.art_url;
-      artistMap.set(k, entry);
+      allTrackArtistMap.set(k, entry);
+    }
+
+    const albumOwner = t.album_id ? albumPrimaryArtistByAlbumId.get(t.album_id) : undefined;
+    if (albumOwner) {
+      const k = albumOwner.toLowerCase();
+      const entry = albumArtistMap.get(k) || {
+        display: albumOwner,
+        albums: new Set<string>(),
+        tracks: new Set<string>(),
+        artUrl: t.art_url || null,
+      };
+      entry.tracks.add(t.uri);
+      if (t.album_id) entry.albums.add(t.album_id);
+      if (!entry.artUrl && t.art_url) entry.artUrl = t.art_url;
+      albumArtistMap.set(k, entry);
+    } else if (!t.album_id || !compilationAlbumIds.has(t.album_id)) {
+      const fallbackName = ((t.artists && t.artists[0]) || '').trim();
+      if (fallbackName && !GENERIC_ALBUM_ARTISTS.has(fallbackName.toLowerCase())) {
+        const k = fallbackName.toLowerCase();
+        const entry = albumArtistMap.get(k) || {
+          display: fallbackName,
+          albums: new Set<string>(),
+          tracks: new Set<string>(),
+          artUrl: t.art_url || null,
+        };
+        entry.tracks.add(t.uri);
+        if (t.album_id) entry.albums.add(t.album_id);
+        if (!entry.artUrl && t.art_url) entry.artUrl = t.art_url;
+        albumArtistMap.set(k, entry);
+      }
     }
   }
 
@@ -137,21 +238,27 @@ export function computeLocalFacetsSummary(
     eras.push({ id: 'unknown', label: 'No Year', count: unknownYearCount });
   }
 
-  const artists = Array.from(artistMap.values())
-    .map((a) => ({
-      name: a.display,
-      albumCount: a.albums.size,
-      trackCount: a.tracks.size,
-      artUrl: a.artUrl,
-    }))
-    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+  const mapToSortedList = (m: Map<string, MutableArtistEntry>): LocalArtistFacet[] =>
+    Array.from(m.values())
+      .map((a) => ({
+        name: a.display,
+        albumCount: a.albums.size,
+        trackCount: a.tracks.size,
+        artUrl: a.artUrl,
+      }))
+      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+
+  const albumArtists = mapToSortedList(albumArtistMap);
+  const allTrackArtists = mapToSortedList(allTrackArtistMap);
 
   return {
     genres,
     eras,
     artworkCounts: { hasArt, missingArt },
     lyricsCounts: { synced, anyLyrics, missing: missingLyrics },
-    artists,
+    artists: albumArtists,
+    albumArtists,
+    allTrackArtists,
   };
 }
 
@@ -249,6 +356,9 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
 
   const [visibleAlbumsCount, setVisibleAlbumsCount] = useState<number>(180);
   const [visibleArtistsCount, setVisibleArtistsCount] = useState<number>(180);
+  const [artistGroupingMode, setArtistGroupingMode] = useState<
+    'album_artists' | 'all_track_artists'
+  >('album_artists');
 
   useEffect(() => {
     setVisibleAlbumsCount(180);
@@ -261,6 +371,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
     localLyricsFilter,
     effectiveSubTab,
     mediaTypeFilter,
+    artistGroupingMode,
   ]);
 
   const hasRichFilter =
@@ -382,27 +493,55 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
     [allLocalTracks, trackMatchesFilters]
   );
 
+  const albumArtistById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const alb of allLocalAlbums) {
+      const clean = cleanAlbumArtistDisplay(alb.album_artist).trim();
+      if (clean && !GENERIC_ALBUM_ARTISTS.has(clean.toLowerCase())) {
+        map.set(alb.id, clean);
+      }
+    }
+    return map;
+  }, [allLocalAlbums]);
+
   const filteredArtistsList = useMemo(() => {
+    const baseList =
+      artistGroupingMode === 'album_artists'
+        ? facetsSummary.albumArtists
+        : facetsSummary.allTrackArtists;
     if (!hasRichFilter && localAlpha === 'all') {
-      return facetsSummary.artists;
+      return baseList;
     }
     const matchingArtistKeys = new Set<string>();
     for (const t of filteredTracksList) {
+      if (artistGroupingMode === 'album_artists' && t.album_id) {
+        const albArtist = albumArtistById.get(t.album_id);
+        if (albArtist) matchingArtistKeys.add(albArtist.toLowerCase());
+      }
       for (const a of t.artists || []) {
         const k = a.trim().toLowerCase();
         if (k) matchingArtistKeys.add(k);
       }
     }
     for (const alb of filteredAlbumsList) {
-      const k = cleanAlbumArtistDisplay(alb.album_artist).toLowerCase();
+      const k = cleanAlbumArtistDisplay(alb.album_artist).trim().toLowerCase();
       if (k) matchingArtistKeys.add(k);
     }
-    return facetsSummary.artists.filter((art) => {
+    return baseList.filter((art) => {
       if (localAlpha !== 'all' && !matchesAlphaBucket(art.name, localAlpha)) return false;
       if (hasRichFilter && !matchingArtistKeys.has(art.name.toLowerCase())) return false;
       return true;
     });
-  }, [hasRichFilter, localAlpha, facetsSummary.artists, filteredTracksList, filteredAlbumsList]);
+  }, [
+    artistGroupingMode,
+    hasRichFilter,
+    localAlpha,
+    facetsSummary.albumArtists,
+    facetsSummary.allTrackArtists,
+    filteredTracksList,
+    filteredAlbumsList,
+    albumArtistById,
+  ]);
 
   // Folder / Mount Drill-Down computation
   const mountsList = snap?.mounts || [];
@@ -941,6 +1080,43 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           data-section-anchor="local_artists_grid"
           style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
         >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {(
+              [
+                {
+                  id: 'album_artists' as const,
+                  label: `Album Artists (${facetsSummary.albumArtists.length})`,
+                },
+                {
+                  id: 'all_track_artists' as const,
+                  label: `All Track Artists (${facetsSummary.allTrackArtists.length})`,
+                },
+              ] as const
+            ).map((mode) => {
+              const active = artistGroupingMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  data-right-filter-pill="true"
+                  onClick={() => setArtistGroupingMode(mode.id)}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    background: active ? '#0b241c' : '#0b0e12',
+                    border: active ? '1px solid #34d399' : '1px solid #1b2a24',
+                    color: active ? '#6ee7b7' : '#9ca3af',
+                    fontSize: 11,
+                    fontWeight: active ? 800 : 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+
           {filteredArtistsList.length > 0 ? (
             <>
               <div style={tileGridStyle}>

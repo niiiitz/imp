@@ -38,6 +38,7 @@ export interface LibrarySourceFilterPillsProps {
   sourceVisibility: SourceVisibilityPrefs;
   snap: SimpStateSnapshot | null;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  scAuthState?: "connected" | "reauth_required" | "public";
   pushCurrentNavState: () => void;
 }
 
@@ -49,6 +50,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
   sourceVisibility,
   snap,
   appleAuthState,
+  scAuthState = 'public',
   pushCurrentNavState,
 }) => {
   const lastPillTapRef = React.useRef<{ id: string; ts: number; wasAll: boolean } | null>(null);
@@ -74,7 +76,7 @@ export const LibrarySourceFilterPills: React.FC<LibrarySourceFilterPillsProps> =
       ? [
           {
             id: 'soundcloud' as const,
-            label: 'SC',
+            label: scAuthState === 'reauth_required' ? 'SC!' : 'SC',
             icon: 'soundcloud' as const,
             accent: 'soundcloud' as const,
           },
@@ -264,6 +266,8 @@ export interface LibraryXmbLeftColumnProps {
   sourceVisibility: SourceVisibilityPrefs;
   snap: SimpStateSnapshot | null;
   appleAuthState: "connected" | "reauth_required" | "never_used";
+  scAuthState?: "connected" | "reauth_required" | "public";
+  onOpenConnectedAccounts?: () => void;
   pushCurrentNavState: () => void;
   localSubTab: LocalSubTab;
   setLocalSubTab: React.Dispatch<React.SetStateAction<LocalSubTab>>;
@@ -340,6 +344,8 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
   sourceVisibility,
   snap,
   appleAuthState,
+  scAuthState = 'public',
+  onOpenConnectedAccounts,
   pushCurrentNavState,
   localSubTab,
   setLocalSubTab,
@@ -542,11 +548,99 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
     return () => window.removeEventListener('simp-left-rail-toggle-collapse', onRailToggle);
   }, [togglePlacesOpen, togglePlaylistsOpen]);
 
-  const savedStationsAndSets = filteredPlaylists.filter(
-    (p) => p.origin === 'soundcloud_remote' || p.origin === 'archive_remote'
+  const impEditablePlaylists = filteredPlaylists.filter((p) => p.origin === 'simp_local');
+  const pinnedApplePlaylists = filteredPlaylists.filter((p) => p.origin === 'apple_remote');
+  const pinnedSoundCloudPlaylists = filteredPlaylists.filter(
+    (p) => p.origin === 'soundcloud_remote'
   );
+  const pinnedArchivePlaylists = filteredPlaylists.filter((p) => p.origin === 'archive_remote');
+  const pinnedLocalPlaylists = filteredPlaylists.filter((p) => p.origin === 'local_pinned');
   const railSmartStations = isSourceIncluded('local') ? localSmartStations : [];
-  const totalStationsAndSets = savedStationsAndSets.length;
+
+  const renderPinnedRailPlaylist = (
+    pl: PlaylistRecord,
+    opts: {
+      activeBg: string;
+      activeBorder: string;
+      accentColor: string;
+      badgeColor: string;
+      icon: React.ReactNode;
+      baseBg?: string;
+      baseBorder?: string;
+    }
+  ) => {
+    const isSelected =
+      rightPaneMode === 'tracks' &&
+      browserTarget?.kind === 'playlist' &&
+      browserTarget.id === pl.id;
+    const cleanTitle = cleanCollectionTitle(pl.name);
+    return (
+      <button
+        key={`rail-pin-${pl.id}`}
+        data-left-active={isSelected ? 'true' : undefined}
+        data-left-playlist-id={pl.id}
+        data-left-playlist-name={cleanTitle}
+        data-left-context-kind="simp_playlist"
+        data-left-context-id={pl.id}
+        data-xmb-preview="true"
+        onContextMenu={(e) => {
+          e.preventDefault();
+          openLeftItemContextMenu('simp_playlist', pl.id);
+        }}
+        onClick={() => {
+          setImpFypActive(false);
+          selectLocalCollection({ kind: 'playlist', id: pl.id });
+        }}
+        style={{
+          minHeight: 30,
+          padding: '0 10px',
+          borderRadius: 7,
+          background: isSelected ? opts.activeBg : opts.baseBg || 'var(--imp-surface-card, #1a1d24)',
+          border: isSelected ? opts.activeBorder : opts.baseBorder || '1px solid #181820',
+          color: isSelected ? opts.accentColor : '#c8c8d2',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 8,
+          textAlign: 'left',
+          cursor: 'pointer',
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 700,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+            flex: 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          {opts.icon}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {cleanTitle}
+          </span>
+        </span>
+        <span
+          style={{
+            fontSize: 10.5,
+            fontFamily: 'monospace',
+            color: opts.badgeColor,
+            flexShrink: 0,
+          }}
+        >
+          {pl.track_count}
+        </span>
+      </button>
+    );
+  };
+
   return (
     <>
       {/* =====================================================================
@@ -601,7 +695,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             {/* Primary Destination: 😈 Imp (Defaults into Imp FYP, expands inline for Imp Library + Albums + Stations) */}
             <button
               data-rail-collapse-key="imp_nav"
-              data-xmb-drill-right="true"
               data-left-active={
                 (browseHubTarget === 'imp_fyp' || browseHubTarget === 'imp_library') &&
                 rightPaneMode === 'browse'
@@ -804,7 +897,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}
                   >
                     <button
-                      data-xmb-drill-right="true"
                       data-rail-collapse-key="imp_albums"
                       onClick={toggleAlbumsSecOpen}
                       style={{
@@ -947,123 +1039,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                   </div>
                 )}
 
-                {/* 4. IMP STATIONS & SETS (Nested under Imp) */}
-                {totalStationsAndSets > 0 && (
-                  <div
-                    data-rail-collapse-key="imp_stations"
-                    style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}
-                  >
-                    <button
-                      data-xmb-drill-right="true"
-                      data-rail-collapse-key="imp_stations"
-                      onClick={toggleStationsSecOpen}
-                      style={{
-                        background: 'var(--imp-surface-card, #1a1d24)',
-                        border: '1px solid #1e1e28',
-                        borderRadius: 8,
-                        padding: '5px 10px',
-                        color: '#c8c8d4',
-                        fontSize: 10.5,
-                        fontFamily: 'monospace',
-                        fontWeight: 800,
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <span>
-                        {stationsSecOpen ? '▾' : '▸'} Imp Stations &amp; Sets ({totalStationsAndSets})
-                      </span>
-                    </button>
-
-                    {stationsSecOpen && (
-                      <>
-                        {savedStationsAndSets.map((pl) => {
-                          const isSelected =
-                            rightPaneMode === 'tracks' &&
-                            browserTarget?.kind === 'playlist' &&
-                            browserTarget.id === pl.id;
-                          return (
-                            <button
-                              key={`station-set-${pl.id}`}
-                              data-left-active={isSelected ? 'true' : undefined}
-                              data-left-context-kind="simp_playlist"
-                              data-left-context-id={pl.id}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                openLeftItemContextMenu('simp_playlist', pl.id);
-                              }}
-                              onClick={() => {
-                                setImpFypActive(false);
-                                selectLocalCollection({ kind: 'playlist', id: pl.id });
-                              }}
-                              style={{
-                                minHeight: 32,
-                                padding: '0 10px',
-                                borderRadius: 8,
-                                background: isSelected ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
-                                border: isSelected
-                                  ? '1px solid var(--imp-focus-ring, #e8b86d)'
-                                  : '1px solid #181820',
-                                color: '#d4d4dc',
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                gap: 8,
-                                textAlign: 'left',
-                                cursor: 'pointer',
-                                width: '100%',
-                                boxSizing: 'border-box',
-                              }}
-                            >
-                              <span
-                                style={{
-                                  fontSize: 11.5,
-                                  fontWeight: 700,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  minWidth: 0,
-                                  flex: 1,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: 6,
-                                }}
-                              >
-                                {pl.origin === 'soundcloud_remote' ? (
-                                  <ImpIcon name="soundcloud" size={11} color="#fdba74" />
-                                ) : (
-                                  <ImpIcon name="archive" size={12} color="#facc15" />
-                                )}
-                                <span
-                                  style={{
-                                    overflow: 'hidden',
-                                    textOverflow: 'ellipsis',
-                                    whiteSpace: 'nowrap',
-                                  }}
-                                >
-                                  {cleanCollectionTitle(pl.name)}
-                                </span>
-                              </span>
-                              <span
-                                style={{
-                                  fontSize: 10.5,
-                                  fontFamily: 'monospace',
-                                  color: '#94a3b8',
-                                  flexShrink: 0,
-                                }}
-                              >
-                                {pl.track_count}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
             )}
 
@@ -1079,7 +1054,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     rightPaneMode === 'browse';
                   return (
                     <button
-                      data-xmb-drill-right="true"
                       data-rail-collapse-key="local_nav"
                       data-left-active={isLocalHubActive ? 'true' : undefined}
                       onClick={() => {
@@ -1214,7 +1188,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}
                       >
                         <button
-                          data-xmb-drill-right="true"
                           data-rail-collapse-key="local_stations"
                           onClick={toggleLocalStationsSecOpen}
                           style={{
@@ -1665,6 +1638,36 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                       })
                     )}
 
+                    {/* Pinned Local Folders / Playlists */}
+                    {pinnedLocalPlaylists.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 }}>
+                        <div
+                          style={{
+                            padding: '2px 4px',
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            color: '#6ee7b7',
+                            opacity: 0.85,
+                          }}
+                        >
+                          PINNED LOCAL ({pinnedLocalPlaylists.length})
+                        </div>
+                        {pinnedLocalPlaylists.map((pl) =>
+                          renderPinnedRailPlaylist(pl, {
+                            activeBg: '#0b241c',
+                            activeBorder: '1px solid #34d399',
+                            accentColor: '#a7f3d0',
+                            badgeColor: '#6ee7b7',
+                            baseBg: '#08120e',
+                            baseBorder: '1px solid #143328',
+                            icon: <ImpIcon name="local" size={11} color="#34d399" />,
+                          })
+                        )}
+                      </div>
+                    )}
+
                     {/* Optical Disc Drive (cdda:// or dvd://) inside Local */}
                     {sourceVisibility.optical_drive && (
                       <div
@@ -1806,7 +1809,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
               >
                 <button
-                  data-xmb-drill-right="true"
                   data-rail-collapse-key="apple_nav"
                   data-left-active={browseHubTarget === 'apple_discover' ? 'true' : undefined}
                   onClick={() => {
@@ -1935,6 +1937,32 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         </button>
                       );
                     })}
+                    {pinnedApplePlaylists.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 3 }}>
+                        <div
+                          style={{
+                            padding: '2px 4px',
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            color: '#fda4af',
+                            opacity: 0.85,
+                          }}
+                        >
+                          PINNED ({pinnedApplePlaylists.length})
+                        </div>
+                        {pinnedApplePlaylists.map((pl) =>
+                          renderPinnedRailPlaylist(pl, {
+                            activeBg: '#28111b',
+                            activeBorder: '1px solid #fa243c',
+                            accentColor: '#fecdd3',
+                            badgeColor: '#fda4af',
+                            icon: <AppleMusicLogo size={11} />,
+                          })
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1947,7 +1975,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
               >
                 <button
-                  data-xmb-drill-right="true"
                   data-rail-collapse-key="sc_nav"
                   data-left-active={browseHubTarget === 'soundcloud_discover' ? 'true' : undefined}
                   onClick={() => {
@@ -2069,6 +2096,32 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         </button>
                       );
                     })}
+                    {pinnedSoundCloudPlaylists.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 3 }}>
+                        <div
+                          style={{
+                            padding: '2px 4px',
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            color: '#fdba74',
+                            opacity: 0.85,
+                          }}
+                        >
+                          PINNED ({pinnedSoundCloudPlaylists.length})
+                        </div>
+                        {pinnedSoundCloudPlaylists.map((pl) =>
+                          renderPinnedRailPlaylist(pl, {
+                            activeBg: '#281409',
+                            activeBorder: '1px solid #ea580c',
+                            accentColor: '#fdba74',
+                            badgeColor: '#fdba74',
+                            icon: <ImpIcon name="soundcloud" size={11} color="#fdba74" />,
+                          })
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2081,7 +2134,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                 style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
               >
                 <button
-                  data-xmb-drill-right="true"
                   data-rail-collapse-key="ia_nav"
                   data-left-active={browseHubTarget === 'ia_discover' ? 'true' : undefined}
                   onClick={() => {
@@ -2197,6 +2249,32 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                         </button>
                       );
                     })}
+                    {pinnedArchivePlaylists.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 3 }}>
+                        <div
+                          style={{
+                            padding: '2px 4px',
+                            fontSize: 9.5,
+                            fontFamily: 'monospace',
+                            fontWeight: 800,
+                            letterSpacing: '0.06em',
+                            color: '#fde68a',
+                            opacity: 0.85,
+                          }}
+                        >
+                          PINNED ({pinnedArchivePlaylists.length})
+                        </div>
+                        {pinnedArchivePlaylists.map((pl) =>
+                          renderPinnedRailPlaylist(pl, {
+                            activeBg: '#261a0b',
+                            activeBorder: '1px solid #f59e0b',
+                            accentColor: '#fde68a',
+                            badgeColor: '#fde68a',
+                            icon: <ImpIcon name="archive" size={11} color="#facc15" />,
+                          })
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2223,7 +2301,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               ⚠️ Apple Music session signed out
             </span>
             <button
-              onClick={() => setSourceModalOpen(true)}
+              onClick={() =>
+                onOpenConnectedAccounts ? onOpenConnectedAccounts() : setSourceModalOpen(true)
+              }
               style={{
                 padding: '4px 8px',
                 borderRadius: 6,
@@ -2240,6 +2320,46 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
             </button>
           </div>
         )}
+
+        {/* SoundCloud Re-Auth Prompt Pill */}
+        {scAuthState === 'reauth_required' &&
+          sourceVisibility.soundcloud &&
+          browserSourceFilter !== 'local' && (
+            <div
+              style={{
+                padding: '8px 10px',
+                borderRadius: 10,
+                background: '#1f1410',
+                border: '1px solid #9a3412',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <span style={{ fontSize: 11, color: '#fdba74', fontWeight: 700 }}>
+                ⚠️ SoundCloud session expired
+              </span>
+              <button
+                onClick={() =>
+                  onOpenConnectedAccounts ? onOpenConnectedAccounts() : setSourceModalOpen(true)
+                }
+                style={{
+                  padding: '4px 8px',
+                  borderRadius: 6,
+                  background: '#2a1409',
+                  border: '1px solid #ea580c',
+                  color: '#fed7aa',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                Reconnect
+              </button>
+            </div>
+          )}
 
         {/* =================================================================
             COLLAPSIBLE BUCKET 1: ▾ SIMP PLAYLISTS (HYBRID & PINNED) + Embedded [+]
@@ -2258,7 +2378,6 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
           }}
         >
           <button
-            data-xmb-drill-right="true"
             data-rail-collapse-key="imp_playlists"
             onClick={togglePlaylistsOpen}
             style={{
@@ -2275,10 +2394,9 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
               cursor: 'pointer',
             }}
           >
-            {playlistsOpen ? '▾' : '▸'} Imp Playlists ({filteredPlaylists.length})
+            {playlistsOpen ? '▾' : '▸'} Imp Playlists ({impEditablePlaylists.length})
           </button>
           <button
-            data-xmb-drill-action="true"
             onClick={(e) => {
               e.stopPropagation();
               if (!playlistsOpen) {
@@ -2366,7 +2484,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
         )}
 
         {playlistsOpen &&
-          filteredPlaylists.map((pl) => {
+          impEditablePlaylists.map((pl) => {
             const isSelected =
               rightPaneMode === 'tracks' &&
               browserTarget?.kind === 'playlist' &&

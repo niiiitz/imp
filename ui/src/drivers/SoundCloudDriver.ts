@@ -4,6 +4,12 @@ import {
   SoundCloudComment,
   TrackMetadata,
 } from '@imp/client';
+import {
+  emitAuthExpired,
+  emitAuthRestored,
+  isAuthExpiredErrorMessage,
+  resolveDaemonUrl,
+} from '../api/servicesCacheApi';
 
 export type { SoundCloudComment };
 
@@ -134,19 +140,7 @@ export const SOUNDCLOUD_GENRE_PILLS: Array<{ id: string; label: string; icon: st
 ];
 
 function resolveDaemonHttpBase(): string {
-  if (typeof window !== 'undefined' && window.location?.hostname) {
-    const host = window.location.hostname;
-    if (
-      window.location.protocol === 'http:' &&
-      host !== 'steamloopback.host' &&
-      host !== '127.0.0.1' &&
-      host !== 'localhost'
-    ) {
-      const port = window.location.port === '1420' ? '18888' : window.location.port || '18888';
-      return `http://${host}:${port}`;
-    }
-  }
-  return 'http://127.0.0.1:18888';
+  return resolveDaemonUrl('');
 }
 
 async function fetchSoundCloudDaemonJson<T>(
@@ -157,7 +151,11 @@ async function fetchSoundCloudDaemonJson<T>(
   const r = await fetch(`${base}${endpoint}`, options);
   const j = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
   if (!r.ok || !j.ok) {
-    throw new Error(j.error || `SoundCloud daemon request failed (${endpoint})`);
+    const errMsg = j.error || `SoundCloud daemon request failed (${endpoint})`;
+    if (r.status === 401 || r.status === 403 || isAuthExpiredErrorMessage(errMsg)) {
+      emitAuthExpired('soundcloud', errMsg);
+    }
+    throw new Error(errMsg);
   }
   if (typeof window !== 'undefined' && typeof j.synced_pinned === 'number' && j.synced_pinned > 0) {
     window.dispatchEvent(
@@ -246,6 +244,7 @@ export async function authorizeSoundCloudOAuth(
     try {
       const cfg = await defaultSimpClient.getSoundCloudAuthConfig();
       if (isGenuineUserSession(cfg)) {
+        emitAuthRestored('soundcloud');
         onToast?.(
           `☁️ SoundCloud connected${cfg.username ? ` as @${cfg.username}` : ''}!`
         );
@@ -261,6 +260,7 @@ export async function authorizeSoundCloudOAuth(
 
   const finalCfg = await defaultSimpClient.getSoundCloudAuthConfig().catch(() => null);
   if (isGenuineUserSession(finalCfg)) {
+    emitAuthRestored('soundcloud');
     onToast?.(
       `☁️ SoundCloud connected${finalCfg?.username ? ` as @${finalCfg.username}` : ''}!`
     );
@@ -321,6 +321,7 @@ export async function submitSoundCloudCallbackCodeOrUrl(
   if (!r.ok || !j.ok) {
     throw new Error(j.error || 'SoundCloud code exchange failed');
   }
+  emitAuthRestored('soundcloud');
   onToast?.(`☁️ SoundCloud connected${j.username ? ` as @${j.username}` : ''}!`);
   return true;
 }

@@ -39,10 +39,15 @@ fi
 
 run_user_systemctl() {
   if [[ "${EUID:-$(id -u)}" -eq 0 && "${REAL_USER}" != "root" ]]; then
-    sudo -u "${REAL_USER}" \
-      XDG_RUNTIME_DIR="/run/user/${REAL_UID}" \
-      DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" \
-      systemctl --user "$@"
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "${REAL_USER}" -- env \
+        XDG_RUNTIME_DIR="/run/user/${REAL_UID}" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${REAL_UID}/bus" \
+        systemctl --user "$@"
+    else
+      su -s /bin/sh "${REAL_USER}" -c 'XDG_RUNTIME_DIR="$1" DBUS_SESSION_BUS_ADDRESS="$2" shift 2; exec systemctl --user "$@"' sh \
+        "/run/user/${REAL_UID}" "unix:path=/run/user/${REAL_UID}/bus" "$@"
+    fi
   else
     systemctl --user "$@"
   fi
@@ -360,6 +365,9 @@ if [[ -d "${DECKY_SRC}" ]]; then
   if [[ -f "${DECKY_SRC}/dist/index.js" ]]; then
     cp "${DECKY_SRC}/dist/"* "${INSTALL_ROOT}/decky-staged/dist/" 2>/dev/null || true
   fi
+  chmod 0755 "${INSTALL_ROOT}/decky-staged" "${INSTALL_ROOT}/decky-staged/dist" 2>/dev/null || true
+  chmod 0644 "${INSTALL_ROOT}/decky-staged/"* "${INSTALL_ROOT}/decky-staged/dist/"* 2>/dev/null || true
+  chmod 0755 "${INSTALL_ROOT}/decky-staged/main.py" 2>/dev/null || true
   if [[ "${EUID:-$(id -u)}" -eq 0 && "${REAL_USER}" != "root" ]]; then
     chown -R "${REAL_UID}:${REAL_GID}" "${INSTALL_ROOT}/decky-staged" >/dev/null 2>&1 || true
   fi
@@ -368,16 +376,7 @@ fi
 INSTALL_DECKY_FLAG="${IMP_INSTALL_DECKY:-${SIMP_INSTALL_DECKY:-${DEFAULT_INSTALL_DECKY}}}"
 if [[ "${INSTALL_DECKY_FLAG}" == "1" && -d "${DECKY_PLUGINS_DIR}" && -d "${DECKY_SRC}" ]]; then
   DECKY_TARGET="${DECKY_PLUGINS_DIR}/imp-decky"
-  if [[ "${EUID:-$(id -u)}" -eq 0 ]] || { [[ ! -w "${DECKY_PLUGINS_DIR}" ]] && [[ ! -w "${DECKY_TARGET}" ]]; }; then
-    echo "ℹ Granting ${REAL_USER} ownership on ${DECKY_PLUGINS_DIR} & ${DECKY_TARGET} so future 1-click updates and restores require zero sudo..."
-    sudo mkdir -p "${DECKY_TARGET}" >/dev/null 2>&1 || mkdir -p "${DECKY_TARGET}" >/dev/null 2>&1 || true
-    sudo rm -rf "${DECKY_TARGET}/imp-decky" "${DECKY_TARGET}/simp-decky" "${DECKY_TARGET}/bin" "${DECKY_TARGET}/ui" >/dev/null 2>&1 || rm -rf "${DECKY_TARGET}/imp-decky" "${DECKY_TARGET}/simp-decky" "${DECKY_TARGET}/bin" "${DECKY_TARGET}/ui" >/dev/null 2>&1 || true
-    sudo chown "${REAL_UID}:${REAL_GID}" "${DECKY_PLUGINS_DIR}" >/dev/null 2>&1 || chown "${REAL_UID}:${REAL_GID}" "${DECKY_PLUGINS_DIR}" >/dev/null 2>&1 || true
-    sudo chmod 0755 "${DECKY_PLUGINS_DIR}" >/dev/null 2>&1 || chmod 0755 "${DECKY_PLUGINS_DIR}" >/dev/null 2>&1 || true
-    sudo chown -R "${REAL_UID}:${REAL_GID}" "${DECKY_TARGET}" >/dev/null 2>&1 || chown -R "${REAL_UID}:${REAL_GID}" "${DECKY_TARGET}" >/dev/null 2>&1 || true
-  fi
-
-  if [[ -w "${DECKY_PLUGINS_DIR}" ]] || [[ -w "${DECKY_TARGET}" ]]; then
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]] || [[ -w "${DECKY_PLUGINS_DIR}" ]] || [[ -w "${DECKY_TARGET}" ]]; then
     rm -rf "${DECKY_TARGET}/imp-decky" "${DECKY_TARGET}/simp-decky" "${DECKY_TARGET}/bin" "${DECKY_TARGET}/ui"
     mkdir -p "${DECKY_TARGET}/dist"
     cp "${DECKY_SRC}/plugin.json" "${DECKY_TARGET}/"
@@ -386,22 +385,27 @@ if [[ "${INSTALL_DECKY_FLAG}" == "1" && -d "${DECKY_PLUGINS_DIR}" && -d "${DECKY
     if [[ -f "${DECKY_SRC}/dist/index.js" ]]; then
       cp "${DECKY_SRC}/dist/"* "${DECKY_TARGET}/dist/"
     fi
+    chmod 0755 "${DECKY_TARGET}" "${DECKY_TARGET}/dist" 2>/dev/null || true
+    chmod 0644 "${DECKY_TARGET}/"* "${DECKY_TARGET}/dist/"* 2>/dev/null || true
+    chmod 0755 "${DECKY_TARGET}/main.py" 2>/dev/null || true
     if [[ "${EUID:-$(id -u)}" -eq 0 && "${REAL_USER}" != "root" ]]; then
       chown -R "${REAL_UID}:${REAL_GID}" "${DECKY_TARGET}" >/dev/null 2>&1 || true
     fi
-    sudo -n systemctl restart plugin_loader >/dev/null 2>&1 || true
     echo "✓ Installed Decky QAM:  ${DECKY_TARGET}"
+  elif [[ -d "${DECKY_TARGET}" ]]; then
+    echo "✓ Staged Decky QAM:     ${INSTALL_ROOT}/decky-staged (Decky Loader will auto-sync on next check)"
   else
-    echo "ℹ Decky directory (${DECKY_PLUGINS_DIR}) requires permissions; run:"
-    echo "   sudo rm -rf \"${DECKY_TARGET}\" && sudo cp -r \"${DECKY_SRC}\" \"${DECKY_TARGET}\" && sudo chown -R \$(id -u):\$(id -g) \"${DECKY_TARGET}\" && sudo systemctl restart plugin_loader"
+    echo "ℹ Decky directory (${DECKY_PLUGINS_DIR}) is not user-writable without elevated privileges."
+    echo "   For first-time Decky QAM install without sudo, install imp-decky.zip via Decky Loader's 'Install Plugin from ZIP' menu."
+    echo "   Future updates will auto-sync cleanly from ${INSTALL_ROOT}/decky-staged/."
   fi
 fi
 
 echo "============================================================"
-echo "✅ IMP Installed!"
+echo "✅ Imp Installed!"
 echo "   • Console UI:   http://127.0.0.1:18888"
-echo "   • Launch App:   imp (or 'IMP' in Application Launcher / Add to Steam)"
-echo "   • Self-Update:  imp update (or click '🔄 Update IMP' inside the IMP Power/Settings menu)"
+echo "   • Launch App:   imp (or 'Imp' in Application Launcher / Add to Steam)"
+echo "   • Self-Update:  imp update (or click '🔄 Update Imp' inside the Imp Power/Settings menu)"
 echo "   • Uninstall:    ~/.local/share/imp/bin/uninstall-steamos.sh (or packaging/scripts/uninstall-steamos.sh)"
 echo "============================================================"
 

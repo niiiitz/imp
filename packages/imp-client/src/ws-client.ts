@@ -33,15 +33,15 @@ function resolveDefaultWsUrl(): string {
     const host = window.location.hostname;
     // In SteamOS Gaming Mode (`SharedJSContext`), `window.location` is `https://steamloopback.host`.
     // Always connect directly to the local daemon on `ws://127.0.0.1:18888/ws` unless accessed over
-    // plain HTTP from a LAN companion device (e.g. `http://192.168.x.x:18888/pair`).
-    if (
-      window.location.protocol === 'http:' &&
-      host !== 'steamloopback.host' &&
-      host !== '127.0.0.1' &&
-      host !== 'localhost'
-    ) {
+    // plain HTTP (LAN host like `http://device.local:18888` or SSH tunnel like `http://127.0.0.1:18889`).
+    if (window.location.protocol === 'http:' && host !== 'steamloopback.host') {
       const port = window.location.port === '1420' ? '18888' : window.location.port || '18888';
-      return `ws://${host}:${port}/ws`;
+      if (host !== '127.0.0.1' && host !== 'localhost') {
+        return `ws://${host}:${port}/ws`;
+      }
+      if (port !== '18888' && window.location.port !== '1420') {
+        return `ws://${host}:${port}/ws`;
+      }
     }
   }
   return 'ws://127.0.0.1:18888/ws';

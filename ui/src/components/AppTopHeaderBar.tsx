@@ -24,6 +24,7 @@ export interface AppTopHeaderBarProps {
   sourceModalOpen: boolean;
   powerModalOpen: boolean;
   desktopMode?: boolean;
+  expiredAuthProviders?: Array<'apple' | 'soundcloud'>;
 }
 
 export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
@@ -46,6 +47,7 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
   sourceModalOpen,
   powerModalOpen,
   desktopMode = false,
+  expiredAuthProviders = [],
 }) => {
   const { scale: uiScale } = useUiScale();
 
@@ -534,8 +536,15 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
               setPowerModalOpen(false);
               setSourceModalOpen((v) => !v);
             }}
-            title="Settings Menu (START)"
+            title={
+              expiredAuthProviders.length > 0
+                ? `Settings Menu (START) — Re-sign in required (${expiredAuthProviders
+                    .map((p) => (p === 'apple' ? 'Apple Music' : 'SoundCloud'))
+                    .join(', ')})`
+                : 'Settings Menu (START)'
+            }
             style={{
+              position: 'relative',
               height: 38,
               padding: '0 10px',
               borderRadius: 8,
@@ -546,6 +555,8 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
               border:
                 sourceModalOpen || powerModalOpen
                   ? '1px solid var(--imp-focus-ring, #e8b86d)'
+                  : expiredAuthProviders.length > 0
+                  ? '1px solid rgba(239, 68, 68, 0.65)'
                   : '1px solid var(--imp-border-subtle, rgba(255, 255, 255, 0.08))',
               color:
                 sourceModalOpen || powerModalOpen
@@ -574,6 +585,32 @@ export const AppTopHeaderBar: React.FC<AppTopHeaderBarProps> = ({
               START
             </span>
             <span style={{ lineHeight: 1 }}>☰</span>
+            {expiredAuthProviders.length > 0 && (
+              <span
+                aria-label="Account sign-in attention"
+                style={{
+                  position: 'absolute',
+                  top: -5,
+                  right: -5,
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: '#ef4444',
+                  border: '1.5px solid #0b0d14',
+                  color: '#ffffff',
+                  fontSize: 10.5,
+                  fontWeight: 900,
+                  lineHeight: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 2px 6px rgba(239, 68, 68, 0.6)',
+                  pointerEvents: 'none',
+                }}
+              >
+                !
+              </span>
+            )}
           </button>
         </div>
       </header>
