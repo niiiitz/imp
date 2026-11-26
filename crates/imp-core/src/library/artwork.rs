@@ -1,9 +1,105 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lofty::file::{TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, PictureType};
 use lofty::probe::Probe;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushArtworkItem {
+    #[serde(default)]
+    pub album_id: Option<String>,
+    #[serde(default)]
+    pub track_uris: Vec<String>,
+    pub image_base64: String,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportedArtworkResult {
+    pub http_art_url: String,
+    pub cache_file_path: String,
+    pub updated_tracks: Vec<(String, Option<String>)>,
+}
+
+/// Decodes and writes Librarian-supplied cover artwork into Imp's art cache (`simp_art_lib_{hash}.{ext}`)
+/// and updates `tracks.art_url`, `track_properties.has_art`, `albums.art_cache_path`, and `musicbrainz_album_art_cache`.
+pub fn import_cached_artwork(
+    db: &crate::library::db::LibraryDatabase,
+    item: &PushArtworkItem,
+) -> anyhow::Result<ImportedArtworkResult> {
+    let raw_b64 = item.image_base64.trim();
+    let clean_b64 = match raw_b64.split_once(";base64,") {
+        Some((_, rhs)) => rhs.trim(),
+        None => raw_b64,
+    };
+    let compact: String = clean_b64.chars().filter(|c| !c.is_whitespace()).collect();
+    let bytes = BASE64_STANDARD
+        .decode(compact.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Invalid base64 artwork payload: {e}"))?;
+    if bytes.len() <= 256 {
+        anyhow::bail!(
+            "Artwork payload too small ({} bytes; expected > 256 bytes)",
+            bytes.len()
+        );
+    }
+
+    let ext = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "png"
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "webp"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "jpg"
+    } else {
+        match item
+            .mime_type
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "image/png" => "png",
+            "image/webp" => "webp",
+            _ => "jpg",
+        }
+    };
+
+    let extracted = write_art_bytes(&bytes, ext, "lib")
+        .ok_or_else(|| anyhow::anyhow!("Failed to persist artwork bytes"))?;
+
+    let mut updated_tracks = Vec::new();
+    for raw_uri in &item.track_uris {
+        let uri = raw_uri.trim();
+        if uri.is_empty() {
+            continue;
+        }
+        db.set_track_art_url(uri, Some(&extracted.http_art_url))?;
+        let album_title = db.get_track_album_title(uri);
+        updated_tracks.push((uri.to_string(), album_title));
+    }
+
+    if let Some(album_id) = item
+        .album_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        db.set_album_art_cache_path(album_id, &extracted.http_art_url)?;
+        db.set_musicbrainz_art_cache(album_id, "found", Some(&extracted.http_art_url))?;
+    }
+
+    Ok(ImportedArtworkResult {
+        http_art_url: extracted.http_art_url,
+        cache_file_path: extracted.cache_file_path,
+        updated_tracks,
+    })
+}
 
 /// Artwork Fallback Cascade:
 /// 1. Embedded ID3v2 APIC / Vorbis PICTURE (`lofty`) -> `simp_art_emb_{hash}.{ext}`
@@ -522,5 +618,94 @@ mod tests {
             normalize_title_for_match(extract_primary_artist("Nova & Guest Vocalist"));
         let norm_mb = normalize_title_for_match("NOVAPOP");
         assert!(norm_mb.contains(&norm_primary));
+    }
+
+    #[test]
+    fn test_import_cached_artwork_writes_cache_and_updates_db() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("imp_art_push_test_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = crate::library::db::LibraryDatabase::open(&root.join("library.db")).unwrap();
+
+        let album_id = format!("local_alb_{nanos}");
+        let track_uri = format!("file:///Volumes/Music/SampleArtist/{nanos}.flac");
+        db.upsert_album(
+            &album_id,
+            "Sample Album",
+            "Sample Artist",
+            Some(2025),
+            None,
+            None,
+        )
+        .unwrap();
+        let tr = imp_protocol::TrackMetadata {
+            uri: track_uri.clone(),
+            title: "Sample Track".to_string(),
+            artists: vec!["Sample Artist".to_string()],
+            album: "Sample Album".to_string(),
+            album_id: Some(album_id.clone()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            art_url: None,
+            duration_ms: 180_000,
+            source: "local".to_string(),
+            mount_root: None,
+            content_rating: None,
+            ..Default::default()
+        };
+        db.upsert_indexed_batch(&[crate::library::db::IndexedTrackBatchItem {
+            album_id: album_id.clone(),
+            album_title: "Sample Album".to_string(),
+            album_artist: "Sample Artist".to_string(),
+            steam_app_id: None,
+            release_year: Some(2025),
+            art_cache_path: None,
+            genre: None,
+            parent_folder: None,
+            track: tr,
+            file_mtime: Some(1),
+            file_size: Some(100),
+            has_art: false,
+            has_local_lrc: false,
+        }])
+        .unwrap();
+
+        // Build > 256 byte unique PNG-headed payload
+        let mut fake_png = vec![0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1A, b'\n'];
+        fake_png.extend_from_slice(&nanos.to_le_bytes());
+        fake_png.resize(300, 0x42);
+
+        let b64 = BASE64_STANDARD.encode(&fake_png);
+        let res = import_cached_artwork(
+            &db,
+            &PushArtworkItem {
+                album_id: Some(album_id.clone()),
+                track_uris: vec![track_uri.clone()],
+                image_base64: b64,
+                mime_type: Some("image/png".to_string()),
+                source: Some("coverartarchive".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert!(res.http_art_url.starts_with("http://127.0.0.1:18888/art/simp_art_lib_"));
+        assert!(res.http_art_url.ends_with(".png"));
+        assert!(Path::new(&res.cache_file_path).is_file());
+        assert_eq!(res.updated_tracks.len(), 1);
+        assert!(db.get_track_properties(&track_uri).unwrap().has_art);
+        assert_eq!(
+            db.get_musicbrainz_art_cache(&album_id)
+                .map(|(st, url, _)| (st, url)),
+            Some(("found".to_string(), Some(res.http_art_url.clone())))
+        );
+
+        let _ = std::fs::remove_file(&res.cache_file_path);
+        if let Some(fname) = Path::new(&res.cache_file_path).file_name() {
+            let _ = std::fs::remove_file(std::env::temp_dir().join(fname));
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

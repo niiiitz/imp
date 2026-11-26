@@ -925,6 +925,73 @@ pub fn schedule_factoid_bubbles(
     out
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushFactoidsItem {
+    pub track_uri: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub bubbles: Vec<FactoidBubble>,
+}
+
+/// Imports pre-fetched factoid bubbles from Imp Librarian into `lyrics.db` (`factoid_entries`).
+pub fn import_cached_factoids(item: &PushFactoidsItem) -> anyhow::Result<TrackFactoidsResponse> {
+    let (cleaned_title_str, cleaned_artist_str) =
+        crate::lyrics::clean_metadata_for_lyrics(&item.title, &item.artist);
+    let clean_title = if cleaned_title_str.is_empty() {
+        item.title.trim()
+    } else {
+        cleaned_title_str.as_str()
+    };
+    let clean_artist = if cleaned_artist_str.is_empty() {
+        item.artist.trim()
+    } else {
+        cleaned_artist_str.as_str()
+    };
+    let clean_album = item
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("unknown album"));
+
+    let key = normalize_key(clean_title, clean_artist, clean_album);
+    let mut provider = item
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("wikipedia_v2+librarian")
+        .to_string();
+    if !provider.contains("librarian") {
+        provider.push_str("+librarian");
+    }
+
+    let resp = TrackFactoidsResponse {
+        found: !item.bubbles.is_empty(),
+        provider,
+        bubbles: item.bubbles.clone(),
+    };
+    let uri_opt = {
+        let u = item.track_uri.trim();
+        (!u.is_empty()).then_some(u)
+    };
+    save_factoids_to_db(
+        &key,
+        uri_opt,
+        clean_title,
+        clean_artist,
+        clean_album,
+        &resp,
+    );
+    Ok(resp)
+}
+
 pub fn fetch_track_factoids(
     track_uri: Option<&str>,
     title: &str,
@@ -948,6 +1015,36 @@ pub fn fetch_track_factoids(
     let key = normalize_key(clean_title, clean_artist, clean_album);
 
     if let Some(mut cached) = load_factoids_from_db(&key, track_uri) {
+        if cached.provider.contains("librarian") {
+            let unseen: Vec<FactoidBubble> = cached
+                .bubbles
+                .iter()
+                .filter(|b| !was_factoid_shown_in_session(&b.body))
+                .cloned()
+                .collect();
+            let chosen = if !unseen.is_empty() {
+                unseen
+            } else {
+                cached.bubbles.clone()
+            };
+            if !chosen.is_empty() {
+                for b in &chosen {
+                    mark_factoid_shown_in_session(&b.body);
+                }
+                let needs_schedule = chosen.iter().all(|b| b.duration_sec == 0);
+                cached.bubbles = if needs_schedule {
+                    let raw = chosen
+                        .into_iter()
+                        .map(|b| (b.category, b.headline, b.body, b.source))
+                        .collect();
+                    schedule_factoid_bubbles(raw, duration_ms)
+                } else {
+                    chosen
+                };
+                cached.found = !cached.bubbles.is_empty();
+                return cached;
+            }
+        }
         // Automatically upgrade legacy v1 summary-only cache rows to the v2 deep-section engine
         let is_v2_cache = cached.provider.contains("v2");
         if is_v2_cache {
@@ -1254,5 +1351,50 @@ Critics later credited the group with pioneering DIY hardware live-coding perfor
         assert_eq!(extracted[1].0, "ARTIST CRAFT");
         assert!(extracted[1].2.contains("abandoned concrete warehouse"));
         assert_eq!(extracted[2].0, "BAND LORE");
+    }
+
+    #[test]
+    fn test_import_cached_factoids_persists_and_returns_bubbles() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let uri = format!("file:///Volumes/Music/SampleArtist/SampleAlbum/{nanos}_fact.flac");
+        let item = PushFactoidsItem {
+            track_uri: uri.clone(),
+            title: format!("Sample Fact Track {nanos}"),
+            artist: "Sample Artist".to_string(),
+            album: Some("Sample Album".to_string()),
+            provider: Some("wikipedia_v2+librarian".to_string()),
+            bubbles: vec![FactoidBubble {
+                category: "recording".to_string(),
+                headline: "Studio Session".to_string(),
+                body: format!(
+                    "Unique librarian factoid {nanos} recorded in a single take on analog tape."
+                ),
+                source: "Wikipedia".to_string(),
+                start_sec: 24,
+                duration_sec: 12,
+                part_index: Some(1),
+                part_total: Some(1),
+            }],
+        };
+
+        let imported = import_cached_factoids(&item).unwrap();
+        assert!(imported.found);
+        assert_eq!(imported.bubbles.len(), 1);
+
+        let fetched = fetch_track_factoids(
+            Some(&uri),
+            &format!("Sample Fact Track {nanos}"),
+            "Sample Artist",
+            Some("Sample Album"),
+            200_000,
+        );
+        assert!(fetched.found);
+        assert!(fetched.provider.contains("librarian"));
+        assert_eq!(fetched.bubbles.len(), 1);
+        assert_eq!(fetched.bubbles[0].headline, "Studio Session");
+        assert_eq!(fetched.bubbles[0].start_sec, 24);
     }
 }

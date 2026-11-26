@@ -947,6 +947,126 @@ pub fn list_cached_lyrics_summaries() -> Vec<CachedLyricsSummary> {
     .unwrap_or_default()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushLyricsItem {
+    pub track_uri: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub duration_ms: u32,
+    #[serde(default)]
+    pub synced_lines: Vec<SyncedLyricLine>,
+    #[serde(default)]
+    pub plain_lyrics: Option<String>,
+    #[serde(default)]
+    pub instrumental: bool,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub lrclib_id: Option<u64>,
+}
+
+/// Imports pre-fetched lyrics from Imp Librarian into `lyrics.db` and refreshes `LYRICS_MEM_CACHE`,
+/// evicting any stale cached negative/miss entries for the same `track_uri`.
+pub fn import_cached_lyrics(item: &PushLyricsItem) -> Result<TrackLyricsResponse> {
+    let uri_trimmed = item.track_uri.trim();
+    let (mut clean_title, mut clean_artist) = clean_metadata_for_lyrics(&item.title, &item.artist);
+    if clean_title.is_empty() {
+        clean_title = item.title.trim().to_string();
+    }
+    if clean_artist.is_empty() {
+        clean_artist = item.artist.trim().to_string();
+    }
+    let clean_album = item
+        .album
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty() && !a.eq_ignore_ascii_case("unknown album"));
+
+    let dur_sec = item.duration_ms / 1000;
+    let cache_key = format!(
+        "{}|{}|{}|{}",
+        uri_trimmed,
+        clean_artist.to_lowercase(),
+        clean_title.to_lowercase(),
+        dur_sec
+    );
+
+    let has_plain = item
+        .plain_lyrics
+        .as_deref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let found = item.instrumental || has_plain || !item.synced_lines.is_empty();
+    let provider = item
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("lrclib_v2")
+        .to_string();
+
+    let mut synced_lines = item.synced_lines.clone();
+    synced_lines.sort_by_key(|l| l.timestamp_ms);
+
+    let resp = TrackLyricsResponse {
+        found,
+        instrumental: item.instrumental,
+        source: provider,
+        track_name: (!clean_title.is_empty()).then(|| clean_title.clone()),
+        artist_name: (!clean_artist.is_empty()).then(|| clean_artist.clone()),
+        album_name: clean_album.map(|a| a.to_string()),
+        synced_lines,
+        plain_lyrics: item.plain_lyrics.clone().filter(|s| !s.trim().is_empty()),
+        lrclib_id: item.lrclib_id,
+    };
+
+    let uri_opt = (!uri_trimmed.is_empty()).then_some(uri_trimmed);
+    save_lyrics_to_db(
+        &cache_key,
+        uri_opt,
+        &clean_title,
+        &clean_artist,
+        clean_album,
+        item.duration_ms,
+        &resp,
+    );
+
+    if let Ok(mut guard) = lyrics_cache().lock() {
+        if !uri_trimmed.is_empty() {
+            let prefix = format!("{uri_trimmed}|");
+            guard.retain(|k, _| !k.starts_with(&prefix));
+        }
+        guard.insert(cache_key, resp.clone());
+    }
+
+    Ok(resp)
+}
+
+/// Returns `(lyrics_entries_count, factoid_entries_count)` from persistent `lyrics.db`.
+pub fn count_lyrics_and_factoid_entries() -> (usize, usize) {
+    with_lyrics_db(|conn| {
+        let lyrics_count: usize = conn
+            .query_row("SELECT COUNT(*) FROM lyrics_entries", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map(|n| n.max(0) as usize)
+            .unwrap_or(0);
+        let factoids_count: usize = conn
+            .query_row("SELECT COUNT(*) FROM factoid_entries", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map(|n| n.max(0) as usize)
+            .unwrap_or(0);
+        Some((lyrics_count, factoids_count))
+    })
+    .unwrap_or((0, 0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -985,6 +1105,67 @@ mod tests {
         );
         assert_eq!(t2, "Nightcall");
         assert_eq!(a2, "Kavinsky");
+    }
+
+    #[test]
+    fn test_import_cached_lyrics_populates_memory_cache_and_clears_miss() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let track_uri = format!("file:///Volumes/Music/SampleArtist/SampleAlbum/{nanos}_song.flac");
+        let dur_sec = 214u32;
+        let stale_key = format!("{track_uri}|sample artist|sample song|{dur_sec}");
+
+        if let Ok(mut guard) = lyrics_cache().lock() {
+            guard.insert(
+                stale_key.clone(),
+                TrackLyricsResponse {
+                    found: false,
+                    source: "none".to_string(),
+                    ..Default::default()
+                },
+            );
+        }
+
+        let pushed = PushLyricsItem {
+            track_uri: track_uri.clone(),
+            title: "Sample Song".to_string(),
+            artist: "Sample Artist".to_string(),
+            album: Some("Sample Album".to_string()),
+            duration_ms: dur_sec * 1000,
+            synced_lines: vec![
+                SyncedLyricLine {
+                    timestamp_ms: 12_450,
+                    text: "First synced line".to_string(),
+                },
+                SyncedLyricLine {
+                    timestamp_ms: 18_000,
+                    text: "Second synced line".to_string(),
+                },
+            ],
+            plain_lyrics: Some("First synced line\nSecond synced line".to_string()),
+            instrumental: false,
+            provider: Some("lrclib_v2".to_string()),
+            lrclib_id: Some(123456),
+        };
+
+        let imported = import_cached_lyrics(&pushed).unwrap();
+        assert!(imported.found);
+        assert_eq!(imported.synced_lines.len(), 2);
+
+        let fetched = fetch_track_lyrics(
+            Some(&track_uri),
+            "Sample Song",
+            "Sample Artist",
+            Some("Sample Album"),
+            dur_sec * 1000,
+        );
+        assert!(fetched.found);
+        assert_eq!(fetched.source, "lrclib_v2");
+        assert_eq!(fetched.synced_lines.len(), 2);
+        assert_eq!(fetched.synced_lines[0].text, "First synced line");
+        assert_eq!(fetched.lrclib_id, Some(123456));
     }
 }
 

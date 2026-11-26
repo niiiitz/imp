@@ -1,15 +1,17 @@
+use crate::factoids::{import_cached_factoids, PushFactoidsItem};
 use crate::library::artwork::{
     cache_folder_artwork_file, extract_and_cache_artwork_from_tagged,
-    fetch_musicbrainz_cover_for_album, pick_preferred_folder_image, resolve_and_cache_artwork,
-    MusicBrainzArtOutcome,
+    fetch_musicbrainz_cover_for_album, import_cached_artwork, pick_preferred_folder_image,
+    resolve_and_cache_artwork, MusicBrainzArtOutcome, PushArtworkItem,
 };
-use crate::library::db::{IndexedTrackBatchItem, LibraryDatabase};
+use crate::library::db::{IndexedTrackBatchItem, LibraryDatabase, TrackPropertiesPatch};
 use crate::library::mounts::discover_removable_mounts;
 use crate::library::vdf::{discover_steam_music_directories, normalize_platform_path};
+use crate::lyrics::{import_cached_lyrics, PushLyricsItem};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, Tag};
-use imp_protocol::{SimpSettings, TrackMetadata};
+use imp_protocol::{MountStatus, SimpSettings, TrackMetadata};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -1049,13 +1051,34 @@ pub fn drain_pending_refresh_queue(
         }
     };
 
+    let mounts = db.get_mounts().unwrap_or_default();
     let mut seen_old: HashSet<String> = HashSet::new();
     let mut old_paths: Vec<PathBuf> = Vec::new();
     let mut seen_new: HashSet<String> = HashSet::new();
     let mut new_paths: Vec<PathBuf> = Vec::new();
     let mut fallback_root: Option<String> = None;
+    let mut deferred_entries: Vec<PendingRefreshEntry> = Vec::new();
 
     for entry in entries {
+        let mut entry_check_paths: Vec<PathBuf> = entry
+            .old_paths
+            .iter()
+            .chain(entry.new_paths.iter())
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        if let Some(ref fb) = entry.fallback_root {
+            let trimmed_fb = fb.trim();
+            if !trimmed_fb.is_empty() {
+                entry_check_paths.push(PathBuf::from(trimmed_fb));
+            }
+        }
+        if detect_offline_mount_for_paths(&entry_check_paths, &mounts).is_some() {
+            deferred_entries.push(entry);
+            continue;
+        }
+
         if fallback_root.is_none() {
             fallback_root = entry
                 .fallback_root
@@ -1078,15 +1101,347 @@ pub fn drain_pending_refresh_queue(
         }
     }
 
-    if old_paths.is_empty() && new_paths.is_empty() {
+    let res = if old_paths.is_empty() && new_paths.is_empty() {
+        Ok(0)
+    } else {
+        let fallback_pb = PathBuf::from(fallback_root.as_deref().unwrap_or("/"));
+        refresh_local_paths_in_db(db, &old_paths, &new_paths, &fallback_pb)
+    };
+
+    if !deferred_entries.is_empty() {
+        if let Ok(serialized) = serde_json::to_string_pretty(&deferred_entries) {
+            let requeue_tmp = queue_path.with_extension("requeue.json");
+            if std::fs::write(&requeue_tmp, serialized).is_ok() {
+                let _ = std::fs::rename(&requeue_tmp, queue_path);
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&processing_path);
+    res
+}
+
+/// Offline enrichment bundle written by external companion tools (such as `imp-librarian`)
+/// when Imp is closed, and drained atomically at daemon startup.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PendingEnrichmentBatch {
+    #[serde(default)]
+    pub lyrics: Vec<PushLyricsItem>,
+    #[serde(default)]
+    pub factoids: Vec<PushFactoidsItem>,
+    #[serde(default)]
+    pub artwork: Vec<PushArtworkItem>,
+}
+
+/// Canonical path to the offline enrichment handoff file drained when Imp starts.
+pub fn pending_enrichment_queue_path() -> PathBuf {
+    crate::simp_data_dir().join("pending_enrichment.json")
+}
+
+/// Atomically claims and applies pre-fetched lyrics, factoids, and artwork from `pending_enrichment.json`.
+pub fn drain_pending_enrichment_queue(
+    db: &LibraryDatabase,
+    queue_path: &Path,
+) -> anyhow::Result<usize> {
+    if !queue_path.is_file() {
+        return Ok(0);
+    }
+
+    let processing_path = queue_path.with_extension("processing.json");
+    match std::fs::rename(queue_path, &processing_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    }
+
+    let raw = match std::fs::read_to_string(&processing_path) {
+        Ok(content) => content,
+        Err(e) => {
+            let _ = std::fs::remove_file(&processing_path);
+            return Err(e.into());
+        }
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
         let _ = std::fs::remove_file(&processing_path);
         return Ok(0);
     }
 
-    let fallback_pb = PathBuf::from(fallback_root.as_deref().unwrap_or("/"));
-    let res = refresh_local_paths_in_db(db, &old_paths, &new_paths, &fallback_pb);
+    let batches: Vec<PendingEnrichmentBatch> =
+        match serde_json::from_str::<Vec<PendingEnrichmentBatch>>(trimmed)
+            .or_else(|_| {
+                serde_json::from_str::<PendingEnrichmentBatch>(trimmed).map(|single| vec![single])
+            }) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                let _ = std::fs::remove_file(&processing_path);
+                return Err(e.into());
+            }
+        };
+
+    let mut imported = 0usize;
+    for batch in batches {
+        for item in batch.lyrics {
+            let uri = item.track_uri.trim().to_string();
+            if let Ok(resp) = import_cached_lyrics(&item) {
+                if !uri.is_empty() {
+                    let _ = db.upsert_track_properties_patch(
+                        &uri,
+                        &TrackPropertiesPatch {
+                            has_lyrics: Some(resp.found),
+                            has_synced_lyrics: Some(!resp.synced_lines.is_empty()),
+                            suppress_lyrics: Some(false),
+                            ..Default::default()
+                        },
+                    );
+                }
+                imported += 1;
+            }
+        }
+        for item in batch.factoids {
+            let uri = item.track_uri.trim().to_string();
+            if let Ok(resp) = import_cached_factoids(&item) {
+                if !uri.is_empty() {
+                    let _ = db.upsert_track_properties_patch(
+                        &uri,
+                        &TrackPropertiesPatch {
+                            has_factoids: Some(resp.found),
+                            suppress_factoids: Some(false),
+                            ..Default::default()
+                        },
+                    );
+                }
+                imported += 1;
+            }
+        }
+        for item in batch.artwork {
+            if import_cached_artwork(db, &item).is_ok() {
+                imported += 1;
+            }
+        }
+    }
+
     let _ = std::fs::remove_file(&processing_path);
-    res
+    Ok(imported)
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct MountFsProbe {
+    pub is_network_fs: bool,
+    pub fs_type: Option<String>,
+}
+
+fn is_network_fs_type(fs_type: &str) -> bool {
+    matches!(
+        fs_type.trim().to_ascii_lowercase().as_str(),
+        "smbfs" | "smb" | "smb2" | "smb3" | "cifs" | "nfs" | "nfs4" | "afpfs" | "webdav" | "davfs" | "fuse.sshfs" | "afs"
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_mounts_for_path(mounts_txt: &str, target: &Path) -> Option<(PathBuf, String)> {
+    let target_str = target.to_string_lossy();
+    let mut best: Option<(PathBuf, String)> = None;
+    for line in mounts_txt.lines() {
+        let mut parts = line.split_whitespace();
+        let _dev = parts.next();
+        let Some(raw_mp) = parts.next() else {
+            continue;
+        };
+        let Some(fs_type) = parts.next() else {
+            continue;
+        };
+        let decoded_mp = raw_mp.replace("\\040", " ").replace("\\011", "\t");
+        let mp = PathBuf::from(&decoded_mp);
+        let mp_match = if decoded_mp == "/" {
+            target_str.starts_with('/')
+        } else {
+            target == mp || target.starts_with(&mp)
+        };
+        if mp_match {
+            let replace = best
+                .as_ref()
+                .map(|(prev_mp, _)| decoded_mp.len() > prev_mp.as_os_str().len())
+                .unwrap_or(true);
+            if replace {
+                best = Some((mp, fs_type.to_string()));
+            }
+        }
+    }
+    best
+}
+
+pub fn probe_mount_fs_info(mount_root: &str) -> MountFsProbe {
+    let trimmed = mount_root.trim();
+    if trimmed.is_empty() {
+        return MountFsProbe::default();
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(mounts_txt) = std::fs::read_to_string("/proc/mounts") {
+            if let Some((_mp, fs_type)) = parse_proc_mounts_for_path(&mounts_txt, Path::new(trimmed)) {
+                let is_net = is_network_fs_type(&fs_type);
+                return MountFsProbe {
+                    is_network_fs: is_net,
+                    fs_type: Some(fs_type),
+                };
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::{CStr, CString};
+        if let Ok(c_path) = CString::new(trimmed) {
+            let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+            let rc = unsafe { libc::statfs(c_path.as_ptr(), &mut buf) };
+            if rc == 0 {
+                let fs_type = unsafe { CStr::from_ptr(buf.f_fstypename.as_ptr()) }
+                    .to_string_lossy()
+                    .trim()
+                    .to_string();
+                if !fs_type.is_empty() {
+                    let is_net = is_network_fs_type(&fs_type);
+                    return MountFsProbe {
+                        is_network_fs: is_net,
+                        fs_type: Some(fs_type),
+                    };
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if trimmed.starts_with("\\\\") || trimmed.starts_with("//") {
+            return MountFsProbe {
+                is_network_fs: true,
+                fs_type: Some("smb".to_string()),
+            };
+        }
+    }
+
+    MountFsProbe::default()
+}
+
+pub fn detect_offline_mount_for_paths(
+    paths: &[PathBuf],
+    mounts: &[MountStatus],
+) -> Option<String> {
+    detect_offline_mount_for_paths_with_roots(paths, mounts, Path::new("/Volumes"))
+}
+
+pub fn detect_offline_mount_for_paths_with_roots(
+    paths: &[PathBuf],
+    mounts: &[MountStatus],
+    volumes_root: &Path,
+) -> Option<String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+
+    #[cfg(target_os = "linux")]
+    let proc_mounts_txt = std::fs::read_to_string("/proc/mounts").ok();
+
+    for path in paths {
+        // 1. macOS /Volumes/<Share> (or injected test volumes_root/<Share>) unmounted/stub guard
+        if let Ok(rel) = path.strip_prefix(volumes_root) {
+            if let Some(std::path::Component::Normal(share)) = rel.components().next() {
+                let share_dir = volumes_root.join(share);
+                if !share_dir.exists() {
+                    return Some(share_dir.to_string_lossy().to_string());
+                }
+                #[cfg(unix)]
+                {
+                    let is_symlink = std::fs::symlink_metadata(&share_dir)
+                        .map(|m| m.file_type().is_symlink())
+                        .unwrap_or(false);
+                    if !is_symlink {
+                        if let (Ok(v_meta), Ok(s_meta)) =
+                            (std::fs::metadata(volumes_root), std::fs::metadata(&share_dir))
+                        {
+                            if s_meta.dev() == v_meta.dev() {
+                                return Some(share_dir.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Linux /mnt/<share> empty unmounted stub or missing mount root guard
+        #[cfg(target_os = "linux")]
+        {
+            for base_prefix in ["/mnt", "/media", "/run/media"] {
+                let base = Path::new(base_prefix);
+                if let Ok(rel) = path.strip_prefix(base) {
+                    let depth = if base_prefix == "/mnt" { 1 } else { 2 };
+                    let mut comps = rel.components();
+                    let mut candidate = base.to_path_buf();
+                    let mut taken = 0usize;
+                    while taken < depth {
+                        if let Some(std::path::Component::Normal(part)) = comps.next() {
+                            candidate.push(part);
+                            taken += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if taken == depth {
+                        if !candidate.exists() {
+                            return Some(candidate.to_string_lossy().to_string());
+                        }
+                        if let (Ok(p_meta), Ok(c_meta)) = (
+                            std::fs::metadata(candidate.parent().unwrap_or(base)),
+                            std::fs::metadata(&candidate),
+                        ) {
+                            let is_active_mount = proc_mounts_txt
+                                .as_deref()
+                                .and_then(|txt| parse_proc_mounts_for_path(txt, &candidate))
+                                .map(|(mp, _)| mp == candidate)
+                                .unwrap_or(false);
+                            let dir_empty = std::fs::read_dir(&candidate)
+                                .map(|mut it| it.next().is_none())
+                                .unwrap_or(false);
+                            if !is_active_mount && c_meta.dev() == p_meta.dev() && dir_empty {
+                                return Some(candidate.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Windows UNC share (\\server\share) check
+        #[cfg(target_os = "windows")]
+        {
+            let raw = path.to_string_lossy();
+            if let Some(rest) = raw.strip_prefix("\\\\") {
+                let mut segs = rest.split('\\').filter(|s| !s.is_empty());
+                if let (Some(srv), Some(share)) = (segs.next(), segs.next()) {
+                    let unc_root = format!("\\\\{srv}\\{share}");
+                    if !Path::new(&unc_root).exists() {
+                        return Some(unc_root);
+                    }
+                }
+            }
+        }
+
+        // 4. Known DB mount state check (`storage_mounts`)
+        let matched = mounts
+            .iter()
+            .filter(|m| {
+                let mp = Path::new(&m.mount_root);
+                path == mp || path.starts_with(mp)
+            })
+            .max_by_key(|m| m.mount_root.len());
+        if let Some(m) = matched {
+            if !m.is_online || !Path::new(&m.mount_root).is_dir() {
+                return Some(m.mount_root.clone());
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
@@ -1205,6 +1560,190 @@ mod tests {
         assert_eq!(snapshot[0].path, new_file.to_string_lossy().to_string());
         assert_eq!(snapshot[0].album_title, "Sample Album");
         assert_eq!(db.get_albums(Some("local"), None, 20, 0).unwrap().len(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn seed_test_track(
+        db: &LibraryDatabase,
+        album_id: &str,
+        track_uri: &str,
+        title: &str,
+        mount_root: Option<&str>,
+    ) {
+        db.upsert_indexed_batch(&[IndexedTrackBatchItem {
+            album_id: album_id.to_string(),
+            album_title: "Sample Album".to_string(),
+            album_artist: "Sample Artist".to_string(),
+            steam_app_id: None,
+            release_year: Some(2025),
+            art_cache_path: None,
+            genre: None,
+            parent_folder: None,
+            track: TrackMetadata {
+                uri: track_uri.to_string(),
+                title: title.to_string(),
+                artists: vec!["Sample Artist".to_string()],
+                album: "Sample Album".to_string(),
+                album_id: Some(album_id.to_string()),
+                track_number: Some(1),
+                disc_number: Some(1),
+                art_url: None,
+                duration_ms: 200_000,
+                source: "local".to_string(),
+                mount_root: mount_root.map(|s| s.to_string()),
+                content_rating: None,
+                ..Default::default()
+            },
+            file_mtime: Some(1),
+            file_size: Some(100),
+            has_art: false,
+            has_local_lrc: false,
+        }])
+        .unwrap();
+    }
+
+    #[test]
+    fn test_drain_pending_enrichment_queue_imports_and_cleans_up() {
+        use base64::Engine as _;
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("imp_pending_enrichment_{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        let db = LibraryDatabase::open(&root.join("library.db")).unwrap();
+
+        let album_id = format!("local_alb_enr_{nanos}");
+        let track_uri = format!("file:///Volumes/Music/SampleArtist/{nanos}_enr.flac");
+        let title = format!("Sample Enrich {nanos}");
+        seed_test_track(&db, &album_id, &track_uri, &title, None);
+
+        let mut fake_png = vec![0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1A, b'\n'];
+        fake_png.extend_from_slice(&nanos.to_le_bytes());
+        fake_png.resize(300, 0x33);
+
+        let batch = vec![PendingEnrichmentBatch {
+            lyrics: vec![PushLyricsItem {
+                track_uri: track_uri.clone(),
+                title: title.clone(),
+                artist: "Sample Artist".to_string(),
+                album: Some("Sample Album".to_string()),
+                duration_ms: 200_000,
+                synced_lines: vec![crate::lyrics::SyncedLyricLine {
+                    timestamp_ms: 5000,
+                    text: "Offline lyric line".to_string(),
+                }],
+                plain_lyrics: Some("Offline lyric line".to_string()),
+                instrumental: false,
+                provider: Some("lrclib_v2".to_string()),
+                lrclib_id: Some(777),
+            }],
+            factoids: vec![PushFactoidsItem {
+                track_uri: track_uri.clone(),
+                title: title.clone(),
+                artist: "Sample Artist".to_string(),
+                album: Some("Sample Album".to_string()),
+                provider: Some("wikipedia_v2+librarian".to_string()),
+                bubbles: vec![crate::factoids::FactoidBubble {
+                    category: "studio".to_string(),
+                    headline: "Analog Session".to_string(),
+                    body: format!("Offline enrichment test {nanos} factoid bubble payload."),
+                    source: "Wikipedia".to_string(),
+                    start_sec: 15,
+                    duration_sec: 10,
+                    part_index: Some(1),
+                    part_total: Some(1),
+                }],
+            }],
+            artwork: vec![PushArtworkItem {
+                album_id: Some(album_id.clone()),
+                track_uris: vec![track_uri.clone()],
+                image_base64: base64::engine::general_purpose::STANDARD.encode(&fake_png),
+                mime_type: Some("image/png".to_string()),
+                source: Some("coverartarchive".to_string()),
+            }],
+        }];
+
+        let queue_path = root.join("pending_enrichment.json");
+        std::fs::write(&queue_path, serde_json::to_string(&batch).unwrap()).unwrap();
+
+        let imported = drain_pending_enrichment_queue(&db, &queue_path).unwrap();
+        assert_eq!(imported, 3);
+        assert!(!queue_path.exists());
+        assert!(!queue_path.with_extension("processing.json").exists());
+
+        let props = db.get_track_properties(&track_uri).unwrap();
+        assert!(props.has_lyrics);
+        assert!(props.has_synced_lyrics);
+        assert!(props.has_factoids);
+        assert!(props.has_art);
+
+        // Clean up art file written for test
+        let audit = db.get_librarian_cache_audit(true, 100).unwrap();
+        assert_eq!(audit.has_lyrics_count, 1);
+        assert_eq!(audit.has_factoids_count, 1);
+        assert_eq!(audit.has_art_count, 1);
+        assert!(audit.missing_uris.as_ref().unwrap().art.is_empty());
+
+        if let Some((_, Some(art_url), _)) = db.get_musicbrainz_art_cache(&album_id) {
+            if let Some(fname) = art_url.rsplit('/').next() {
+                let _ = std::fs::remove_file(crate::imp_art_cache_dir().join(fname));
+                let _ = std::fs::remove_file(std::env::temp_dir().join(fname));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_smb_offline_mount_stub_blocks_pruning_and_defers_queue() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("imp_smb_guard_{nanos}"));
+        let volumes_stub_root = root.join("Volumes");
+        let offline_share_stub = volumes_stub_root.join("NasShare");
+        std::fs::create_dir_all(&offline_share_stub).unwrap();
+
+        let offline_track_path = offline_share_stub
+            .join("SampleArtist")
+            .join("SampleAlbum")
+            .join("01.flac");
+
+        // Same st_dev stub under fake /Volumes catches offline mount even if empty stub dir exists
+        let detected = detect_offline_mount_for_paths_with_roots(
+            std::slice::from_ref(&offline_track_path),
+            &[],
+            &volumes_stub_root,
+        );
+        assert_eq!(
+            detected.as_deref(),
+            Some(offline_share_stub.to_string_lossy().as_ref())
+        );
+
+        // Drain pending refresh queue should retain offline-mount entries instead of dropping them
+        let db = LibraryDatabase::open(&root.join("library.db")).unwrap();
+        let share_str = offline_share_stub.to_string_lossy().to_string();
+        db.upsert_mount(&share_str, "NasShare", "user_custom", false)
+            .unwrap();
+        let track_uri = format!("file://{}", offline_track_path.to_string_lossy());
+        seed_test_track(&db, "alb_nas", &track_uri, "Track 01", Some(&share_str));
+
+        let queue_path = root.join("pending_refresh.json");
+        let payload = vec![PendingRefreshEntry {
+            old_paths: vec![offline_track_path.to_string_lossy().to_string()],
+            new_paths: vec![],
+            fallback_root: Some(share_str.clone()),
+        }];
+        std::fs::write(&queue_path, serde_json::to_string(&payload).unwrap()).unwrap();
+
+        let refreshed = drain_pending_refresh_queue(&db, &queue_path).unwrap();
+        assert_eq!(refreshed, 0);
+        // Entry was retained in queue_path for retry when mount comes back online, and track wasn't pruned
+        assert!(queue_path.is_file());
+        assert_eq!(db.list_local_track_index_snapshot(None).unwrap().len(), 1);
 
         let _ = std::fs::remove_dir_all(&root);
     }

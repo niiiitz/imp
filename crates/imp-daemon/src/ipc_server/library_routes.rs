@@ -858,13 +858,13 @@ pub(super) async fn auth_probe_handler(State(state): State<DaemonIpcState>) -> i
     }
 }
 
-pub(super) async fn library_refresh_paths_handler(
-    State(state): State<DaemonIpcState>,
-    Json(body): Json<imp_core::library::indexer::PendingRefreshEntry>,
-) -> impl IntoResponse {
-    let db = state.db.clone();
-    let bcast = state.broadcast_tx.clone();
-    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<(usize, usize, usize)> {
+pub(super) async fn execute_refresh_paths_with_volumes_root(
+    db: imp_core::library::db::LibraryDatabase,
+    bcast: tokio::sync::broadcast::Sender<imp_protocol::PlaybackEvent>,
+    body: imp_core::library::indexer::PendingRefreshEntry,
+    volumes_root: std::path::PathBuf,
+) -> serde_json::Value {
+    let res = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
         let old_paths: Vec<std::path::PathBuf> = body
             .old_paths
             .into_iter()
@@ -885,6 +885,32 @@ pub(super) async fn library_refresh_paths_handler(
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from("/"));
 
+        let mut guard_paths: Vec<std::path::PathBuf> = old_paths
+            .iter()
+            .chain(new_paths.iter())
+            .cloned()
+            .collect();
+        if let Some(ref fb) = body.fallback_root {
+            let trimmed_fb = fb.trim();
+            if !trimmed_fb.is_empty() {
+                guard_paths.push(std::path::PathBuf::from(trimmed_fb));
+            }
+        }
+        let existing_mounts = db.get_mounts().unwrap_or_default();
+        if let Some(offline_mount) =
+            imp_core::library::indexer::detect_offline_mount_for_paths_with_roots(
+                &guard_paths,
+                &existing_mounts,
+                &volumes_root,
+            )
+        {
+            return Ok(serde_json::json!({
+                "ok": false,
+                "error": "mount_offline",
+                "mount_root": offline_mount,
+            }));
+        }
+
         let refreshed = imp_core::library::indexer::refresh_local_paths_in_db(
             &db,
             &old_paths,
@@ -896,20 +922,35 @@ pub(super) async fn library_refresh_paths_handler(
             total_albums,
             total_tracks,
         });
-        Ok((refreshed, total_albums, total_tracks))
-    })
-    .await;
-
-    match res {
-        Ok(Ok((refreshed, total_albums, total_tracks))) => Json(serde_json::json!({
+        Ok(serde_json::json!({
             "ok": true,
             "refreshed": refreshed,
             "total_albums": total_albums,
             "total_tracks": total_tracks,
-        })),
-        Ok(Err(e)) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
-        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+        }))
+    })
+    .await;
+
+    match res {
+        Ok(Ok(payload)) => payload,
+        Ok(Err(e)) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
     }
+}
+
+pub(super) async fn library_refresh_paths_handler(
+    State(state): State<DaemonIpcState>,
+    Json(body): Json<imp_core::library::indexer::PendingRefreshEntry>,
+) -> impl IntoResponse {
+    Json(
+        execute_refresh_paths_with_volumes_root(
+            state.db.clone(),
+            state.broadcast_tx.clone(),
+            body,
+            std::path::PathBuf::from("/Volumes"),
+        )
+        .await,
+    )
 }
 
 pub(super) async fn library_index_snapshot_handler(
@@ -922,7 +963,23 @@ pub(super) async fn library_index_snapshot_handler(
         .filter(|s| !s.is_empty());
     let db = state.db.clone();
     let res = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
-        let mounts = db.get_mounts()?;
+        let raw_mounts = db.get_mounts()?;
+        let mounts: Vec<serde_json::Value> = raw_mounts
+            .into_iter()
+            .map(|m| {
+                let probe = imp_core::library::indexer::probe_mount_fs_info(&m.mount_root);
+                serde_json::json!({
+                    "mount_root": m.mount_root,
+                    "label": m.label,
+                    "mount_kind": m.mount_kind,
+                    "is_online": m.is_online,
+                    "track_count": m.track_count,
+                    "last_scanned_at": m.last_scanned_at,
+                    "is_network_fs": probe.is_network_fs,
+                    "fs_type": probe.fs_type,
+                })
+            })
+            .collect();
         let tracks = db.list_local_track_index_snapshot(mount_root.as_deref())?;
         Ok(serde_json::json!({
             "ok": true,

@@ -3002,6 +3002,158 @@ impl LibraryDatabase {
             smart_stations,
         })
     }
+
+    pub fn set_album_art_cache_path(&self, album_id: &str, art_url: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE albums SET art_cache_path = ?1 WHERE id = ?2",
+            params![art_url.trim(), album_id.trim()],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_track_album_title(&self, uri: &str) -> Option<String> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT album_title FROM tracks WHERE uri = ?1",
+            params![uri.trim()],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    }
+
+    pub fn get_librarian_cache_audit(
+        &self,
+        include_missing_uris: bool,
+        limit: usize,
+    ) -> Result<LibrarianLibraryAudit> {
+        let conn = self.conn.lock().unwrap();
+        let count_i64 = |sql: &str| -> usize {
+            conn.query_row(sql, [], |r| r.get::<_, i64>(0))
+                .map(|n| n.max(0) as usize)
+                .unwrap_or(0)
+        };
+
+        let total_albums = count_i64("SELECT COUNT(*) FROM albums");
+        let total_tracks = count_i64("SELECT COUNT(*) FROM tracks");
+        let local_tracks = count_i64("SELECT COUNT(*) FROM tracks WHERE uri LIKE 'file://%'");
+        let has_art_count = count_i64(
+            "SELECT COUNT(*)
+             FROM tracks t
+             LEFT JOIN track_properties tp ON tp.uri = t.uri
+             WHERE t.uri LIKE 'file://%'
+               AND ((t.art_url IS NOT NULL AND TRIM(t.art_url) != '') OR COALESCE(tp.has_art, 0) != 0)",
+        );
+        let missing_art_count = local_tracks.saturating_sub(has_art_count);
+        let has_lyrics_count = count_i64(
+            "SELECT COUNT(*)
+             FROM tracks t
+             JOIN track_properties tp ON tp.uri = t.uri
+             WHERE t.uri LIKE 'file://%' AND COALESCE(tp.has_lyrics, 0) != 0",
+        );
+        let has_synced_lyrics_count = count_i64(
+            "SELECT COUNT(*)
+             FROM tracks t
+             JOIN track_properties tp ON tp.uri = t.uri
+             WHERE t.uri LIKE 'file://%' AND COALESCE(tp.has_synced_lyrics, 0) != 0",
+        );
+        let has_factoids_count = count_i64(
+            "SELECT COUNT(*)
+             FROM tracks t
+             JOIN track_properties tp ON tp.uri = t.uri
+             WHERE t.uri LIKE 'file://%' AND COALESCE(tp.has_factoids, 0) != 0",
+        );
+        let mb_art_negative_cache_count = count_i64(
+            "SELECT COUNT(*) FROM musicbrainz_album_art_cache WHERE status = 'not_found'",
+        );
+
+        let missing_uris = if include_missing_uris {
+            let capped = i64::try_from(limit.clamp(1, 20_000)).unwrap_or(2000);
+            let collect_uris = |sql: &str| -> Vec<String> {
+                let Ok(mut stmt) = conn.prepare(sql) else {
+                    return Vec::new();
+                };
+                let Ok(rows) = stmt.query_map(params![capped], |r| r.get::<_, String>(0)) else {
+                    return Vec::new();
+                };
+                rows.filter_map(Result::ok).collect()
+            };
+
+            Some(LibrarianMissingUris {
+                art: collect_uris(
+                    "SELECT t.uri
+                     FROM tracks t
+                     LEFT JOIN track_properties tp ON tp.uri = t.uri
+                     WHERE t.uri LIKE 'file://%'
+                       AND (t.art_url IS NULL OR TRIM(t.art_url) = '')
+                       AND COALESCE(tp.has_art, 0) = 0
+                     ORDER BY t.uri ASC
+                     LIMIT ?1",
+                ),
+                lyrics: collect_uris(
+                    "SELECT t.uri
+                     FROM tracks t
+                     LEFT JOIN track_properties tp ON tp.uri = t.uri
+                     WHERE t.uri LIKE 'file://%'
+                       AND COALESCE(tp.has_lyrics, 0) = 0
+                       AND COALESCE(tp.suppress_lyrics, 0) = 0
+                     ORDER BY t.uri ASC
+                     LIMIT ?1",
+                ),
+                factoids: collect_uris(
+                    "SELECT t.uri
+                     FROM tracks t
+                     LEFT JOIN track_properties tp ON tp.uri = t.uri
+                     WHERE t.uri LIKE 'file://%'
+                       AND COALESCE(tp.has_factoids, 0) = 0
+                       AND COALESCE(tp.suppress_factoids, 0) = 0
+                     ORDER BY t.uri ASC
+                     LIMIT ?1",
+                ),
+            })
+        } else {
+            None
+        };
+
+        Ok(LibrarianLibraryAudit {
+            total_albums,
+            total_tracks,
+            local_tracks,
+            has_art_count,
+            missing_art_count,
+            has_lyrics_count,
+            has_synced_lyrics_count,
+            has_factoids_count,
+            mb_art_negative_cache_count,
+            missing_uris,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LibrarianMissingUris {
+    pub art: Vec<String>,
+    pub lyrics: Vec<String>,
+    pub factoids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LibrarianLibraryAudit {
+    pub total_albums: usize,
+    pub total_tracks: usize,
+    pub local_tracks: usize,
+    pub has_art_count: usize,
+    pub missing_art_count: usize,
+    pub has_lyrics_count: usize,
+    pub has_synced_lyrics_count: usize,
+    pub has_factoids_count: usize,
+    pub mb_art_negative_cache_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_uris: Option<LibrarianMissingUris>,
 }
 
 #[cfg(test)]
