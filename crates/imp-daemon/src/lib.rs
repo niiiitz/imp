@@ -115,6 +115,25 @@ pub async fn run_daemon() -> anyhow::Result<()> {
     };
     if should_run_initial_scan {
         let _ = cmd_tx.send(AudioCommand::RescanStorage);
+    } else {
+        // Lightweight non-blocking mount liveness check so mounts that went offline during a
+        // previous outage automatically flip back to online on restart without walking files.
+        let probe_db = db.clone();
+        let probe_cfg = settings.lock().unwrap().clone();
+        let probe_bcast = broadcast_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            if imp_core::library::indexer::refresh_mount_online_states(&probe_db, &probe_cfg) {
+                if let Ok(mounts) = probe_db.get_mounts() {
+                    let _ = probe_bcast.send(PlaybackEvent::StorageMountsChanged { mounts });
+                }
+                let (total_albums, total_tracks) =
+                    probe_db.get_library_counts().unwrap_or((0, 0));
+                let _ = probe_bcast.send(PlaybackEvent::LibraryUpdated {
+                    total_albums,
+                    total_tracks,
+                });
+            }
+        });
     }
 
     // Drain any offline path refreshes or pre-fetched enrichment bundles queued by `imp-librarian`

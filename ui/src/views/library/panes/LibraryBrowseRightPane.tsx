@@ -133,6 +133,7 @@ export interface LibraryBrowseRightPaneProps {
   loadMoreScSearch: any;
   localVideos: TrackMetadata[];
   mediaTypeFilter: "all" | "video" | "audio";
+  mountAlbums: AlbumRecord[];
   mountTracks: TrackMetadata[];
   newFeedAlbums: AppleCloudAlbumSummary[];
   newFeedPlaylists: AppleCloudPlaylistSummary[];
@@ -302,6 +303,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
   loadMoreScSearch,
   localVideos,
   mediaTypeFilter,
+  mountAlbums,
   mountTracks,
   newFeedAlbums,
   newFeedPlaylists,
@@ -622,6 +624,7 @@ export const LibraryBrowseRightPane: React.FC<LibraryBrowseRightPaneProps> = ({
                 snap={snap}
                 allLocalAlbums={allLocalAlbums}
                 allLocalTracks={allLocalTracks}
+                mountAlbums={mountAlbums}
                 mountTracks={mountTracks}
                 localVideos={localVideos}
                 localDiscover={localDiscover}

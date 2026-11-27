@@ -118,7 +118,7 @@ const RETRIEVAL_KEY_MAP: Record<
 };
 
 // Pure in-memory session recall for the last accessed XMB column and cursor item per column.
-let lastXmbColMemory: XmbColumnId = 'display';
+let lastXmbColMemory: XmbColumnId = 'system_network';
 const lastXmbItemIdByCol: Partial<Record<XmbColumnId, string>> = {};
 
 export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
@@ -503,7 +503,7 @@ export const XmbUnifiedMenu: React.FC<XmbUnifiedMenuProps> = ({
     setSavedIaUsername('');
     setIaSafeSearch(true);
     setNetworkedRetrieval(DEFAULT_NETWORKED_RETRIEVAL_PREFS);
-    lastXmbColMemory = 'display';
+    lastXmbColMemory = 'system_network';
     (Object.keys(lastXmbItemIdByCol) as XmbColumnId[]).forEach((k) => {
       delete lastXmbItemIdByCol[k];
     });

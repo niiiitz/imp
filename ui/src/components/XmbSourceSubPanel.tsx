@@ -831,7 +831,8 @@ export const XmbSourceSubPanel: React.FC<XmbSourceSubPanelProps> = ({
                       flex: 1,
                     }}
                   >
-                    {m.mount_root} ({m.track_count})
+                    {m.mount_root}
+                    {!m.is_online ? ' (Offline)' : ''} ({m.track_count})
                   </span>
                   <button
                     type="button"

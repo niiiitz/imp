@@ -97,6 +97,22 @@ pub fn prune_ignored_and_stale_mounts(db: &LibraryDatabase, settings: &SimpSetti
 /// Crawls configured local directories, Steam OST directories (`libraryfolders.vdf`),
 /// and removable USB/MicroSD mounts (`/run/media`), incrementally indexing tracks into SQLite.
 pub fn scan_all_storage(db: &LibraryDatabase, settings: &SimpSettings) -> (usize, usize) {
+    scan_all_storage_with_callbacks(db, settings, None, || {}, |_, _| {})
+}
+
+/// Crawls storage mounts (or a single `only_mount` when targeted) with live callbacks
+/// whenever mount online states change or incremental batches commit to SQLite.
+pub fn scan_all_storage_with_callbacks<FM, FP>(
+    db: &LibraryDatabase,
+    settings: &SimpSettings,
+    only_mount: Option<&str>,
+    mut on_mounts_changed: FM,
+    on_progress: FP,
+) -> (usize, usize)
+where
+    FM: FnMut() + Send + Sync,
+    FP: Fn(usize, usize) + Send + Sync,
+{
     crate::prefer_efficiency_core_for_current_thread();
     let ignored_roots: HashSet<String> = settings
         .library
@@ -105,8 +121,13 @@ pub fn scan_all_storage(db: &LibraryDatabase, settings: &SimpSettings) -> (usize
         .map(|s| normalize_platform_path(s).to_string_lossy().to_string())
         .collect();
 
+    let only_mount_norm = only_mount
+        .map(|m| normalize_platform_path(m).to_string_lossy().to_string())
+        .filter(|s| !s.is_empty());
+
     // 1. User-configured custom paths (normalized for Windows C:\ and bash-escaped spaces)
     let mut active_custom_roots = HashSet::new();
+    let mut custom_mounts_to_scan: Vec<(PathBuf, String, bool)> = Vec::new();
     for (_key, raw_path_str) in &settings.library.custom_paths {
         let norm_path = normalize_platform_path(raw_path_str);
         let norm_str = norm_path.to_string_lossy().to_string();
@@ -116,55 +137,86 @@ pub fn scan_all_storage(db: &LibraryDatabase, settings: &SimpSettings) -> (usize
         if !active_custom_roots.insert(norm_str.clone()) {
             continue;
         }
-        let online = norm_path.is_dir();
+        if let Some(ref target) = only_mount_norm {
+            if &norm_str != target {
+                continue;
+            }
+        }
+        let online = probe_mount_online(&norm_path);
         let label = norm_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| norm_str.clone());
         let _ = db.upsert_mount(&norm_str, &label, "user_custom", online);
+        custom_mounts_to_scan.push((norm_path, norm_str, online));
+    }
+
+    if let Some(ref target) = only_mount_norm {
+        if custom_mounts_to_scan.is_empty() && !ignored_roots.contains(target) {
+            let norm_path = PathBuf::from(target);
+            let online = probe_mount_online(&norm_path);
+            let label = norm_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| target.clone());
+            let _ = db.upsert_mount(target, &label, "user_custom", online);
+            custom_mounts_to_scan.push((norm_path, target.clone(), online));
+        }
+    }
+
+    on_mounts_changed();
+
+    let emit_progress = || {
+        let (albums, tracks) = db.get_library_counts().unwrap_or((0, 0));
+        on_progress(albums, tracks);
+    };
+
+    for (norm_path, norm_str, online) in custom_mounts_to_scan {
         if online {
-            scan_mount_directory(db, &norm_path, &norm_str, "local");
+            scan_mount_directory_with_progress(db, &norm_path, &norm_str, "local", Some(&emit_progress));
         }
     }
 
-    // Prune any stale `user_custom` mounts in SQLite that are no longer in `custom_paths`,
-    // or any mounts explicitly added to `ignored_paths`, or any fixed/optical Windows drive roots
-    // or macOS `/Volumes` Time Machine shadow mounts that were previously misclassified as `removable_media`.
-    prune_ignored_and_stale_mounts(db, settings);
+    if only_mount_norm.is_none() {
+        // Prune any stale `user_custom` mounts in SQLite that are no longer in `custom_paths`,
+        // or any mounts explicitly added to `ignored_paths`, or any fixed/optical Windows drive roots
+        // or macOS `/Volumes` Time Machine shadow mounts that were previously misclassified as `removable_media`.
+        prune_ignored_and_stale_mounts(db, settings);
 
-    // 2. Steam Soundtracks (`libraryfolders.vdf`)
-    if settings.library.scan_steam_osts {
-        for ost_dir in discover_steam_music_directories() {
-            let root_str = ost_dir.to_string_lossy().to_string();
-            if ignored_roots.contains(&root_str) {
-                continue;
+        // 2. Steam Soundtracks (`libraryfolders.vdf`)
+        if settings.library.scan_steam_osts {
+            for ost_dir in discover_steam_music_directories() {
+                let root_str = ost_dir.to_string_lossy().to_string();
+                if ignored_roots.contains(&root_str) {
+                    continue;
+                }
+                let _ = db.upsert_mount(&root_str, "Steam Soundtracks", "steam_vdf", true);
+                scan_mount_directory_with_progress(db, &ost_dir, &root_str, "steam_ost", Some(&emit_progress));
             }
-            let _ = db.upsert_mount(&root_str, "Steam Soundtracks", "steam_vdf", true);
-            scan_mount_directory(db, &ost_dir, &root_str, "steam_ost");
         }
-    }
 
-    // 3. Removable USB / MicroSD Drives (`/run/media/...` on Linux, `DRIVE_REMOVABLE` on Windows)
-    if settings.library.auto_mount_removable {
-        let discovered: Vec<(PathBuf, String)> = discover_removable_mounts()
-            .into_iter()
-            .filter(|(p, _)| !ignored_roots.contains(&p.to_string_lossy().to_string()))
-            .collect();
-        if let Ok(existing_mounts) = db.get_mounts() {
-            for m in existing_mounts {
-                if m.mount_kind == "removable_media"
-                    && !discovered
-                        .iter()
-                        .any(|(p, _)| p.to_string_lossy() == m.mount_root)
-                {
-                    let _ = db.set_mount_online(&m.mount_root, false);
+        // 3. Removable USB / MicroSD Drives (`/run/media/...` on Linux, `DRIVE_REMOVABLE` on Windows)
+        if settings.library.auto_mount_removable {
+            let discovered: Vec<(PathBuf, String)> = discover_removable_mounts()
+                .into_iter()
+                .filter(|(p, _)| !ignored_roots.contains(&p.to_string_lossy().to_string()))
+                .collect();
+            if let Ok(existing_mounts) = db.get_mounts() {
+                for m in existing_mounts {
+                    if m.mount_kind == "removable_media"
+                        && !discovered
+                            .iter()
+                            .any(|(p, _)| p.to_string_lossy() == m.mount_root)
+                    {
+                        let _ = db.set_mount_online(&m.mount_root, false);
+                    }
                 }
             }
-        }
-        for (mount_path, label) in discovered {
-            let root_str = mount_path.to_string_lossy().to_string();
-            let _ = db.upsert_mount(&root_str, &label, "removable_media", true);
-            scan_mount_directory(db, &mount_path, &root_str, "local");
+            for (mount_path, label) in discovered {
+                let root_str = mount_path.to_string_lossy().to_string();
+                let _ = db.upsert_mount(&root_str, &label, "removable_media", true);
+                scan_mount_directory_with_progress(db, &mount_path, &root_str, "local", Some(&emit_progress));
+            }
         }
     }
 
@@ -402,7 +454,24 @@ fn resolve_folder_art_cached(
     resolved
 }
 
-fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, source: &str) {
+fn scan_mount_directory_with_progress(
+    db: &LibraryDatabase,
+    dir: &Path,
+    mount_root: &str,
+    source: &str,
+    on_progress: Option<&(dyn Fn() + Sync)>,
+) {
+    if std::fs::read_dir(dir).is_err() {
+        tracing::warn!(
+            "Skipping scan of '{}' — directory is not readable (mount offline or stale SMB handle)",
+            mount_root
+        );
+        if source == "local" {
+            let _ = db.set_mount_online(mount_root, false);
+        }
+        return;
+    }
+
     let fingerprints = db.get_mount_file_fingerprints(mount_root).unwrap_or_default();
     let needs_backfill = db
         .get_tracks_missing_folder_metadata(mount_root)
@@ -412,16 +481,26 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
     let mut video_files: Vec<(PathBuf, i64, i64)> = Vec::new();
     let mut lrc_stems: HashSet<(PathBuf, String)> = HashSet::new();
     let mut folder_images: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    let mut walk_io_errors: usize = 0;
 
     // Single directory walk capturing audio, video, sidecar `.lrc`, and folder artwork files
     // alongside stat metadata to avoid redundant SMB RPC round-trips per file.
-    for entry in WalkDir::new(dir)
+    for entry_res in WalkDir::new(dir)
         .follow_links(false)
         .max_depth(10)
         .into_iter()
         .filter_entry(|e| !is_ignored_walk_entry(e))
-        .filter_map(Result::ok)
     {
+        let entry = match entry_res {
+            Ok(ent) => ent,
+            Err(err) => {
+                walk_io_errors += 1;
+                if walk_io_errors <= 5 {
+                    tracing::warn!("Storage walk error under '{}': {err}", mount_root);
+                }
+                continue;
+            }
+        };
         if !entry.file_type().is_file() {
             continue;
         }
@@ -461,6 +540,7 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
         }
 
         let Ok(fs_meta) = entry.metadata() else {
+            walk_io_errors += 1;
             continue;
         };
         let file_size = fs_meta.len() as i64;
@@ -476,6 +556,14 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
         } else {
             video_files.push((path.to_path_buf(), file_size, file_mtime));
         }
+    }
+
+    if walk_io_errors > 0 {
+        tracing::warn!(
+            "Completed walk of '{}' with {} I/O error(s) (stale pruning disabled for this pass)",
+            mount_root,
+            walk_io_errors
+        );
     }
 
     // Sort so preferred tagged formats (`flac`, `mp3`, `m4a`, `ogg`) come before raw `wav` when deduplicating identical stems
@@ -499,6 +587,7 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
     });
 
     let mut seen_stems: HashSet<(PathBuf, String)> = HashSet::new();
+    let mut seen_uris: HashSet<String> = HashSet::new();
     let mut cached_caps: Vec<(String, bool, bool, bool)> = Vec::new();
     let mut to_parse: Vec<(PathBuf, String, i64, i64, bool)> = Vec::new();
 
@@ -516,6 +605,7 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
         }
 
         let uri = format!("file://{}", path.to_string_lossy());
+        seen_uris.insert(uri.clone());
         let has_local_lrc = lrc_stems.contains(&(parent_dir, stem_key));
 
         if let Some((cached_mtime, cached_size, cached_art)) = fingerprints.get(&uri) {
@@ -525,10 +615,15 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
                 let is_mb = art_str.contains("/mb_");
                 // Only reuse cached fingerprint if:
                 // - Artwork came from embedded audio tags (`simp_art_emb_`), OR
-                // - Folder still has a local cover image (`has_local_dir_art == true`), OR
-                // - Artwork came from MusicBrainz (`mb_`) and no local folder cover image was added.
-                // This ensures deleting or adding `cover.png`/`cover.jpg` in a folder is immediately detected!
-                if is_emb || (is_mb && !has_local_dir_art) || (!is_mb && has_local_dir_art) {
+                // - Folder still has a local cover image (`has_local_dir_art == true`) and cached art exists, OR
+                // - Artwork came from MusicBrainz (`mb_`) and no local folder cover image was added, OR
+                // - Track has no art yet and still has no local folder cover image.
+                // This avoids re-parsing artless SMB tracks on every rescan while picking up newly added `cover.jpg`.
+                let art_cache_valid = is_emb
+                    || (is_mb && !has_local_dir_art)
+                    || (!art_str.is_empty() && !is_mb && has_local_dir_art)
+                    || (art_str.is_empty() && !has_local_dir_art);
+                if art_cache_valid {
                     if has_local_lrc || !art_str.is_empty() {
                         cached_caps.push((
                             uri.clone(),
@@ -564,42 +659,53 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
     if !to_parse.is_empty() {
         let worker_count = to_parse.len().min(8);
         let queue = Mutex::new(VecDeque::from(to_parse));
-        let parsed_out: Mutex<Vec<IndexedTrackBatchItem>> = Mutex::new(Vec::new());
 
         std::thread::scope(|s| {
             for _ in 0..worker_count {
-                s.spawn(|| loop {
-                    let next_item = { queue.lock().unwrap().pop_front() };
-                    let Some((path, uri, file_size, file_mtime, has_local_lrc)) = next_item else {
-                        break;
-                    };
-                    if let Some(batch_item) = parse_audio_file_detached(
-                        &path,
-                        &uri,
-                        mount_root,
-                        source,
-                        file_mtime,
-                        file_size,
-                        has_local_lrc,
-                        &folder_images,
-                        &folder_art_cache,
-                    ) {
-                        parsed_out.lock().unwrap().push(batch_item);
+                s.spawn(|| {
+                    let mut local_batch: Vec<IndexedTrackBatchItem> = Vec::with_capacity(100);
+                    loop {
+                        let next_item = { queue.lock().unwrap().pop_front() };
+                        let Some((path, uri, file_size, file_mtime, has_local_lrc)) = next_item else {
+                            break;
+                        };
+                        if let Some(batch_item) = parse_audio_file_detached(
+                            &path,
+                            &uri,
+                            mount_root,
+                            source,
+                            file_mtime,
+                            file_size,
+                            has_local_lrc,
+                            &folder_images,
+                            &folder_art_cache,
+                        ) {
+                            local_batch.push(batch_item);
+                            if local_batch.len() >= 100 {
+                                let _ = db.upsert_indexed_batch(&local_batch);
+                                local_batch.clear();
+                                if let Some(cb) = on_progress {
+                                    cb();
+                                }
+                            }
+                        }
+                    }
+                    if !local_batch.is_empty() {
+                        let _ = db.upsert_indexed_batch(&local_batch);
+                        if let Some(cb) = on_progress {
+                            cb();
+                        }
                     }
                 });
             }
         });
-
-        let parsed_items = parsed_out.into_inner().unwrap();
-        for chunk in parsed_items.chunks(250) {
-            let _ = db.upsert_indexed_batch(chunk);
-        }
     }
 
     if source == "local" && !video_files.is_empty() {
         let mut video_batch: Vec<IndexedTrackBatchItem> = Vec::new();
         for (path, file_size, file_mtime) in video_files {
             let uri = format!("video://local/{}", path.to_string_lossy());
+            seen_uris.insert(uri.clone());
             if let Some((cached_mtime, cached_size, _)) = fingerprints.get(&uri) {
                 if *cached_mtime == file_mtime && *cached_size == file_size {
                     if needs_backfill.contains(&uri) {
@@ -629,6 +735,27 @@ fn scan_mount_directory(db: &LibraryDatabase, dir: &Path, mount_root: &str, sour
         }
         for chunk in video_batch.chunks(250) {
             let _ = db.upsert_indexed_batch(chunk);
+        }
+    }
+
+    if walk_io_errors > 0 && seen_uris.is_empty() && !probe_mount_online(dir) {
+        if source == "local" {
+            let _ = db.set_mount_online(mount_root, false);
+        }
+        return;
+    }
+
+    if walk_io_errors == 0
+        && probe_mount_online(dir)
+        && (!seen_uris.is_empty() || fingerprints.len() <= 50)
+    {
+        let stale_uris: Vec<String> = fingerprints
+            .keys()
+            .filter(|uri| !seen_uris.contains(*uri))
+            .cloned()
+            .collect();
+        if !stale_uris.is_empty() {
+            let _ = db.remove_tracks_by_uris_and_prune_empty_albums(&stale_uris);
         }
     }
 }
@@ -1333,99 +1460,203 @@ pub fn detect_offline_mount_for_paths(
     detect_offline_mount_for_paths_with_roots(paths, mounts, Path::new("/Volumes"))
 }
 
+/// Checks whether a candidate path resides on a missing/unmounted network or removable share stub.
+fn detect_unmounted_share_stub_for_path(
+    path: &Path,
+    volumes_root: &Path,
+    #[allow(unused_variables)] proc_mounts_txt: Option<&str>,
+) -> Option<String> {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+
+    // 1. macOS /Volumes/<Share> (or injected test volumes_root/<Share>) unmounted/stub guard
+    if let Ok(rel) = path.strip_prefix(volumes_root) {
+        if let Some(std::path::Component::Normal(share)) = rel.components().next() {
+            let share_dir = volumes_root.join(share);
+            if !share_dir.exists() {
+                return Some(share_dir.to_string_lossy().to_string());
+            }
+            #[cfg(unix)]
+            {
+                let is_symlink = std::fs::symlink_metadata(&share_dir)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false);
+                if !is_symlink {
+                    if let (Ok(v_meta), Ok(s_meta)) =
+                        (std::fs::metadata(volumes_root), std::fs::metadata(&share_dir))
+                    {
+                        if s_meta.dev() == v_meta.dev() {
+                            return Some(share_dir.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Linux /mnt/<share> empty unmounted stub or missing mount root guard
+    #[cfg(target_os = "linux")]
+    {
+        for base_prefix in ["/mnt", "/media", "/run/media"] {
+            let base = Path::new(base_prefix);
+            if let Ok(rel) = path.strip_prefix(base) {
+                let depth = if base_prefix == "/mnt" { 1 } else { 2 };
+                let mut comps = rel.components();
+                let mut candidate = base.to_path_buf();
+                let mut taken = 0usize;
+                while taken < depth {
+                    if let Some(std::path::Component::Normal(part)) = comps.next() {
+                        candidate.push(part);
+                        taken += 1;
+                    } else {
+                        break;
+                    }
+                }
+                if taken == depth {
+                    if !candidate.exists() {
+                        return Some(candidate.to_string_lossy().to_string());
+                    }
+                    if let (Ok(p_meta), Ok(c_meta)) = (
+                        std::fs::metadata(candidate.parent().unwrap_or(base)),
+                        std::fs::metadata(&candidate),
+                    ) {
+                        let is_active_mount = proc_mounts_txt
+                            .and_then(|txt| parse_proc_mounts_for_path(txt, &candidate))
+                            .map(|(mp, _)| mp == candidate)
+                            .unwrap_or(false);
+                        let dir_empty = std::fs::read_dir(&candidate)
+                            .map(|mut it| it.next().is_none())
+                            .unwrap_or(false);
+                        if !is_active_mount && c_meta.dev() == p_meta.dev() && dir_empty {
+                            return Some(candidate.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Windows UNC share (\\server\share) check
+    #[cfg(target_os = "windows")]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix("\\\\") {
+            let mut segs = rest.split('\\').filter(|s| !s.is_empty());
+            if let (Some(srv), Some(share)) = (segs.next(), segs.next()) {
+                let unc_root = format!("\\\\{srv}\\{share}");
+                if !Path::new(&unc_root).exists() {
+                    return Some(unc_root);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Returns `true` only when `path` is backed by a live, readable directory (not an unmounted SMB/NAS stub).
+pub fn probe_mount_online(path: &Path) -> bool {
+    probe_mount_online_with_volumes_root(path, Path::new("/Volumes"))
+}
+
+pub fn probe_mount_online_with_volumes_root(path: &Path, volumes_root: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    let proc_mounts_txt = std::fs::read_to_string("/proc/mounts").ok();
+    #[cfg(not(target_os = "linux"))]
+    let proc_mounts_txt: Option<String> = None;
+
+    if detect_unmounted_share_stub_for_path(path, volumes_root, proc_mounts_txt.as_deref()).is_some()
+    {
+        return false;
+    }
+
+    if !std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false) {
+        return false;
+    }
+    std::fs::read_dir(path).is_ok()
+}
+
+/// Probes every configured/indexed `user_custom` mount and updates `storage_mounts.is_online`
+/// without walking mount contents. Returns `true` if any mount state changed or was newly registered.
+pub fn refresh_mount_online_states(db: &LibraryDatabase, settings: &SimpSettings) -> bool {
+    let ignored_roots: HashSet<String> = settings
+        .library
+        .ignored_paths
+        .values()
+        .map(|s| normalize_platform_path(s).to_string_lossy().to_string())
+        .collect();
+
+    let mut changed = false;
+    let mut known_roots: HashSet<String> = HashSet::new();
+
+    if let Ok(existing_mounts) = db.get_mounts() {
+        for m in existing_mounts {
+            let norm_mount = normalize_platform_path(&m.mount_root)
+                .to_string_lossy()
+                .to_string();
+            known_roots.insert(m.mount_root.clone());
+            known_roots.insert(norm_mount.clone());
+            if m.mount_kind != "user_custom"
+                || ignored_roots.contains(&m.mount_root)
+                || ignored_roots.contains(&norm_mount)
+            {
+                continue;
+            }
+            let online = probe_mount_online(Path::new(&m.mount_root));
+            if online != m.is_online {
+                if db.set_mount_online(&m.mount_root, online).is_ok() {
+                    tracing::info!(
+                        "Storage mount '{}' state transitioned: {}",
+                        m.mount_root,
+                        if online { "online" } else { "offline" }
+                    );
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    for raw_path_str in settings.library.custom_paths.values() {
+        let norm_path = normalize_platform_path(raw_path_str);
+        let norm_str = norm_path.to_string_lossy().to_string();
+        if norm_str.is_empty()
+            || ignored_roots.contains(&norm_str)
+            || ignored_roots.contains(raw_path_str)
+            || known_roots.contains(&norm_str)
+        {
+            continue;
+        }
+        known_roots.insert(norm_str.clone());
+        if probe_mount_online(&norm_path) {
+            let label = norm_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| norm_str.clone());
+            if db.upsert_mount(&norm_str, &label, "user_custom", true).is_ok() {
+                tracing::info!("Registered newly online storage mount '{}'", norm_str);
+                changed = true;
+            }
+        }
+    }
+
+    changed
+}
+
 pub fn detect_offline_mount_for_paths_with_roots(
     paths: &[PathBuf],
     mounts: &[MountStatus],
     volumes_root: &Path,
 ) -> Option<String> {
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
-
     #[cfg(target_os = "linux")]
     let proc_mounts_txt = std::fs::read_to_string("/proc/mounts").ok();
+    #[cfg(not(target_os = "linux"))]
+    let proc_mounts_txt: Option<String> = None;
 
     for path in paths {
-        // 1. macOS /Volumes/<Share> (or injected test volumes_root/<Share>) unmounted/stub guard
-        if let Ok(rel) = path.strip_prefix(volumes_root) {
-            if let Some(std::path::Component::Normal(share)) = rel.components().next() {
-                let share_dir = volumes_root.join(share);
-                if !share_dir.exists() {
-                    return Some(share_dir.to_string_lossy().to_string());
-                }
-                #[cfg(unix)]
-                {
-                    let is_symlink = std::fs::symlink_metadata(&share_dir)
-                        .map(|m| m.file_type().is_symlink())
-                        .unwrap_or(false);
-                    if !is_symlink {
-                        if let (Ok(v_meta), Ok(s_meta)) =
-                            (std::fs::metadata(volumes_root), std::fs::metadata(&share_dir))
-                        {
-                            if s_meta.dev() == v_meta.dev() {
-                                return Some(share_dir.to_string_lossy().to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 2. Linux /mnt/<share> empty unmounted stub or missing mount root guard
-        #[cfg(target_os = "linux")]
+        if let Some(stub) =
+            detect_unmounted_share_stub_for_path(path, volumes_root, proc_mounts_txt.as_deref())
         {
-            for base_prefix in ["/mnt", "/media", "/run/media"] {
-                let base = Path::new(base_prefix);
-                if let Ok(rel) = path.strip_prefix(base) {
-                    let depth = if base_prefix == "/mnt" { 1 } else { 2 };
-                    let mut comps = rel.components();
-                    let mut candidate = base.to_path_buf();
-                    let mut taken = 0usize;
-                    while taken < depth {
-                        if let Some(std::path::Component::Normal(part)) = comps.next() {
-                            candidate.push(part);
-                            taken += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if taken == depth {
-                        if !candidate.exists() {
-                            return Some(candidate.to_string_lossy().to_string());
-                        }
-                        if let (Ok(p_meta), Ok(c_meta)) = (
-                            std::fs::metadata(candidate.parent().unwrap_or(base)),
-                            std::fs::metadata(&candidate),
-                        ) {
-                            let is_active_mount = proc_mounts_txt
-                                .as_deref()
-                                .and_then(|txt| parse_proc_mounts_for_path(txt, &candidate))
-                                .map(|(mp, _)| mp == candidate)
-                                .unwrap_or(false);
-                            let dir_empty = std::fs::read_dir(&candidate)
-                                .map(|mut it| it.next().is_none())
-                                .unwrap_or(false);
-                            if !is_active_mount && c_meta.dev() == p_meta.dev() && dir_empty {
-                                return Some(candidate.to_string_lossy().to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Windows UNC share (\\server\share) check
-        #[cfg(target_os = "windows")]
-        {
-            let raw = path.to_string_lossy();
-            if let Some(rest) = raw.strip_prefix("\\\\") {
-                let mut segs = rest.split('\\').filter(|s| !s.is_empty());
-                if let (Some(srv), Some(share)) = (segs.next(), segs.next()) {
-                    let unc_root = format!("\\\\{srv}\\{share}");
-                    if !Path::new(&unc_root).exists() {
-                        return Some(unc_root);
-                    }
-                }
-            }
+            return Some(stub);
         }
 
         // 4. Known DB mount state check (`storage_mounts`)
@@ -1538,7 +1769,7 @@ mod tests {
         let root_str = root.to_string_lossy().to_string();
         db.upsert_mount(&root_str, "Music", "user_custom", true)
             .unwrap();
-        scan_mount_directory(&db, &root, &root_str, "local");
+        scan_mount_directory_with_progress(&db, &root, &root_str, "local", None);
         assert_eq!(db.list_local_track_index_snapshot(None).unwrap().len(), 1);
 
         // Simulate external move performed while IMP was offline
@@ -1761,5 +1992,68 @@ mod tests {
             compute_local_album_id(composed_album, composed_dir, "local"),
             compute_local_album_id(decomposed_album, decomposed_dir, "local"),
         );
+    }
+
+    #[test]
+    fn test_probe_mount_online_rejects_missing_and_volumes_stub_accepts_real_dir() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("imp_probe_mount_{nanos}"));
+        let volumes_stub_root = root.join("Volumes");
+        let stub_dir = volumes_stub_root.join("OfflineShare");
+        let real_dir = root.join("LocalMusic");
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        std::fs::create_dir_all(&real_dir).unwrap();
+
+        assert!(probe_mount_online_with_volumes_root(&real_dir, &volumes_stub_root));
+        assert!(!probe_mount_online_with_volumes_root(
+            &stub_dir,
+            &volumes_stub_root
+        ));
+        assert!(!probe_mount_online_with_volumes_root(
+            &root.join("MissingDir"),
+            &volumes_stub_root
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_refresh_mount_online_states_recovers_offline_mount_and_detects_disconnect() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("imp_mount_recover_{nanos}"));
+        let share_dir = root.join("NasMusic");
+        std::fs::create_dir_all(&share_dir).unwrap();
+
+        let db = LibraryDatabase::open(&root.join("library.db")).unwrap();
+        let share_str = share_dir.to_string_lossy().to_string();
+        db.upsert_mount(&share_str, "NasMusic", "user_custom", false)
+            .unwrap();
+
+        let mut cfg = SimpSettings::default();
+        cfg.library
+            .custom_paths
+            .insert("0".to_string(), share_str.clone());
+
+        assert!(refresh_mount_online_states(&db, &cfg));
+        let mounts_after_recovery = db.get_mounts().unwrap();
+        assert_eq!(mounts_after_recovery.len(), 1);
+        assert!(mounts_after_recovery[0].is_online);
+
+        // No-op when state did not change
+        assert!(!refresh_mount_online_states(&db, &cfg));
+
+        // Simulate NAS unplug
+        std::fs::remove_dir_all(&share_dir).unwrap();
+        assert!(refresh_mount_online_states(&db, &cfg));
+        let mounts_after_unplug = db.get_mounts().unwrap();
+        assert!(!mounts_after_unplug[0].is_online);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

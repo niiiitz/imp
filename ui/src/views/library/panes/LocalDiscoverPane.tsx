@@ -273,6 +273,7 @@ export interface LocalDiscoverPaneProps {
   snap: SimpStateSnapshot | null;
   allLocalAlbums: AlbumRecord[];
   allLocalTracks: TrackMetadata[];
+  mountAlbums: AlbumRecord[];
   mountTracks: TrackMetadata[];
   localVideos: TrackMetadata[];
   localDiscover: LocalDiscoverResponse;
@@ -324,6 +325,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   snap,
   allLocalAlbums,
   allLocalTracks,
+  mountAlbums,
   mountTracks,
   localVideos,
   localDiscover,
@@ -351,8 +353,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   openLibraryContextMenu,
 }) => {
   const { syncedUris, allLyricsUris } = useLibraryLyricsStatus();
-  const isMountedMode = browseHubTarget === 'mount';
-  const effectiveSubTab: LocalSubTab = isMountedMode ? 'folders' : localSubTab;
+  const effectiveSubTab: LocalSubTab = localSubTab;
 
   const [visibleAlbumsCount, setVisibleAlbumsCount] = useState<number>(180);
   const [visibleArtistsCount, setVisibleArtistsCount] = useState<number>(180);
@@ -433,19 +434,66 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
     allLyricsUris,
   ]);
 
+  const scopedLocalTracks = useMemo(() => {
+    if (!activeMountRoot) return allLocalTracks;
+    if (mountTracks.length > 0) return mountTracks;
+    return allLocalTracks.filter((t) => t.mount_root === activeMountRoot);
+  }, [activeMountRoot, mountTracks, allLocalTracks]);
+
+  const scopedLocalAlbums = useMemo(() => {
+    if (!activeMountRoot) return allLocalAlbums;
+    if (mountAlbums.length > 0) return mountAlbums;
+    const albumIdSet = new Set<string>();
+    for (const t of scopedLocalTracks) {
+      if (t.album_id) albumIdSet.add(t.album_id);
+    }
+    return allLocalAlbums.filter((a) => albumIdSet.has(a.id));
+  }, [activeMountRoot, mountAlbums, allLocalAlbums, scopedLocalTracks]);
+
+  const scopedLocalVideos = useMemo(() => {
+    if (!activeMountRoot) return localVideos;
+    return localVideos.filter((v) => v.mount_root === activeMountRoot);
+  }, [activeMountRoot, localVideos]);
+
+  const activeFacetsSummary = useMemo(() => {
+    if (!activeMountRoot) return facetsSummary;
+    return computeLocalFacetsSummary(
+      scopedLocalAlbums,
+      scopedLocalTracks,
+      syncedUris,
+      allLyricsUris
+    );
+  }, [activeMountRoot, facetsSummary, scopedLocalAlbums, scopedLocalTracks, syncedUris, allLyricsUris]);
+
+  const scopedAlbumIdSet = useMemo(
+    () => new Set(scopedLocalAlbums.map((a) => a.id)),
+    [scopedLocalAlbums]
+  );
+
+  const overviewRecentAlbums = useMemo(() => {
+    if (!activeMountRoot) return localDiscover.recent_albums;
+    const filtered = localDiscover.recent_albums.filter((a) => scopedAlbumIdSet.has(a.id));
+    return filtered.length > 0 ? filtered : scopedLocalAlbums.slice(0, 16);
+  }, [activeMountRoot, localDiscover.recent_albums, scopedAlbumIdSet, scopedLocalAlbums]);
+
+  const overviewRediscoverAlbums = useMemo(() => {
+    if (!activeMountRoot) return localDiscover.rediscover_albums;
+    return localDiscover.rediscover_albums.filter((a) => scopedAlbumIdSet.has(a.id));
+  }, [activeMountRoot, localDiscover.rediscover_albums, scopedAlbumIdSet]);
+
   const tracksByAlbumId = useMemo(() => {
     const map = new Map<string, TrackMetadata[]>();
-    for (const t of allLocalTracks) {
+    for (const t of scopedLocalTracks) {
       if (!t.album_id) continue;
       const list = map.get(t.album_id);
       if (list) list.push(t);
       else map.set(t.album_id, [t]);
     }
     return map;
-  }, [allLocalTracks]);
+  }, [scopedLocalTracks]);
 
   const filteredAlbumsList = useMemo(() => {
-    return allLocalAlbums.filter((alb) => {
+    return scopedLocalAlbums.filter((alb) => {
       if (mediaTypeFilter === 'video') return false;
       if (localAlpha !== 'all' && !matchesAlphaBucket(alb.title, localAlpha)) return false;
       const albTracks = tracksByAlbumId.get(alb.id) || [];
@@ -476,7 +524,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
       return true;
     });
   }, [
-    allLocalAlbums,
+    scopedLocalAlbums,
     mediaTypeFilter,
     localAlpha,
     tracksByAlbumId,
@@ -489,26 +537,26 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   ]);
 
   const filteredTracksList = useMemo(
-    () => allLocalTracks.filter(trackMatchesFilters),
-    [allLocalTracks, trackMatchesFilters]
+    () => scopedLocalTracks.filter(trackMatchesFilters),
+    [scopedLocalTracks, trackMatchesFilters]
   );
 
   const albumArtistById = useMemo(() => {
     const map = new Map<string, string>();
-    for (const alb of allLocalAlbums) {
+    for (const alb of scopedLocalAlbums) {
       const clean = cleanAlbumArtistDisplay(alb.album_artist).trim();
       if (clean && !GENERIC_ALBUM_ARTISTS.has(clean.toLowerCase())) {
         map.set(alb.id, clean);
       }
     }
     return map;
-  }, [allLocalAlbums]);
+  }, [scopedLocalAlbums]);
 
   const filteredArtistsList = useMemo(() => {
     const baseList =
       artistGroupingMode === 'album_artists'
-        ? facetsSummary.albumArtists
-        : facetsSummary.allTrackArtists;
+        ? activeFacetsSummary.albumArtists
+        : activeFacetsSummary.allTrackArtists;
     if (!hasRichFilter && localAlpha === 'all') {
       return baseList;
     }
@@ -536,8 +584,8 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
     artistGroupingMode,
     hasRichFilter,
     localAlpha,
-    facetsSummary.albumArtists,
-    facetsSummary.allTrackArtists,
+    activeFacetsSummary.albumArtists,
+    activeFacetsSummary.allTrackArtists,
     filteredTracksList,
     filteredAlbumsList,
     albumArtistById,
@@ -589,26 +637,31 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
   if (localAlpha !== 'all') filterSummaryParts.push(localAlpha.toUpperCase());
   if (mediaTypeFilter !== 'all') filterSummaryParts.push(mediaTypeFilter);
 
+  const scopedMountTitle = activeMountRoot && effectiveMount ? effectiveMount.label : null;
   const hubTitle =
     effectiveSubTab === 'artists'
-      ? `Local Artists (${filteredArtistsList.length})`
+      ? scopedMountTitle
+        ? `${scopedMountTitle} — Artists (${filteredArtistsList.length})`
+        : `Local Artists (${filteredArtistsList.length})`
       : effectiveSubTab === 'albums'
-      ? `Local Albums (${filteredAlbumsList.length})`
+      ? scopedMountTitle
+        ? `${scopedMountTitle} — Albums (${filteredAlbumsList.length})`
+        : `Local Albums (${filteredAlbumsList.length})`
       : effectiveSubTab === 'folders'
       ? effectiveMount
         ? `${effectiveMount.label}${folderDrillData.curPrefix ? ` / ${folderDrillData.curPrefix}` : ''}`
         : 'Local Folders'
       : effectiveSubTab === 'videos'
-      ? `Local Videos (${localVideos.length})`
+      ? scopedMountTitle
+        ? `${scopedMountTitle} — Videos (${scopedLocalVideos.length})`
+        : `Local Videos (${scopedLocalVideos.length})`
+      : scopedMountTitle
+      ? scopedMountTitle
       : 'Local Music & Storage';
 
   const switchLocalTab = (tab: LocalSubTab) => {
     pushCurrentNavState();
     setLocalSubTab(tab);
-    if (tab !== 'folders') {
-      setActiveMountRoot(null);
-      setLocalFolderPath('');
-    }
   };
 
   return (
@@ -662,11 +715,11 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           {(
             [
               { id: 'overview', label: '⚡ Overview' },
-              { id: 'artists', label: `🎤 Artists (${facetsSummary.artists.length})` },
-              { id: 'albums', label: `💿 Albums (${allLocalAlbums.length})` },
+              { id: 'artists', label: `🎤 Artists (${activeFacetsSummary.artists.length})` },
+              { id: 'albums', label: `💿 Albums (${scopedLocalAlbums.length})` },
               { id: 'folders', label: `📂 Folders (${mountsList.length})` },
-              ...(localVideos.length > 0 && mediaTypeFilter !== 'audio'
-                ? [{ id: 'videos' as const, label: `🎬 Videos (${localVideos.length})` }]
+              ...(scopedLocalVideos.length > 0 && mediaTypeFilter !== 'audio'
+                ? [{ id: 'videos' as const, label: `🎬 Videos (${scopedLocalVideos.length})` }]
                 : []),
             ] as const
           ).map((t) => {
@@ -713,6 +766,62 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
             </button>
           )}
         </div>
+
+        {/* Mount Scope Selector Strip (persists across tabs when scoped to a folder container or browsing Folders) */}
+        {mountsList.length > 1 && (effectiveSubTab === 'folders' || Boolean(activeMountRoot)) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              data-right-filter-pill="true"
+              onClick={() => {
+                pushCurrentNavState();
+                setActiveMountRoot(null);
+                setLocalFolderPath('');
+              }}
+              style={{
+                padding: '5px 10px',
+                borderRadius: 7,
+                background: !activeMountRoot ? '#0b241c' : '#0b0e12',
+                border: !activeMountRoot ? '1px solid #34d399' : '1px solid #1b2a24',
+                color: !activeMountRoot ? '#6ee7b7' : '#9ca3af',
+                fontSize: 11,
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              All Folders ({mountsList.length})
+            </button>
+            {mountsList.map((m) => {
+              const isActive = effectiveMount?.mount_root === m.mount_root;
+              return (
+                <button
+                  key={m.mount_root}
+                  type="button"
+                  data-right-filter-pill="true"
+                  onClick={() => {
+                    pushCurrentNavState();
+                    setActiveMountRoot(m.mount_root);
+                    setLocalFolderPath('');
+                  }}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: 7,
+                    background: isActive ? '#0b241c' : '#0b0e12',
+                    border: isActive ? '1px solid #34d399' : '1px solid #1b2a24',
+                    color: isActive ? '#6ee7b7' : '#9ca3af',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    opacity: m.is_online ? 1 : 0.65,
+                  }}
+                >
+                  💾 {m.label}
+                  {!m.is_online ? ' (Offline)' : ''} ({m.track_count})
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* ===================================================================
@@ -820,7 +929,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           )}
 
           {/* Browse by Genre */}
-          {facetsSummary.genres.length > 0 && (
+          {activeFacetsSummary.genres.length > 0 && (
             <section
               data-section-anchor="local_genres"
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
@@ -828,10 +937,10 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
               <CollapsibleSectionHeader
                 sectionKey="local:genres"
                 accentColor="#34d399"
-                title={`🎸 BROWSE BY GENRE (${facetsSummary.genres.length})`}
+                title={`🎸 BROWSE BY GENRE (${activeFacetsSummary.genres.length})`}
               />
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {facetsSummary.genres.map((g) => (
+                {activeFacetsSummary.genres.map((g) => (
                   <button
                     key={g.genre}
                     type="button"
@@ -882,7 +991,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           )}
 
           {/* Browse by Era / Decade */}
-          {facetsSummary.eras.length > 0 && (
+          {activeFacetsSummary.eras.length > 0 && (
             <section
               data-section-anchor="local_eras"
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
@@ -893,7 +1002,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 title={`📅 BROWSE BY DECADE & YEAR`}
               />
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {facetsSummary.eras.map((era) => (
+                {activeFacetsSummary.eras.map((era) => (
                   <button
                     key={era.id}
                     type="button"
@@ -953,7 +1062,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 {
                   key: 'has_art',
                   title: '🖼️ Artwork Found',
-                  count: facetsSummary.artworkCounts.hasArt,
+                  count: activeFacetsSummary.artworkCounts.hasArt,
                   sub: 'Tracks with embedded or folder art',
                   accent: '#38bdf8',
                   onClick: () => {
@@ -966,7 +1075,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 {
                   key: 'missing_art',
                   title: '⚠️ Missing Artwork',
-                  count: facetsSummary.artworkCounts.missingArt,
+                  count: activeFacetsSummary.artworkCounts.missingArt,
                   sub: 'Tracks lacking cover art',
                   accent: '#facc15',
                   onClick: () => {
@@ -979,7 +1088,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 {
                   key: 'synced_lrc',
                   title: '🎤 Synced Lyrics (LRC)',
-                  count: facetsSummary.lyricsCounts.synced,
+                  count: activeFacetsSummary.lyricsCounts.synced,
                   sub: 'Karaoke-ready timed lyrics',
                   accent: '#34d399',
                   onClick: () => {
@@ -992,7 +1101,7 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
                 {
                   key: 'missing_lyrics',
                   title: '📝 Missing Lyrics',
-                  count: facetsSummary.lyricsCounts.missing,
+                  count: activeFacetsSummary.lyricsCounts.missing,
                   sub: 'Tracks without indexed lyrics yet',
                   accent: '#94a3b8',
                   onClick: () => {
@@ -1035,37 +1144,37 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           </section>
 
           {/* Recently Added Local Releases */}
-          {localDiscover.recent_albums.length > 0 && mediaTypeFilter !== 'video' && (
+          {overviewRecentAlbums.length > 0 && mediaTypeFilter !== 'video' && (
             <section
               data-section-anchor="local_recent_releases"
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
             >
               <PinnableSectionHeader
-                title={`🆕 RECENTLY ADDED LOCAL RELEASES (${localDiscover.recent_albums.length})`}
+                title={`🆕 RECENTLY ADDED LOCAL RELEASES (${overviewRecentAlbums.length})`}
                 accentColor="#34d399"
                 descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[2]}
-                liveItems={localDiscover.recent_albums}
+                liveItems={overviewRecentAlbums}
               />
-              <HorizontalShelfRail variant="tiles" itemCount={localDiscover.recent_albums.length}>
-                {localDiscover.recent_albums.map(renderSimpAlbumCard)}
+              <HorizontalShelfRail variant="tiles" itemCount={overviewRecentAlbums.length}>
+                {overviewRecentAlbums.map(renderSimpAlbumCard)}
               </HorizontalShelfRail>
             </section>
           )}
 
           {/* Rediscover Local Gems */}
-          {localDiscover.rediscover_albums.length > 0 && mediaTypeFilter !== 'video' && (
+          {overviewRediscoverAlbums.length > 0 && mediaTypeFilter !== 'video' && (
             <section
               data-section-anchor="local_rediscover"
               style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
             >
               <PinnableSectionHeader
-                title={`✨ REDISCOVER LOCAL GEMS (${localDiscover.rediscover_albums.length})`}
+                title={`✨ REDISCOVER LOCAL GEMS (${overviewRediscoverAlbums.length})`}
                 accentColor="#34d399"
                 descriptor={DEFAULT_STARTER_FYP_DESCRIPTORS[1]}
-                liveItems={localDiscover.rediscover_albums}
+                liveItems={overviewRediscoverAlbums}
               />
-              <HorizontalShelfRail variant="tiles" itemCount={localDiscover.rediscover_albums.length}>
-                {localDiscover.rediscover_albums.map(renderSimpAlbumCard)}
+              <HorizontalShelfRail variant="tiles" itemCount={overviewRediscoverAlbums.length}>
+                {overviewRediscoverAlbums.map(renderSimpAlbumCard)}
               </HorizontalShelfRail>
             </section>
           )}
@@ -1085,11 +1194,11 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
               [
                 {
                   id: 'album_artists' as const,
-                  label: `Album Artists (${facetsSummary.albumArtists.length})`,
+                  label: `Album Artists (${activeFacetsSummary.albumArtists.length})`,
                 },
                 {
                   id: 'all_track_artists' as const,
-                  label: `All Track Artists (${facetsSummary.allTrackArtists.length})`,
+                  label: `All Track Artists (${activeFacetsSummary.allTrackArtists.length})`,
                 },
               ] as const
             ).map((mode) => {
@@ -1284,60 +1393,6 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
          =================================================================== */}
       {effectiveSubTab === 'folders' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-          {/* Mount Selector Strip */}
-          {mountsList.length > 1 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                data-right-filter-pill="true"
-                onClick={() => {
-                  pushCurrentNavState();
-                  setActiveMountRoot(null);
-                  setLocalFolderPath('');
-                }}
-                style={{
-                  padding: '5px 10px',
-                  borderRadius: 7,
-                  background: !effectiveMount ? '#0b241c' : '#0b0e12',
-                  border: !effectiveMount ? '1px solid #34d399' : '1px solid #1b2a24',
-                  color: !effectiveMount ? '#6ee7b7' : '#9ca3af',
-                  fontSize: 11,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                }}
-              >
-                All Folders ({mountsList.length})
-              </button>
-              {mountsList.map((m) => {
-                const isActive = effectiveMount?.mount_root === m.mount_root;
-                return (
-                  <button
-                    key={m.mount_root}
-                    type="button"
-                    data-right-filter-pill="true"
-                    onClick={() => {
-                      pushCurrentNavState();
-                      setActiveMountRoot(m.mount_root);
-                      setLocalFolderPath('');
-                    }}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: 7,
-                      background: isActive ? '#0b241c' : '#0b0e12',
-                      border: isActive ? '1px solid #34d399' : '1px solid #1b2a24',
-                      color: isActive ? '#6ee7b7' : '#9ca3af',
-                      fontSize: 11,
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    💾 {m.label} ({m.track_count})
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {!effectiveMount ? (
             mountsList.length > 0 ? (
               <div style={tileGridStyle}>
@@ -1705,9 +1760,9 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
           data-section-anchor="local_videos_list"
           style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}
         >
-          {localVideos.length > 0 ? (
+          {scopedLocalVideos.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {localVideos.map((v) => renderSingleSongRow(v, localVideos, 'local_video_hub'))}
+              {scopedLocalVideos.map((v) => renderSingleSongRow(v, scopedLocalVideos, 'local_video_hub'))}
             </div>
           ) : (
             <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>

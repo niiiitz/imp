@@ -1546,8 +1546,7 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                     ) : (
                       snap?.mounts.map((m) => {
                         const isMountActive =
-                          (browseHubTarget === 'mount' ||
-                            (browseHubTarget === 'local_discover' && localSubTab === 'folders')) &&
+                          (browseHubTarget === 'mount' || browseHubTarget === 'local_discover') &&
                           activeMountRoot === m.mount_root &&
                           rightPaneMode === 'browse';
                         return (

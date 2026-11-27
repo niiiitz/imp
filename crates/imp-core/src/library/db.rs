@@ -524,7 +524,7 @@ impl LibraryDatabase {
     }
 
     /// Returns a map of `uri -> (mtime, size, art_url)` for fast incremental indexing of a mount root.
-    /// Tracks with `art_url IS NULL` are excluded so newly added folder artwork (`cover.jpg`) is picked up on rescan.
+    /// Includes tracks without artwork so artless files aren't re-parsed over SMB unless folder cover art appears.
     pub fn get_mount_file_fingerprints(
         &self,
         mount_root: &str,
@@ -532,7 +532,7 @@ impl LibraryDatabase {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT uri, COALESCE(file_mtime, 0), COALESCE(file_size, 0), art_url
-             FROM tracks WHERE mount_root = ?1 AND art_url IS NOT NULL",
+             FROM tracks WHERE mount_root = ?1",
         )?;
         let mut map = HashMap::new();
         let rows = stmt.query_map(params![mount_root], |row| {

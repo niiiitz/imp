@@ -590,6 +590,13 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     rediscover_albums: [],
     smart_stations: [],
   });
+  const mountsOnlineSignature = useMemo(
+    () =>
+      (snap?.mounts || [])
+        .map((m) => `${m.mount_root}:${m.is_online ? 1 : 0}:${m.track_count}`)
+        .join('|'),
+    [snap?.mounts]
+  );
   useEffect(() => {
     let cancelled = false;
     fetchLocalDiscover().then((res) => {
@@ -598,7 +605,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [albums.length, snap?.mounts?.length]);
+  }, [albums.length, snap?.mounts?.length, mountsOnlineSignature]);
 
   const handlePlayLocalSmartStation = useCallback(
     (st: LocalSmartStation, shuffle = false) => {
@@ -660,14 +667,10 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     setPreviewFolderPath(null);
   }, [localFolderPath, activeMountRoot, browseHubTarget, localSubTab]);
   useEffect(() => {
-    if (
-      !activeMountRoot ||
-      (browseHubTarget !== 'mount' &&
-        !(browseHubTarget === 'local_discover' && localSubTab === 'folders'))
-    ) {
+    if (!activeMountRoot || localSubTab !== 'folders') {
       setLeftMountDrillOpen(false);
     }
-  }, [activeMountRoot, browseHubTarget, localSubTab]);
+  }, [activeMountRoot, localSubTab]);
   useEffect(() => {
     defaultSimpClient
       .query<TrackMetadata[]>('get_tracks', {
@@ -681,7 +684,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (Array.isArray(res)) setAllLocalTracks(res);
       })
       .catch(() => {});
-  }, [albums.length, snap?.mounts?.length, totalMountTracks, allLocalTracksVersion]);
+  }, [albums.length, snap?.mounts?.length, totalMountTracks, mountsOnlineSignature, allLocalTracksVersion]);
   const allLocalAlbums = useMemo(
     () => albums.filter((alb) => !alb.id.startsWith('applemusic:album:')),
     [albums]
@@ -695,17 +698,16 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
   const [filterHasLyricsOnly, setFilterHasLyricsOnly] = useState<boolean>(false);
   const handleSelectLocalSubTab = useCallback(
     (next: React.SetStateAction<LocalSubTab>) => {
-      setLocalSubTab((prev) => {
-        const resolved = typeof next === 'function' ? next(prev) : next;
-        if (resolved !== 'folders') {
-          setActiveMountRoot(null);
-          setLocalFolderPath('');
-          setBrowseHubTarget('local_discover');
-        }
-        return resolved;
-      });
+      const resolved = typeof next === 'function' ? next(localSubTab) : next;
+      setLocalSubTab(resolved);
+      if (resolved !== 'folders') {
+        setLeftMountDrillOpen(false);
+      }
+      if (browseHubTarget !== 'local_discover' && browseHubTarget !== 'mount') {
+        setBrowseHubTarget('local_discover');
+      }
     },
-    [setBrowseHubTarget]
+    [localSubTab, browseHubTarget, setBrowseHubTarget]
   );
   useEffect(() => {
     setFilterHasLyricsOnly(false);
@@ -1388,7 +1390,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         if (Array.isArray(res)) setMountTracks(res);
       })
       .catch(() => {});
-  }, [activeMountRoot, browserSearch, albums]);
+  }, [activeMountRoot, browserSearch, albums, mountsOnlineSignature]);
 
   // Load indexed Local Video files (`source: 'local_video'`) for the SIMP Library hub
   useEffect(() => {
@@ -4093,7 +4095,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         onOpenConnectedAccounts={onOpenConnectedAccounts}
         pushCurrentNavState={pushCurrentNavState}
         localSubTab={localSubTab}
-        setLocalSubTab={setLocalSubTab}
+        setLocalSubTab={handleSelectLocalSubTab}
         setLocalFolderPath={setLocalFolderPath}
         localAlbumsCount={allLocalAlbums.length}
         localArtistsCount={localFacetsSummary.artists.length}
@@ -4264,7 +4266,8 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
             activeMountRoot={activeMountRoot}
             setActiveMountRoot={setActiveMountRoot}
             localSubTab={localSubTab}
-            setLocalSubTab={setLocalSubTab}
+            setLocalSubTab={handleSelectLocalSubTab}
+            mountAlbums={mountAlbums}
             localFolderPath={previewFolderPath ?? localFolderPath}
             setLocalFolderPath={(next) => {
               setPreviewFolderPath(null);

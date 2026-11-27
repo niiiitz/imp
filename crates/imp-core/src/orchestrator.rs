@@ -1,5 +1,7 @@
 use crate::library::db::LibraryDatabase;
-use crate::library::indexer::scan_all_storage;
+use crate::library::indexer::{
+    probe_mount_online, refresh_mount_online_states, scan_all_storage_with_callbacks,
+};
 use crate::library::mounts::read_power_state;
 use crate::library::vdf::{load_session_state, save_session_state};
 use crate::mpris::{initialize_mpris, update_mpris_metadata, update_mpris_playback, MprisHandle};
@@ -40,6 +42,21 @@ pub struct OrchestratorSnapshot {
     pub soundcloud_authenticated: bool,
     pub internet_archive_authenticated: bool,
     pub brightness_pct: u8,
+}
+
+static MOUNT_LIVENESS_PROBE_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static STORAGE_SCAN_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static STORAGE_SCAN_REQUEUE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+struct AtomicFlagResetGuard(&'static std::sync::atomic::AtomicBool);
+
+impl Drop for AtomicFlagResetGuard {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 pub struct AudioOrchestrator {
@@ -178,6 +195,94 @@ impl AudioOrchestrator {
         orchestrator
     }
 
+    /// Spawns a single-flight background storage scan (optionally scoped to one mount).
+    /// Overlapping scan requests coalesce via `STORAGE_SCAN_REQUEUE` to avoid duplicate SMB walks.
+    fn spawn_storage_scan(&self, only_mount: Option<String>) {
+        if STORAGE_SCAN_RUNNING
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            STORAGE_SCAN_REQUEUE.store(true, std::sync::atomic::Ordering::SeqCst);
+            tracing::info!("Coalescing concurrent storage scan request behind active scan");
+            return;
+        }
+
+        let db = self.db.clone();
+        let settings_arc = self.settings.clone();
+        let bcast = self.broadcast_tx.clone();
+        let state_ref = self.state.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = AtomicFlagResetGuard(&STORAGE_SCAN_RUNNING);
+            let mut next_only_mount = only_mount;
+            loop {
+                let cfg = {
+                    let mut guard = settings_arc.lock().unwrap();
+                    if !guard.library.initial_scan_completed {
+                        guard.library.initial_scan_completed = true;
+                        let _ = crate::library::vdf::save_settings(&guard);
+                    }
+                    guard.clone()
+                };
+                if next_only_mount.is_none() {
+                    let _ = db.clear_musicbrainz_negative_cache();
+                }
+
+                let (total_albums, total_tracks) = scan_all_storage_with_callbacks(
+                    &db,
+                    &cfg,
+                    next_only_mount.as_deref(),
+                    || {
+                        if let Ok(mounts) = db.get_mounts() {
+                            let _ = bcast.send(PlaybackEvent::StorageMountsChanged { mounts });
+                        }
+                    },
+                    |albums, tracks| {
+                        let _ = bcast.send(PlaybackEvent::LibraryUpdated {
+                            total_albums: albums,
+                            total_tracks: tracks,
+                        });
+                    },
+                );
+
+                // Refresh current_track metadata (e.g., if cover.jpg was just added to the album folder)
+                let cur_uri = state_ref
+                    .lock()
+                    .unwrap()
+                    .current_track
+                    .as_ref()
+                    .map(|t| t.uri.clone());
+                if let Some(uri) = cur_uri {
+                    if let Ok(Some(updated_track)) = db.get_track_by_uri(&uri) {
+                        let mut st = state_ref.lock().unwrap();
+                        st.current_track = Some(updated_track.clone());
+                        for q_item in &mut st.queue {
+                            if q_item.uri == uri {
+                                *q_item = updated_track.clone();
+                            }
+                        }
+                    }
+                }
+                let _ = bcast.send(PlaybackEvent::LibraryUpdated {
+                    total_albums,
+                    total_tracks,
+                });
+                if let Ok(mounts) = db.get_mounts() {
+                    let _ = bcast.send(PlaybackEvent::StorageMountsChanged { mounts });
+                }
+
+                if !STORAGE_SCAN_REQUEUE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+                next_only_mount = None;
+            }
+        });
+    }
+
     pub async fn run_loop(
         mut self,
         mut cmd_rx: mpsc::UnboundedReceiver<AudioCommand>,
@@ -200,6 +305,34 @@ impl AudioOrchestrator {
                     self.internet_archive_sink.check_idle_suspend();
                     if self.state.lock().unwrap().is_playing {
                         self.persist_session_to_vdf();
+                    }
+                    if MOUNT_LIVENESS_PROBE_RUNNING
+                        .compare_exchange(
+                            false,
+                            true,
+                            std::sync::atomic::Ordering::SeqCst,
+                            std::sync::atomic::Ordering::SeqCst,
+                        )
+                        .is_ok()
+                    {
+                        let probe_db = self.db.clone();
+                        let probe_cfg = self.settings.lock().unwrap().clone();
+                        let probe_bcast = self.broadcast_tx.clone();
+                        tokio::task::spawn_blocking(move || {
+                            let _guard = AtomicFlagResetGuard(&MOUNT_LIVENESS_PROBE_RUNNING);
+                            if refresh_mount_online_states(&probe_db, &probe_cfg) {
+                                if let Ok(mounts) = probe_db.get_mounts() {
+                                    let _ = probe_bcast
+                                        .send(PlaybackEvent::StorageMountsChanged { mounts });
+                                }
+                                let (total_albums, total_tracks) =
+                                    probe_db.get_library_counts().unwrap_or((0, 0));
+                                let _ = probe_bcast.send(PlaybackEvent::LibraryUpdated {
+                                    total_albums,
+                                    total_tracks,
+                                });
+                            }
+                        });
                     }
                 }
             }
@@ -569,8 +702,17 @@ impl AudioOrchestrator {
                         }
                     }
                     existing_roots.extend(unique_paths.iter().cloned());
+                    let other_roots: Vec<String> = existing_roots
+                        .iter()
+                        .filter(|existing| {
+                            crate::library::vdf::normalize_platform_path(existing)
+                                .to_string_lossy()
+                                != normalized
+                        })
+                        .cloned()
+                        .collect();
                     if let Some(covering_parent) =
-                        crate::library::vdf::find_covering_parent_path(&normalized, &existing_roots)
+                        crate::library::vdf::find_covering_parent_path(&normalized, &other_roots)
                     {
                         tracing::info!(
                             "Skipping AddLibraryPath '{normalized}' — already covered by parent mount '{covering_parent}'"
@@ -602,19 +744,27 @@ impl AudioOrchestrator {
                     let _ = crate::library::vdf::save_settings(&cfg);
                 }
                 let norm_path = std::path::PathBuf::from(&normalized);
-                if norm_path.is_dir() {
-                    let label = norm_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| normalized.clone());
-                    let _ = self.db.upsert_mount(&normalized, &label, "user_custom", true);
-                    if let Ok(mounts) = self.db.get_mounts() {
-                        let _ = self
-                            .broadcast_tx
-                            .send(PlaybackEvent::StorageMountsChanged { mounts });
-                    }
+                let online = probe_mount_online(&norm_path);
+                let label = norm_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| normalized.clone());
+                let _ = self
+                    .db
+                    .upsert_mount(&normalized, &label, "user_custom", online);
+                if let Ok(mounts) = self.db.get_mounts() {
+                    let _ = self
+                        .broadcast_tx
+                        .send(PlaybackEvent::StorageMountsChanged { mounts });
                 }
-                self.handle_command(AudioCommand::RescanStorage);
+                if online {
+                    self.spawn_storage_scan(Some(normalized));
+                } else {
+                    tracing::warn!(
+                        "Storage mount '{}' is currently offline/unmounted; skipping rescan walk",
+                        normalized
+                    );
+                }
             }
             AudioCommand::RemoveLibraryPath { path } => {
                 let target_norm = crate::library::vdf::normalize_platform_path(&path)
@@ -676,46 +826,7 @@ impl AudioOrchestrator {
                 }
             }
             AudioCommand::RescanStorage => {
-                let db = self.db.clone();
-                let cfg = {
-                    let mut guard = self.settings.lock().unwrap();
-                    if !guard.library.initial_scan_completed {
-                        guard.library.initial_scan_completed = true;
-                        let _ = crate::library::vdf::save_settings(&guard);
-                    }
-                    guard.clone()
-                };
-                let bcast = self.broadcast_tx.clone();
-                let state_ref = self.state.clone();
-                tokio::task::spawn_blocking(move || {
-                    let _ = db.clear_musicbrainz_negative_cache();
-                    let (total_albums, total_tracks) = scan_all_storage(&db, &cfg);
-                    // Refresh current_track metadata (e.g., if cover.jpg was just added to the album folder)
-                    let cur_uri = state_ref
-                        .lock()
-                        .unwrap()
-                        .current_track
-                        .as_ref()
-                        .map(|t| t.uri.clone());
-                    if let Some(uri) = cur_uri {
-                        if let Ok(Some(updated_track)) = db.get_track_by_uri(&uri) {
-                            let mut st = state_ref.lock().unwrap();
-                            st.current_track = Some(updated_track.clone());
-                            for q_item in &mut st.queue {
-                                if q_item.uri == uri {
-                                    *q_item = updated_track.clone();
-                                }
-                            }
-                        }
-                    }
-                    let _ = bcast.send(PlaybackEvent::LibraryUpdated {
-                        total_albums,
-                        total_tracks,
-                    });
-                    if let Ok(mounts) = db.get_mounts() {
-                        let _ = bcast.send(PlaybackEvent::StorageMountsChanged { mounts });
-                    }
-                });
+                self.spawn_storage_scan(None);
             }
             AudioCommand::ConfigureAppleMusic {
                 team_id,
