@@ -17,7 +17,21 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use unicode_normalization::UnicodeNormalization;
 use walkdir::WalkDir;
+
+/// Computes a deterministic 16-hex `album_id` from Unicode-NFC-normalized
+/// `(album_title, parent_folder_path, source)` so macOS NFD vs NFC paths hash identically.
+pub fn compute_local_album_id(album: &str, parent_folder_path: &Path, source: &str) -> String {
+    let album_nfc: String = album.nfc().collect::<String>().to_lowercase();
+    let folder_nfc: String = parent_folder_path
+        .to_string_lossy()
+        .nfc()
+        .collect::<String>()
+        .to_lowercase();
+    let input = format!("{album_nfc}::{folder_nfc}::{source}");
+    blake3::hash(input.as_bytes()).to_hex()[..16].to_string()
+}
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[
     "flac", "mp3", "wav", "m4a", "aac", "ogg", "opus", "aiff", "aif",
@@ -643,17 +657,9 @@ fn parse_local_video_file_detached(
         .and_then(|parent| resolve_folder_art_cached(parent, folder_images, folder_art_cache));
     let art_http = folder_art.or_else(|| resolve_and_cache_artwork(path).map(|a| a.http_art_url));
 
-    let parent_folder_key = path
-        .parent()
-        .map(|p| p.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
+    let parent_dir = path.parent().unwrap_or_else(|| Path::new(""));
     let parent_folder = compute_relative_parent_folder(mount_root, path);
-    let album_id_input = format!(
-        "{}::{}::local_video",
-        folder_album.to_lowercase(),
-        parent_folder_key
-    );
-    let album_id = blake3::hash(album_id_input.as_bytes()).to_hex()[..16].to_string();
+    let album_id = compute_local_album_id(&folder_album, parent_dir, "local_video");
     let artist_label = parsed_artist.unwrap_or_else(|| "Local Video".to_string());
     let has_art = art_http
         .as_deref()
@@ -792,13 +798,9 @@ fn parse_audio_file_detached(
 
     // Group compilation / OST albums by `(album_title, parent_folder)` so multi-artist soundtracks
     // stay together as a single album instead of splitting per track artist.
-    let parent_folder_key = path
-        .parent()
-        .map(|p| p.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
+    let parent_dir = path.parent().unwrap_or_else(|| Path::new(""));
     let parent_folder = compute_relative_parent_folder(mount_root, path);
-    let album_id_input = format!("{}::{}::{}", album.to_lowercase(), parent_folder_key, source);
-    let album_id = blake3::hash(album_id_input.as_bytes()).to_hex()[..16].to_string();
+    let album_id = compute_local_album_id(&album, parent_dir, source);
 
     let album_artist_owned = if source == "steam_ost" {
         "Steam Soundtrack".to_string()
@@ -1746,5 +1748,18 @@ mod tests {
         assert_eq!(db.list_local_track_index_snapshot(None).unwrap().len(), 1);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_compute_local_album_id_normalizes_nfc_and_nfd_identically() {
+        let composed_album = "Caf\u{00E9} OST";
+        let decomposed_album = "Cafe\u{0301} OST";
+        let composed_dir = Path::new("/Volumes/Music/Caf\u{00E9}");
+        let decomposed_dir = Path::new("/Volumes/Music/Cafe\u{0301}");
+
+        assert_eq!(
+            compute_local_album_id(composed_album, composed_dir, "local"),
+            compute_local_album_id(decomposed_album, decomposed_dir, "local"),
+        );
     }
 }

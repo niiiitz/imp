@@ -270,9 +270,53 @@ fn extract_embedded_bytes(file_path: &Path) -> Option<(Vec<u8>, &'static str)> {
     extract_embedded_bytes_from_tagged(&tagged_file)
 }
 
+/// Computes a canonical 16-hex `blake3` hash of cover artwork bytes.
+/// For PNG images, hashes only critical pixel/header chunks (`IHDR`, `PLTE`, `IDAT`)
+/// so identical covers with differing encoder `tIME` or ancillary metadata chunks share the same cached file.
+pub fn canonical_artwork_hash(bytes: &[u8]) -> String {
+    const PNG_SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.starts_with(PNG_SIG) {
+        let mut pos = PNG_SIG.len();
+        let mut hasher = blake3::Hasher::new();
+        let mut saw_idat = false;
+        while let Some(header_end) = pos.checked_add(8) {
+            if header_end > bytes.len() {
+                break;
+            }
+            let chunk_len = u32::from_be_bytes([
+                bytes[pos],
+                bytes[pos + 1],
+                bytes[pos + 2],
+                bytes[pos + 3],
+            ]) as usize;
+            let ctype = &bytes[pos + 4..pos + 8];
+            let Some(payload_end) = header_end.checked_add(chunk_len) else {
+                break;
+            };
+            let Some(next_pos) = payload_end.checked_add(4) else {
+                break;
+            };
+            if next_pos > bytes.len() {
+                break;
+            }
+            if matches!(ctype, b"IHDR" | b"PLTE" | b"IDAT") {
+                if ctype == b"IDAT" {
+                    saw_idat = true;
+                }
+                hasher.update(ctype);
+                hasher.update(&bytes[header_end..payload_end]);
+            }
+            pos = next_pos;
+        }
+        if saw_idat {
+            return hasher.finalize().to_hex()[..16].to_string();
+        }
+    }
+    blake3::hash(bytes).to_hex()[..16].to_string()
+}
+
 fn write_art_bytes(bytes: &[u8], ext: &str, kind: &str) -> Option<ExtractedArtwork> {
-    let hash = blake3::hash(bytes).to_hex();
-    let short_hash = &hash.as_str()[..16];
+    let short_hash = canonical_artwork_hash(bytes);
     let filename = format!("simp_art_{kind}_{short_hash}.{ext}");
 
     // 1. Write to system temp directory (/tmp RAM disk on Linux, %TEMP% on Windows) for MPRIS2 / SMTC
@@ -707,5 +751,41 @@ mod tests {
             let _ = std::fs::remove_file(std::env::temp_dir().join(fname));
         }
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn mk_test_png_chunk(ctype: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(12 + payload.len());
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(ctype);
+        out.extend_from_slice(payload);
+        out.extend_from_slice(&[0u8; 4]);
+        out
+    }
+
+    fn mk_test_png(time_sec: u8, idat_byte: u8) -> Vec<u8> {
+        let mut buf = Vec::from(b"\x89PNG\r\n\x1a\n".as_slice());
+        buf.extend_from_slice(&mk_test_png_chunk(
+            b"IHDR",
+            &[0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0],
+        ));
+        buf.extend_from_slice(&mk_test_png_chunk(
+            b"tIME",
+            &[0x07, 0xEA, 5, 25, 10, 0, time_sec],
+        ));
+        buf.extend_from_slice(&mk_test_png_chunk(b"IDAT", &[idat_byte, 2, 3, 4]));
+        buf.extend_from_slice(&mk_test_png_chunk(b"IEND", &[]));
+        buf
+    }
+
+    #[test]
+    fn test_canonical_artwork_hash_ignores_png_time_chunks() {
+        let png_a = mk_test_png(10, 42);
+        let png_b = mk_test_png(55, 42);
+        let png_diff = mk_test_png(55, 43);
+        assert_eq!(canonical_artwork_hash(&png_a), canonical_artwork_hash(&png_b));
+        assert_ne!(
+            canonical_artwork_hash(&png_a),
+            canonical_artwork_hash(&png_diff)
+        );
     }
 }

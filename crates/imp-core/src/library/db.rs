@@ -912,6 +912,40 @@ impl LibraryDatabase {
                     ])?;
                 }
             }
+
+            // Recompute `albums.art_cache_path` by majority vote across each touched album's tracks
+            // so 1-2 outlier tracks never hijack the album tile, and clear stale MB `not_found` cache entries
+            // when local artwork (`simp_art_*`) is now present.
+            let mut maj_art_stmt = tx.prepare(
+                "SELECT art_url
+                 FROM tracks
+                 WHERE album_id = ?1 AND art_url IS NOT NULL AND TRIM(art_url) != ''
+                 GROUP BY art_url
+                 ORDER BY
+                   COUNT(*) DESC,
+                   CASE WHEN art_url LIKE '%/simp_art_%' THEN 0 ELSE 1 END ASC,
+                   MIN(COALESCE(disc_number, 1)) ASC,
+                   MIN(COALESCE(track_number, 999999)) ASC,
+                   art_url ASC
+                 LIMIT 1",
+            )?;
+            let mut update_alb_art_stmt = tx.prepare(
+                "UPDATE albums SET art_cache_path = ?1 WHERE id = ?2",
+            )?;
+            let mut clear_stale_mb_stmt = tx.prepare(
+                "DELETE FROM musicbrainz_album_art_cache WHERE album_id = ?1 AND status = 'not_found'",
+            )?;
+            for album_id in unique_albums.keys() {
+                let winner_art: Option<String> = maj_art_stmt
+                    .query_row(params![album_id], |row| row.get(0))
+                    .optional()?;
+                if let Some(ref art_url) = winner_art {
+                    update_alb_art_stmt.execute(params![art_url, album_id])?;
+                    if art_url.contains("/simp_art_") {
+                        clear_stale_mb_stmt.execute(params![album_id])?;
+                    }
+                }
+            }
         }
         tx.commit()?;
         Ok(())
@@ -3873,6 +3907,73 @@ mod tests {
         assert_eq!(profile.albums.len(), 1);
         assert_eq!(profile.tracks.len(), 3);
         assert!(profile.tracks.iter().any(|t| t.title == "Guest Interlude"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_upsert_indexed_batch_picks_majority_album_art_and_clears_stale_mb_not_found() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("imp_majority_art_{nanos}"));
+        let db = LibraryDatabase::open(&temp_dir.join("library.db")).unwrap();
+
+        let album_id = "alb_maj_test".to_string();
+        db.set_musicbrainz_art_cache(&album_id, "not_found", None)
+            .unwrap();
+        assert!(db.get_musicbrainz_art_cache(&album_id).is_some());
+
+        let minority_art = "http://127.0.0.1:18888/art/simp_art_emb_minority00000001.png";
+        let majority_art = "http://127.0.0.1:18888/art/simp_art_emb_majority00000002.png";
+        let mk_item = |tn: u32, art: &str| IndexedTrackBatchItem {
+            album_id: album_id.clone(),
+            album_title: "Sample Album".to_string(),
+            album_artist: "Sample Artist".to_string(),
+            steam_app_id: None,
+            release_year: Some(2024),
+            art_cache_path: Some(art.to_string()),
+            genre: None,
+            parent_folder: Some("Sample Artist/Sample Album".to_string()),
+            track: TrackMetadata {
+                uri: format!("file:///music/sample/{tn:02}.flac"),
+                title: format!("Track {tn:02}"),
+                artists: vec!["Sample Artist".to_string()],
+                album: "Sample Album".to_string(),
+                album_id: Some(album_id.clone()),
+                track_number: Some(tn),
+                disc_number: Some(1),
+                duration_ms: 180_000,
+                art_url: Some(art.to_string()),
+                source: "local".to_string(),
+                mount_root: None,
+                genre: None,
+                release_year: Some(2024),
+                content_rating: None,
+                parent_folder: Some("Sample Artist/Sample Album".to_string()),
+            },
+            file_mtime: Some(1700000100),
+            file_size: Some(4096),
+            has_art: true,
+            has_local_lrc: false,
+        };
+
+        // Track 1 arrives first with minority cover; tracks 2..=4 carry the majority cover
+        db.upsert_indexed_batch(&[
+            mk_item(1, minority_art),
+            mk_item(2, majority_art),
+            mk_item(3, majority_art),
+            mk_item(4, majority_art),
+        ])
+        .unwrap();
+
+        let albums = db
+            .get_albums_filtered(Some("local"), None, Some("Sample Album"), 10, 0)
+            .unwrap();
+        assert_eq!(albums.len(), 1);
+        assert_eq!(albums[0].art_url.as_deref(), Some(majority_art));
+        assert_eq!(db.get_musicbrainz_art_cache(&album_id), None);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
