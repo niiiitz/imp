@@ -811,6 +811,145 @@ pub fn search_catalog(
     Ok(items)
 }
 
+/// Extracts an Internet Archive identifier from URLs like
+/// `https://archive.org/details/<id>`, `/metadata/<id>`, or `/download/<id>`.
+pub fn parse_archive_org_identifier(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let without_scheme = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))?;
+    let (host_port, rest) = without_scheme.split_once('/')?;
+    let host = host_port
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if host != "archive.org" && !host.ends_with(".archive.org") {
+        return None;
+    }
+    let path_only = rest.split(['?', '#']).next().unwrap_or("");
+    let mut segs = path_only.split('/').filter(|s| !s.is_empty());
+    let kind = segs.next()?;
+    if !matches!(kind, "details" | "metadata" | "download") {
+        return None;
+    }
+    let id = segs.next()?.trim();
+    if id.len() >= 2
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        Some(id.to_string())
+    } else {
+        None
+    }
+}
+
+/// Replaces Lucene special syntax characters with spaces so user search terms cannot trigger
+/// invalid Solr field queries on `archive.org/advancedsearch.php`.
+pub fn sanitize_archive_lucene_terms(raw: &str) -> String {
+    raw.chars()
+        .map(|c| {
+            if matches!(
+                c,
+                '(' | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '"'
+                    | '^'
+                    | '~'
+                    | '*'
+                    | '?'
+                    | ':'
+                    | '\\'
+                    | '/'
+                    | '+'
+                    | '!'
+                    | '-'
+            ) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Picks the best non-private full-resolution cover image from an Archive.org `files` array,
+/// ignoring `__ia_thumb.jpg`, `*_thumb.*`, and generated thumbnail entries.
+pub fn pick_best_archive_cover_file(identifier: &str, files: &[Value]) -> Option<String> {
+    let mut best: Option<(u8, u64, String)> = None;
+    for item in files {
+        let is_private = item
+            .get("private")
+            .and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s == "true" || s == "1")))
+            .unwrap_or(false);
+        if is_private {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(|v| v.as_str()).map(str::trim) else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        let lower = name.to_ascii_lowercase();
+        let leaf = lower.rsplit('/').next().unwrap_or(&lower);
+        let is_img = leaf.ends_with(".jpg")
+            || leaf.ends_with(".jpeg")
+            || leaf.ends_with(".png")
+            || leaf.ends_with(".webp");
+        if !is_img || leaf == "__ia_thumb.jpg" || leaf.contains("_thumb.") {
+            continue;
+        }
+        let fmt = item
+            .get("format")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if fmt.contains("thumb") || fmt == "item tile" {
+            continue;
+        }
+        let size: u64 = item
+            .get("size")
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok()))
+            })
+            .unwrap_or(0);
+        let name_score: u8 = if leaf.contains("cover")
+            || leaf.contains("front")
+            || leaf.contains("folder")
+            || leaf.contains("jacket")
+            || leaf.contains("booklet")
+        {
+            2
+        } else if size >= 4096 {
+            1
+        } else {
+            0
+        };
+        let replace = match &best {
+            None => true,
+            Some((ps, psz, _)) => name_score > *ps || (name_score == *ps && size > *psz),
+        };
+        if replace {
+            best = Some((name_score, size, name.to_string()));
+        }
+    }
+
+    best.map(|(_, _, name)| {
+        let encoded_id = url_encode_component(identifier);
+        let encoded_path = url_encode_path_preserve_slashes(name.trim_start_matches('/'));
+        format!("https://archive.org/download/{encoded_id}/{encoded_path}")
+    })
+}
+
 pub fn search_catalog_paged(
     settings: &SimpSettings,
     term: &str,
@@ -822,7 +961,13 @@ pub fn search_catalog_paged(
         return Ok((Vec::new(), false));
     }
     let creds = resolve_internet_archive_credentials(settings);
-    let escaped = trimmed.replace('"', " ");
+    if let Some(id) = parse_archive_org_identifier(trimmed) {
+        return execute_archive_search_paged(&creds, &format!("identifier:{id}"), "downloads desc", 10, 1);
+    }
+    let escaped = sanitize_archive_lucene_terms(trimmed);
+    if escaped.is_empty() {
+        return Ok((Vec::new(), false));
+    }
     let type_clause = match media_filter.unwrap_or("all") {
         "video" | "movies" => "mediatype:movies AND -collection:television",
         "audio" => "(mediatype:etree OR mediatype:audio)",
@@ -946,16 +1091,17 @@ pub fn parse_ia_metadata_json(identifier: &str, root: &Value) -> Result<ArchiveI
     let description = strip_html_tags(&value_as_first_string(meta.get("description")));
     let content_rating = extract_ia_content_rating(meta, &description, Some(root));
     let runtime_raw = value_as_first_string(meta.get("runtime"));
-    let art_url = Some(format!(
-        "https://archive.org/services/img/{}",
-        url_encode_component(identifier)
-    ));
-
     let files = root
         .get("files")
         .and_then(|f| f.as_array())
         .cloned()
         .unwrap_or_default();
+    let art_url = pick_best_archive_cover_file(identifier, &files).or_else(|| {
+        Some(format!(
+            "https://archive.org/services/img/{}",
+            url_encode_component(identifier)
+        ))
+    });
 
     // 1. Collect subtitle files (`.srt` / `.vtt`)
     let mut item_subtitles: Vec<(String, VideoSubtitleVariant)> = Vec::new();
@@ -1757,6 +1903,60 @@ mod tests {
         assert_eq!(
             detail_stars.summary.content_rating.as_deref(),
             Some("★ 4.6")
+        );
+    }
+
+    #[test]
+    fn test_parse_archive_org_identifier_and_lucene_sanitization() {
+        assert_eq!(
+            parse_archive_org_identifier("https://archive.org/details/sample-ost-2009?tab=1#reviews"),
+            Some("sample-ost-2009".to_string())
+        );
+        assert_eq!(
+            parse_archive_org_identifier("https://archive.org/metadata/sample_concert_1999/"),
+            Some("sample_concert_1999".to_string())
+        );
+        assert_eq!(parse_archive_org_identifier("Artist: Album [OST]"), None);
+        assert_eq!(
+            sanitize_archive_lucene_terms("Title: The Complete [Soundtrack]!"),
+            "Title The Complete Soundtrack"
+        );
+    }
+
+    #[test]
+    fn test_parse_ia_metadata_prefers_full_res_cover_file_over_tile() {
+        let with_cover = json!({
+            "metadata": {
+                "identifier": "sample_audio_release",
+                "title": "Sample Audio Release",
+                "mediatype": "audio"
+            },
+            "files": [
+                { "name": "private_cover.jpg", "size": "900000", "format": "JPEG", "private": true },
+                { "name": "__ia_thumb.jpg", "size": "20817", "format": "Item Tile" },
+                { "name": "cover_thumb.jpg", "size": "11475", "format": "JPEG Thumb" },
+                { "name": "Front Cover.jpg", "size": "252411", "format": "JPEG" }
+            ]
+        });
+        let detail = parse_ia_metadata_json("sample_audio_release", &with_cover).expect("parse");
+        assert_eq!(
+            detail.summary.art_url.as_deref(),
+            Some("https://archive.org/download/sample_audio_release/Front%20Cover.jpg")
+        );
+
+        let no_cover = json!({
+            "metadata": {
+                "identifier": "sample_no_cover",
+                "title": "Sample No Cover",
+                "mediatype": "audio"
+            },
+            "files": []
+        });
+        let detail_fallback =
+            parse_ia_metadata_json("sample_no_cover", &no_cover).expect("parse fallback");
+        assert_eq!(
+            detail_fallback.summary.art_url.as_deref(),
+            Some("https://archive.org/services/img/sample_no_cover")
         );
     }
 }

@@ -43,6 +43,32 @@ export const TrackPropertiesModal: React.FC<TrackPropertiesModalProps> = ({
   const [propsData, setPropsData] = useState<TrackPropertiesData | null>(null);
   const [loading, setLoading] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [librarianOnline, setLibrarianOnline] = useState(false);
+  const [openingLibrarian, setOpeningLibrarian] = useState(false);
+
+  useEffect(() => {
+    setLibrarianOnline(false);
+    if (!track?.uri || !track.uri.startsWith('file://')) return;
+    let cancelled = false;
+    const ctrl = new AbortController();
+    const timer = window.setTimeout(() => ctrl.abort(), 700);
+    fetch('http://127.0.0.1:18899/api/status', { signal: ctrl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (!cancelled && json?.ok) {
+          setLibrarianOnline(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        window.clearTimeout(timer);
+      });
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [track?.uri]);
 
   useEffect(() => {
     if (!track?.uri) return;
@@ -768,6 +794,121 @@ export const TrackPropertiesModal: React.FC<TrackPropertiesModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {librarianOnline && track.uri.startsWith('file://') && (
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  background: 'rgba(46, 196, 182, 0.06)',
+                  border: '1px solid rgba(46, 196, 182, 0.3)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 800, color: '#2ec4b6' }}>
+                    <ImpIcon name="sliders" size={15} />
+                    <span>Imp Librarian Companion</span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      background: 'rgba(46, 196, 182, 0.16)',
+                      color: '#5eead4',
+                      fontWeight: 700,
+                    }}
+                  >
+                    Connected
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <button
+                    type="button"
+                    disabled={openingLibrarian}
+                    onClick={async () => {
+                      setOpeningLibrarian(true);
+                      try {
+                        const r = await fetch('http://127.0.0.1:18899/api/focus-track', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ uri: track.uri, target_tab: 'editor' }),
+                        });
+                        const json = await r.json().catch(() => null);
+                        if (r.ok && json?.ok) {
+                          onToast?.('Opened track in Imp Librarian');
+                        } else {
+                          onToast?.(json?.error || 'Could not open track in Imp Librarian');
+                        }
+                      } catch {
+                        onToast?.('Imp Librarian server is unreachable');
+                        setLibrarianOnline(false);
+                      } finally {
+                        setOpeningLibrarian(false);
+                      }
+                    }}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(46, 196, 182, 0.45)',
+                      background: 'rgba(46, 196, 182, 0.16)',
+                      color: '#5eead4',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: openingLibrarian ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>Edit Tags / AcoustID in Librarian ↗</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={openingLibrarian}
+                    onClick={async () => {
+                      setOpeningLibrarian(true);
+                      try {
+                        const r = await fetch('http://127.0.0.1:18899/api/focus-track', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ uri: track.uri, target_tab: 'artwork' }),
+                        });
+                        const json = await r.json().catch(() => null);
+                        if (r.ok && json?.ok) {
+                          onToast?.('Opened album in Imp Librarian Workbench');
+                        } else {
+                          onToast?.(json?.error || 'Could not open album in Imp Librarian');
+                        }
+                      } catch {
+                        onToast?.('Imp Librarian server is unreachable');
+                        setLibrarianOnline(false);
+                      } finally {
+                        setOpeningLibrarian(false);
+                      }
+                    }}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(255,255,255,0.14)',
+                      background: 'rgba(255,255,255,0.05)',
+                      color: '#e2e8f0',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: openingLibrarian ? 'wait' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <span>Open Album in Workbench ↗</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

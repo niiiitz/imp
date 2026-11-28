@@ -137,7 +137,7 @@ const ConsoleMainApp: React.FC = () => {
     }
   });
   const [desktopScreensaverActive, setDesktopScreensaverActive] = useState<boolean>(false);
-  const screensaverEnteredAtRef = useRef<number>(0);
+  const screensaverPointerGraceUntilRef = useRef<number>(0);
   const [view, setViewState] = useState<'lock' | 'browser'>(() =>
     desktopMode ? 'browser' : 'lock'
   );
@@ -601,7 +601,7 @@ const ConsoleMainApp: React.FC = () => {
 
   const triggerDesktopScreensaver = useCallback(() => {
     if (!desktopMode) return;
-    screensaverEnteredAtRef.current = performance.now();
+    screensaverPointerGraceUntilRef.current = performance.now() + 1800;
     setDesktopScreensaverActive(true);
   }, [desktopMode]);
 
@@ -1975,7 +1975,7 @@ const ConsoleMainApp: React.FC = () => {
           return;
         }
         if (isPlaying && desktopMode && desktopVizIdleSec > 0) {
-          screensaverEnteredAtRef.current = performance.now();
+          screensaverPointerGraceUntilRef.current = performance.now() + 350;
           setDesktopScreensaverActive(true);
           setLibraryIdleDimmed(false);
         } else {
@@ -1988,7 +1988,7 @@ const ConsoleMainApp: React.FC = () => {
     const onUserActivity = (ev?: Event) => {
       if (
         ev?.type === 'pointermove' &&
-        performance.now() - screensaverEnteredAtRef.current < 350
+        performance.now() < screensaverPointerGraceUntilRef.current
       ) {
         return;
       }

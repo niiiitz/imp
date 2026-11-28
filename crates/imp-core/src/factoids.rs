@@ -352,70 +352,245 @@ fn truncate_factoid_sentence(text: &str, max_chars: usize) -> String {
 }
 
 /// Splits a factoid sentence into either 1 compact speech bubble (`<= 92` chars)
-/// or a 2-part sequential speech-bubble pair (`Part 1/2` -> `Part 2/2`) at a natural
-/// clause/word boundary so facts fit inside a VH1 speech bubble without abrupt mid-sentence truncation.
+/// or a balanced N-part sequential speech-bubble sequence (`1/N` -> `N/N`, up to 6 parts)
+/// at natural clause/word boundaries so longer complete thoughts finish cleanly without mid-sentence cutoff.
 pub fn split_sentence_into_bubble_parts(text: &str) -> Vec<String> {
+    const MAX_BUBBLE_CHARS: usize = 92;
+
     let cleaned = text
         .replace('\n', " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
     let char_count = cleaned.chars().count();
-    if char_count <= 92 {
+    if char_count <= MAX_BUBBLE_CHARS {
         return vec![cleaned];
     }
 
-    let capped = truncate_factoid_sentence(&cleaned, 184);
-    let words: Vec<&str> = capped.split_whitespace().collect();
-    if words.len() < 6 {
-        return vec![truncate_factoid_sentence(&cleaned, 92)];
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    if words.len() < 4 {
+        return vec![cleaned];
     }
 
-    // Find a word split near the middle (preferring after a comma, semicolon, or dash)
-    let target_len = capped.len() / 2;
-    let mut best_split_idx = words.len() / 2;
-    let mut best_score = usize::MAX;
-    let mut running_len = 0usize;
-
-    for (idx, w) in words.iter().enumerate().take(words.len() - 2).skip(2) {
-        running_len += w.len() + 1;
-        let dist = running_len.abs_diff(target_len);
-        let punctuation_bonus = if w.ends_with(',') || w.ends_with(';') || w.ends_with('—') || w.ends_with('-') {
+    let word_chars: Vec<usize> = words.iter().map(|w| w.chars().count()).collect();
+    let span_chars = |start: usize, end: usize| -> usize {
+        if start >= end {
+            return 0;
+        }
+        let words_sum: usize = word_chars[start..end].iter().sum();
+        words_sum + (end - start - 1)
+    };
+    let punct_penalty = |w: &str| -> u64 {
+        if w.ends_with(',')
+            || w.ends_with(';')
+            || w.ends_with(':')
+            || w.ends_with('—')
+            || w.ends_with('–')
+            || w.ends_with('-')
+            || w.ends_with(')')
+        {
             0
         } else {
-            14
-        };
-        let score = dist + punctuation_bonus;
-        if score < best_score && running_len <= 92 {
-            best_score = score;
-            best_split_idx = idx + 1;
+            220
+        }
+    };
+
+    let format_chunks = |slices: Vec<String>| -> Vec<String> {
+        let total = slices.len();
+        slices
+            .into_iter()
+            .enumerate()
+            .map(|(idx, raw)| {
+                if total == 1 {
+                    raw
+                } else if idx == 0 {
+                    format!("{} …", raw.trim_end_matches([',', ';']))
+                } else if idx + 1 < total {
+                    format!("… {} …", raw.trim_end_matches([',', ';']))
+                } else {
+                    format!("… {}", raw)
+                }
+            })
+            .collect()
+    };
+
+    let n = words.len();
+    for k in 2..=6 {
+        if n < k {
+            continue;
+        }
+        let target = (char_count / k).max(20);
+        let mut dp: Vec<Vec<Option<(u64, usize)>>> = vec![vec![None; n + 1]; k + 1];
+
+        for j in 1..=n {
+            let len = span_chars(0, j);
+            if j == 1 || len <= 90 {
+                let cost = (len.abs_diff(target) as u64).pow(2) + punct_penalty(words[j - 1]);
+                dp[1][j] = Some((cost, 0));
+            }
+        }
+
+        for p in 2..=k {
+            let max_raw = if p < k { 88 } else { 90 };
+            for j in p..=n {
+                let mut best: Option<(u64, usize)> = None;
+                for i in (p - 1)..j {
+                    let Some((prev_cost, _)) = dp[p - 1][i] else {
+                        continue;
+                    };
+                    let len = span_chars(i, j);
+                    if j - i == 1 || len <= max_raw {
+                        let penalty = if p < k { punct_penalty(words[j - 1]) } else { 0 };
+                        let cost = prev_cost
+                            .saturating_add((len.abs_diff(target) as u64).pow(2))
+                            .saturating_add(penalty);
+                        if best.map(|(b_cost, _)| cost < b_cost).unwrap_or(true) {
+                            best = Some((cost, i));
+                        }
+                    }
+                }
+                dp[p][j] = best;
+            }
+        }
+
+        if dp[k][n].is_some() {
+            let mut bounds = vec![n];
+            let mut cur_j = n;
+            for p in (1..=k).rev() {
+                let prev_i = dp[p][cur_j].map(|(_, idx)| idx).unwrap_or(0);
+                bounds.push(prev_i);
+                cur_j = prev_i;
+            }
+            bounds.reverse();
+            let raw_slices: Vec<String> = bounds
+                .windows(2)
+                .map(|w| words[w[0]..w[1]].join(" "))
+                .collect();
+            return format_chunks(raw_slices);
         }
     }
 
-    let part1_raw = words[..best_split_idx].join(" ");
-    let part2_raw = words[best_split_idx..].join(" ");
-    if part2_raw.is_empty() {
-        return vec![truncate_factoid_sentence(&part1_raw, 92)];
+    // Greedy fallback so no words are ever dropped on extraordinarily long inputs
+    let mut raw_slices = Vec::new();
+    let mut current = String::new();
+    for word in words {
+        if current.is_empty() {
+            current.push_str(word);
+        } else if current.chars().count() + 1 + word.chars().count() <= 88 {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            raw_slices.push(current);
+            current = word.to_string();
+        }
+    }
+    if !current.is_empty() {
+        raw_slices.push(current);
+    }
+    format_chunks(raw_slices)
+}
+
+fn is_non_terminal_period(paragraph: &str, period_byte_idx: usize, after_end_byte_idx: usize) -> bool {
+    let rest = paragraph[after_end_byte_idx..].trim_start();
+    if let Some(next_ch) = rest.chars().next() {
+        if next_ch.is_lowercase() || next_ch.is_ascii_digit() {
+            return true;
+        }
     }
 
-    let part1 = format!("{} …", part1_raw.trim_end_matches([',', ';', '.']));
-    let part2 = format!("… {}", truncate_factoid_sentence(&part2_raw, 92));
-    vec![part1, part2]
+    let before = &paragraph[..period_byte_idx];
+    let token = before
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .trim_start_matches(['"', '“', '”', '\'', '‘', '’', '(', '[']);
+    if token.is_empty() {
+        return false;
+    }
+
+    let lower = token.to_lowercase();
+    const ABBREVIATIONS: &[&str] = &[
+        "mr", "mrs", "ms", "dr", "prof", "st", "jr", "sr", "rev", "gen", "col", "sgt", "capt",
+        "no", "nos", "vol", "vols", "pt", "op", "ft", "feat", "vs", "inc", "ltd", "co", "corp",
+        "bros", "est", "approx", "ed", "eds", "al", "pp", "p", "e.g", "i.e", "etc", "cf", "jan",
+        "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "u.s",
+        "u.k", "a.m", "p.m",
+    ];
+    if ABBREVIATIONS.contains(&lower.as_str()) {
+        return true;
+    }
+
+    let last_seg = token.rsplit('.').next().unwrap_or("");
+    last_seg.chars().count() == 1 && last_seg.chars().all(|c| c.is_ascii_alphabetic())
+}
+
+fn extract_complete_sentences(extract: &str) -> Vec<String> {
+    let mut sentences = Vec::new();
+    for raw_line in extract.lines() {
+        let paragraph = raw_line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if paragraph.is_empty() {
+            continue;
+        }
+
+        let mut start = 0usize;
+        let bytes = paragraph.as_bytes();
+        let mut idx = 0usize;
+        while idx < paragraph.len() {
+            let Some(ch) = paragraph[idx..].chars().next() else {
+                break;
+            };
+            let ch_len = ch.len_utf8();
+            if ch == '.' || ch == '!' || ch == '?' {
+                let mut end = idx + ch_len;
+                while end < paragraph.len() {
+                    let Some(close) = paragraph[end..].chars().next() else {
+                        break;
+                    };
+                    if matches!(close, '"' | '”' | '\'' | '’' | ')') {
+                        end += close.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                let at_end = end == paragraph.len();
+                let followed_by_ws = !at_end
+                    && paragraph[end..]
+                        .chars()
+                        .next()
+                        .map(|c| c.is_whitespace())
+                        .unwrap_or(false);
+                if (at_end || followed_by_ws)
+                    && (ch != '.' || !is_non_terminal_period(&paragraph, idx, end))
+                {
+                    let piece = paragraph[start..end].trim();
+                    if !piece.is_empty() {
+                        sentences.push(piece.to_string());
+                    }
+                    start = end;
+                    while start < paragraph.len() && bytes[start].is_ascii_whitespace() {
+                        start += 1;
+                    }
+                    idx = start;
+                    continue;
+                }
+            }
+            idx += ch_len;
+        }
+        let trailing = paragraph[start..].trim();
+        if !trailing.is_empty() && trailing.ends_with(['.', '!', '?']) {
+            sentences.push(trailing.to_string());
+        }
+    }
+    sentences
 }
 
 fn split_extract_into_sentences(extract: &str, max_sentences: usize) -> Vec<String> {
     let mut results = Vec::new();
-    for raw in extract.split(". ") {
-        let trimmed = raw.trim();
-        if trimmed.len() < 28 {
+    for candidate in extract_complete_sentences(extract) {
+        let char_count = candidate.chars().count();
+        if !(32..=340).contains(&char_count) {
             continue;
         }
-        let with_dot = if trimmed.ends_with('.') {
-            trimmed.to_string()
-        } else {
-            format!("{trimmed}.")
-        };
-        let candidate = truncate_factoid_sentence(&with_dot, 184);
         if !is_high_signal_factoid_body(&candidate) || was_factoid_shown_in_session(&candidate) {
             continue;
         }
@@ -853,7 +1028,7 @@ fn query_musicbrainz_recording_factoid(title: &str, artist: &str) -> Option<Stri
     if parts.len() < 2 {
         None
     } else {
-        let combined = truncate_factoid_sentence(&parts.join(" • "), 180);
+        let combined = truncate_factoid_sentence(&parts.join(" • "), 340);
         if is_high_signal_factoid_body(&combined) && !was_factoid_shown_in_session(&combined) {
             Some(combined)
         } else {
@@ -862,10 +1037,87 @@ fn query_musicbrainz_recording_factoid(title: &str, artist: &str) -> Option<Stri
     }
 }
 
-/// Schedules 2–4 VH1-style "Pop-Up Video" factoid slots cleanly between `18s` and `duration_sec - 20s`
-/// so they never collide with the `0.5s–8.5s` MTV Track Intro Chyron or the `T-15s` Up Next Flyover.
-/// Longer sentences (`> 92` chars) are automatically split into a 2-part sequential speech-bubble pair
-/// (`Part 1/2` for `5s` -> `Part 2/2` for `5s`).
+fn is_continuation_bubble(prev: &FactoidBubble, next: &FactoidBubble) -> bool {
+    if prev.category != next.category
+        || prev.headline != next.headline
+        || prev.source != next.source
+    {
+        return false;
+    }
+    let meta_continuation = prev.part_total.unwrap_or(1) > 1
+        && prev.part_total == next.part_total
+        && prev
+            .part_index
+            .zip(next.part_index)
+            .map(|(a, b)| b == a.saturating_add(1))
+            .unwrap_or(false);
+    let ellipsis_continuation =
+        prev.body.trim_end().ends_with('…') && next.body.trim_start().starts_with('…');
+    meta_continuation || ellipsis_continuation
+}
+
+fn group_factoid_bubbles(bubbles: Vec<FactoidBubble>) -> Vec<Vec<FactoidBubble>> {
+    let mut groups: Vec<Vec<FactoidBubble>> = Vec::new();
+    for bubble in bubbles {
+        if let Some(last_group) = groups.last_mut() {
+            if let Some(prev) = last_group.last() {
+                if is_continuation_bubble(prev, &bubble) {
+                    last_group.push(bubble);
+                    continue;
+                }
+            }
+        }
+        groups.push(vec![bubble]);
+    }
+    groups
+}
+
+fn coalesce_bubble_group(group: &[FactoidBubble]) -> Option<(String, String, String, String)> {
+    let first = group.first()?;
+    if group.len() == 1 {
+        return Some((
+            first.category.clone(),
+            first.headline.clone(),
+            first.body.clone(),
+            first.source.clone(),
+        ));
+    }
+    let mut segments = Vec::with_capacity(group.len());
+    for (i, bubble) in group.iter().enumerate() {
+        let mut s = bubble.body.trim();
+        if i > 0 {
+            s = s.trim_start_matches('…').trim_start();
+        }
+        if i + 1 < group.len() {
+            s = s.trim_end_matches('…').trim_end();
+        }
+        if !s.is_empty() {
+            segments.push(s);
+        }
+    }
+    let joined_body = segments.join(" ");
+    Some((
+        first.category.clone(),
+        first.headline.clone(),
+        joined_body,
+        first.source.clone(),
+    ))
+}
+
+/// Rejoins split multi-part cached bubbles back into whole `(category, headline, body, source)` items.
+pub fn coalesce_cached_factoid_bubbles(
+    bubbles: Vec<FactoidBubble>,
+) -> Vec<(String, String, String, String)> {
+    group_factoid_bubbles(bubbles)
+        .into_iter()
+        .filter_map(|group| coalesce_bubble_group(&group))
+        .collect()
+}
+
+/// Schedules 2–4 VH1-style "Pop-Up Video" factoid slots cleanly between `18s` and `duration_sec - 4s`
+/// so they never collide with the `0.5s–8.5s` MTV Track Intro Chyron or cut off at track end.
+/// Longer complete thoughts (`> 92` chars) are automatically split into a sequential N-part speech-bubble
+/// chain (`Part 1/N` .. `Part N/N`, `5s` each back-to-back with `0s` gap) without overlapping the next slot.
 pub fn schedule_factoid_bubbles(
     raw_items: Vec<(String, String, String, String)>,
     duration_ms: u32,
@@ -876,6 +1128,7 @@ pub fn schedule_factoid_bubbles(
     let total_sec = (duration_ms / 1000).max(90);
     let safe_start = 18u32;
     let safe_end = total_sec.saturating_sub(24).max(safe_start + 16);
+    let hard_end = total_sec.saturating_sub(4);
     let count = raw_items.len().min(4);
     let span = safe_end.saturating_sub(safe_start);
     let step = if count > 1 {
@@ -885,30 +1138,38 @@ pub fn schedule_factoid_bubbles(
     };
 
     let mut out = Vec::new();
+    let mut next_earliest_start = safe_start;
     for (idx, (category, headline, body, source)) in raw_items.into_iter().take(4).enumerate() {
-        let slot_start = (safe_start + (idx as u32) * step).min(safe_end);
         let parts = split_sentence_into_bubble_parts(&body);
-        if parts.len() >= 2 {
-            out.push(FactoidBubble {
-                category: category.clone(),
-                headline: headline.clone(),
-                body: parts[0].clone(),
-                source: source.clone(),
-                start_sec: slot_start,
-                duration_sec: 5,
-                part_index: Some(1),
-                part_total: Some(2),
-            });
-            out.push(FactoidBubble {
-                category,
-                headline,
-                body: parts[1].clone(),
-                source,
-                start_sec: slot_start + 5,
-                duration_sec: 5,
-                part_index: Some(2),
-                part_total: Some(2),
-            });
+        if parts.is_empty() {
+            continue;
+        }
+        let total_parts = parts.len();
+        let total_dur = if total_parts >= 2 {
+            (total_parts as u32) * 5
+        } else {
+            8
+        };
+        let requested_start = (safe_start + (idx as u32) * step).max(next_earliest_start);
+        if !out.is_empty() && requested_start + total_dur > hard_end {
+            continue;
+        }
+        let slot_start = requested_start.min(hard_end.saturating_sub(total_dur).max(safe_start));
+
+        if total_parts >= 2 {
+            let part_total_u8 = total_parts.min(u8::MAX as usize) as u8;
+            for (p_idx, part_body) in parts.into_iter().enumerate() {
+                out.push(FactoidBubble {
+                    category: category.clone(),
+                    headline: headline.clone(),
+                    body: part_body,
+                    source: source.clone(),
+                    start_sec: slot_start + (p_idx as u32) * 5,
+                    duration_sec: 5,
+                    part_index: Some((p_idx + 1).min(u8::MAX as usize) as u8),
+                    part_total: Some(part_total_u8),
+                });
+            }
         } else if let Some(single) = parts.into_iter().next() {
             out.push(FactoidBubble {
                 category,
@@ -921,6 +1182,7 @@ pub fn schedule_factoid_bubbles(
                 part_total: None,
             });
         }
+        next_earliest_start = slot_start + total_dur + 2;
     }
     out
 }
@@ -992,6 +1254,13 @@ pub fn import_cached_factoids(item: &PushFactoidsItem) -> anyhow::Result<TrackFa
     Ok(resp)
 }
 
+fn has_truncated_factoid(items: &[(String, String, String, String)]) -> bool {
+    items.iter().any(|(_, _, body, _)| {
+        let trimmed = body.trim_end();
+        trimmed.ends_with('…') || trimmed.ends_with("...")
+    })
+}
+
 pub fn fetch_track_factoids(
     track_uri: Option<&str>,
     title: &str,
@@ -1016,53 +1285,61 @@ pub fn fetch_track_factoids(
 
     if let Some(mut cached) = load_factoids_from_db(&key, track_uri) {
         if cached.provider.contains("librarian") {
-            let unseen: Vec<FactoidBubble> = cached
-                .bubbles
+            let grouped = group_factoid_bubbles(cached.bubbles.clone());
+            let unseen: Vec<Vec<FactoidBubble>> = grouped
                 .iter()
-                .filter(|b| !was_factoid_shown_in_session(&b.body))
+                .filter(|g| {
+                    coalesce_bubble_group(g)
+                        .map(|(_, _, body, _)| !was_factoid_shown_in_session(&body))
+                        .unwrap_or(false)
+                })
                 .cloned()
                 .collect();
-            let chosen = if !unseen.is_empty() {
-                unseen
-            } else {
-                cached.bubbles.clone()
-            };
-            if !chosen.is_empty() {
-                for b in &chosen {
-                    mark_factoid_shown_in_session(&b.body);
+            let chosen_groups = if !unseen.is_empty() { unseen } else { grouped };
+            if !chosen_groups.is_empty() {
+                for g in &chosen_groups {
+                    if let Some((_, _, combined, _)) = coalesce_bubble_group(g) {
+                        mark_factoid_shown_in_session(&combined);
+                    }
                 }
-                let needs_schedule = chosen.iter().all(|b| b.duration_sec == 0);
+                let needs_schedule = chosen_groups
+                    .iter()
+                    .all(|g| g.iter().all(|b| b.duration_sec == 0));
                 cached.bubbles = if needs_schedule {
-                    let raw = chosen
-                        .into_iter()
-                        .map(|b| (b.category, b.headline, b.body, b.source))
+                    let raw: Vec<(String, String, String, String)> = chosen_groups
+                        .iter()
+                        .filter_map(|g| coalesce_bubble_group(g))
                         .collect();
                     schedule_factoid_bubbles(raw, duration_ms)
                 } else {
-                    chosen
+                    chosen_groups.into_iter().flatten().collect()
                 };
                 cached.found = !cached.bubbles.is_empty();
                 return cached;
             }
         }
-        // Automatically upgrade legacy v1 summary-only cache rows to the v2 deep-section engine
-        let is_v2_cache = cached.provider.contains("v2");
-        if is_v2_cache {
-            let filtered_raw: Vec<(String, String, String, String)> = cached
-                .bubbles
-                .into_iter()
-                .filter(|b| {
-                    is_high_signal_factoid_body(&b.body) && !was_factoid_shown_in_session(&b.body)
-                })
-                .map(|b| (b.category, b.headline, b.body, b.source))
-                .collect();
-            if !filtered_raw.is_empty() {
-                for (_, _, body, _) in &filtered_raw {
-                    mark_factoid_shown_in_session(body);
+        // Automatically upgrade legacy v1 rows and truncated v2 rows to complete-thought v3 factoids
+        let is_modern_cache = cached.provider.contains("v3") || cached.provider.contains("v2");
+        if is_modern_cache {
+            let coalesced = coalesce_cached_factoid_bubbles(cached.bubbles);
+            let should_upgrade_truncated_v2 = !cached.provider.contains("v3")
+                && crate::is_online_factoids_fetch_enabled()
+                && has_truncated_factoid(&coalesced);
+            if !should_upgrade_truncated_v2 {
+                let filtered_raw: Vec<(String, String, String, String)> = coalesced
+                    .into_iter()
+                    .filter(|(_, _, body, _)| {
+                        is_high_signal_factoid_body(body) && !was_factoid_shown_in_session(body)
+                    })
+                    .collect();
+                if !filtered_raw.is_empty() {
+                    for (_, _, body, _) in &filtered_raw {
+                        mark_factoid_shown_in_session(body);
+                    }
+                    cached.bubbles = schedule_factoid_bubbles(filtered_raw, duration_ms);
+                    cached.found = !cached.bubbles.is_empty();
+                    return cached;
                 }
-                cached.bubbles = schedule_factoid_bubbles(filtered_raw, duration_ms);
-                cached.found = !cached.bubbles.is_empty();
-                return cached;
             }
         }
     }
@@ -1132,8 +1409,8 @@ pub fn fetch_track_factoids(
                     ));
                 }
             }
-            if !providers.contains(&"wikipedia-v2") {
-                providers.push("wikipedia-v2");
+            if !providers.contains(&"wikipedia-v3") {
+                providers.push("wikipedia-v3");
             }
         }
     }
@@ -1178,8 +1455,8 @@ pub fn fetch_track_factoids(
                     ));
                 }
             }
-            if !providers.contains(&"wikipedia-v2") {
-                providers.push("wikipedia-v2");
+            if !providers.contains(&"wikipedia-v3") {
+                providers.push("wikipedia-v3");
             }
         }
     }
@@ -1396,5 +1673,284 @@ Critics later credited the group with pioneering DIY hardware live-coding perfor
         assert_eq!(fetched.bubbles.len(), 1);
         assert_eq!(fetched.bubbles[0].headline, "Studio Session");
         assert_eq!(fetched.bubbles[0].start_sec, 24);
+    }
+
+    #[test]
+    fn test_coalesce_cached_factoid_bubbles_preserves_pairs_and_four_factoids() {
+        let raw = vec![
+            (
+                "STUDIO LORE".into(),
+                "Track 01".into(),
+                "The rhythm section was tracked live in a converted warehouse using vintage ribbon microphones and analog tape machines.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "BAND LORE".into(),
+                "Example Artist".into(),
+                "Example Artist recorded early demos on a four-track cassette deck.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "ALBUM".into(),
+                "Sample Album".into(),
+                "Sample Album was mixed overnight in a small coastal studio while a winter storm knocked out external telephone lines.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "CRAFT".into(),
+                "Example Artist".into(),
+                "A custom spring reverb tank gave the lead synth its cavernous tail.".into(),
+                "Wikipedia".into(),
+            ),
+        ];
+
+        let scheduled = schedule_factoid_bubbles(raw, 240_000);
+        assert_eq!(scheduled.len(), 6);
+
+        let coalesced = coalesce_cached_factoid_bubbles(scheduled);
+        assert_eq!(coalesced.len(), 4);
+
+        let rescheduled = schedule_factoid_bubbles(coalesced, 240_000);
+        assert_eq!(rescheduled.len(), 6);
+        assert_eq!(rescheduled[0].part_index, Some(1));
+        assert_eq!(rescheduled[0].part_total, Some(2));
+        assert_eq!(rescheduled[1].part_index, Some(2));
+        assert_eq!(rescheduled[1].part_total, Some(2));
+        assert_eq!(rescheduled[1].start_sec, rescheduled[0].start_sec + 5);
+        assert_eq!(rescheduled[3].part_index, Some(1));
+        assert_eq!(rescheduled[3].part_total, Some(2));
+        assert_eq!(rescheduled[4].part_index, Some(2));
+        assert_eq!(rescheduled[4].part_total, Some(2));
+        assert_eq!(rescheduled[4].start_sec, rescheduled[3].start_sec + 5);
+
+        // Ellipsis fallback when part_index/part_total are missing
+        let ellipsis_only = vec![
+            FactoidBubble {
+                category: "STUDIO LORE".into(),
+                headline: "Track 02".into(),
+                body: "First half of a long studio story recorded onto analog tape …".into(),
+                source: "Wikipedia".into(),
+                start_sec: 18,
+                duration_sec: 0,
+                part_index: None,
+                part_total: None,
+            },
+            FactoidBubble {
+                category: "STUDIO LORE".into(),
+                headline: "Track 02".into(),
+                body: "… and completed after adding vintage modular synthesizers.".into(),
+                source: "Wikipedia".into(),
+                start_sec: 0,
+                duration_sec: 0,
+                part_index: None,
+                part_total: None,
+            },
+        ];
+        let ellipsis_coalesced = coalesce_cached_factoid_bubbles(ellipsis_only);
+        assert_eq!(ellipsis_coalesced.len(), 1);
+        assert_eq!(
+            ellipsis_coalesced[0].2,
+            "First half of a long studio story recorded onto analog tape and completed after adding vintage modular synthesizers."
+        );
+    }
+
+    #[test]
+    fn test_cached_v2_replay_keeps_split_parts_back_to_back() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let uri = format!("file:///Volumes/Music/SampleArtist/SampleAlbum/{nanos}_v2_replay.flac");
+        let title = format!("Sample V2 Replay {nanos}");
+        let artist = "Sample Artist";
+        let album = Some("Sample Album");
+
+        let raw = vec![
+            (
+                "STUDIO LORE".into(),
+                title.clone(),
+                format!("Factoid one {nanos} was recorded in a converted theater with vintage ribbon microphones and analog tape machines."),
+                "Wikipedia".into(),
+            ),
+            (
+                "BAND LORE".into(),
+                artist.to_string(),
+                format!("Short factoid two {nanos} highlights early hardware experiments."),
+                "Wikipedia".into(),
+            ),
+            (
+                "ALBUM LORE".into(),
+                "Sample Album".into(),
+                format!("Factoid three {nanos} was mixed overnight during a winter storm using a custom analog console and spring reverb."),
+                "Wikipedia".into(),
+            ),
+            (
+                "CRAFT".into(),
+                artist.to_string(),
+                format!("Short factoid four {nanos} mentions modular synthesizer patches."),
+                "Wikipedia".into(),
+            ),
+        ];
+        let initial_bubbles = schedule_factoid_bubbles(raw, 240_000);
+        assert_eq!(initial_bubbles.len(), 6);
+
+        let key = normalize_key(&title, artist, album);
+        let resp = TrackFactoidsResponse {
+            found: true,
+            provider: "wikipedia_v2".to_string(),
+            bubbles: initial_bubbles,
+        };
+        save_factoids_to_db(&key, Some(&uri), &title, artist, album, &resp);
+
+        let fetched = fetch_track_factoids(Some(&uri), &title, artist, album, 240_000);
+        assert!(fetched.found);
+        assert_eq!(fetched.bubbles.len(), 6);
+        assert_eq!(fetched.bubbles[0].part_index, Some(1));
+        assert_eq!(fetched.bubbles[0].part_total, Some(2));
+        assert_eq!(fetched.bubbles[1].part_index, Some(2));
+        assert_eq!(fetched.bubbles[1].part_total, Some(2));
+        assert_eq!(
+            fetched.bubbles[1].start_sec,
+            fetched.bubbles[0].start_sec + fetched.bubbles[0].duration_sec
+        );
+        assert_eq!(fetched.bubbles[3].part_index, Some(1));
+        assert_eq!(fetched.bubbles[3].part_total, Some(2));
+        assert_eq!(fetched.bubbles[4].part_index, Some(2));
+        assert_eq!(fetched.bubbles[4].part_total, Some(2));
+        assert_eq!(
+            fetched.bubbles[4].start_sec,
+            fetched.bubbles[3].start_sec + fetched.bubbles[3].duration_sec
+        );
+    }
+
+    #[test]
+    fn test_split_sentence_into_three_or_four_parts_completes_thought_without_truncation() {
+        let long_sentence = "During the marathon winter recording sessions at the coastal studio, the engineers custom-wired three vintage spring reverb tanks in series, bounced the analog tape drums through a guitar amplifier, and captured the final vocal take before dawn.";
+        assert!(long_sentence.chars().count() > 210);
+
+        let parts = split_sentence_into_bubble_parts(long_sentence);
+        assert!(
+            parts.len() == 3 || parts.len() == 4,
+            "expected 3 or 4 parts, got {}: {:?}",
+            parts.len(),
+            parts
+        );
+        for (idx, p) in parts.iter().enumerate() {
+            assert!(
+                p.chars().count() <= 92,
+                "part {} exceeded 92 chars ({}): {}",
+                idx + 1,
+                p.chars().count(),
+                p
+            );
+            if idx == 0 {
+                assert!(p.ends_with(" …"), "part 1 missing trailing ellipsis: {p}");
+            } else if idx + 1 < parts.len() {
+                assert!(p.starts_with("… "), "middle part missing leading ellipsis: {p}");
+                assert!(p.ends_with(" …"), "middle part missing trailing ellipsis: {p}");
+            } else {
+                assert!(p.starts_with("… "), "final part missing leading ellipsis: {p}");
+                assert!(
+                    p.ends_with('.'),
+                    "final part must complete the sentence without trailing ellipsis: {p}"
+                );
+                assert!(!p.ends_with('…'));
+            }
+        }
+
+        let scheduled = schedule_factoid_bubbles(
+            vec![(
+                "STUDIO LORE".into(),
+                "Track 01".into(),
+                long_sentence.to_string(),
+                "Wikipedia".into(),
+            )],
+            240_000,
+        );
+        assert_eq!(scheduled.len(), parts.len());
+        for (idx, bubble) in scheduled.iter().enumerate() {
+            assert_eq!(bubble.part_index, Some((idx + 1) as u8));
+            assert_eq!(bubble.part_total, Some(parts.len() as u8));
+            assert_eq!(bubble.duration_sec, 5);
+            if idx > 0 {
+                assert_eq!(bubble.start_sec, scheduled[idx - 1].start_sec + 5);
+            }
+        }
+
+        let coalesced = coalesce_cached_factoid_bubbles(scheduled);
+        assert_eq!(coalesced.len(), 1);
+        assert!(coalesced[0].2.ends_with("before dawn."));
+        let rescheduled = schedule_factoid_bubbles(coalesced, 240_000);
+        assert_eq!(rescheduled.len(), parts.len());
+        for idx in 1..rescheduled.len() {
+            assert_eq!(rescheduled[idx].start_sec, rescheduled[idx - 1].start_sec + 5);
+        }
+    }
+
+    #[test]
+    fn test_sentence_splitter_handles_abbreviations_and_skips_mid_sentence_truncation() {
+        let abbr_extract = "Dr. Example arrived in St. Louis before the No. 1 U.S. Billboard debut of the project. Critics noted how B. B. King influenced the studio arrangement during the late-night session.";
+        let parsed = split_extract_into_sentences(abbr_extract, 4);
+        assert_eq!(parsed.len(), 2, "got: {:?}", parsed);
+        assert!(parsed[0].contains("Dr. Example") && parsed[0].contains("St. Louis"));
+        assert!(parsed[1].contains("B. B. King"));
+
+        let long_complete_plus_runon = "This overly dense encyclopedic run-on sentence goes far beyond three hundred and forty characters by stacking endless parenthetical trivia credits, unedited mastering engineer rosters, obscure catalog release variants, international cassette pressings, regional distribution footnotes, promotional sampler dates, and exhaustive remix tracklists into a single breath without stopping. Meanwhile, the shorter 230-character follow-up sentence about recording drums inside a concrete stairwell during a thunderstorm completes its entire musical thought cleanly and ends right here.";
+        let picked = split_extract_into_sentences(long_complete_plus_runon, 2);
+        assert_eq!(picked.len(), 1, "expected run-on >340 chars to be skipped: {:?}", picked);
+        assert!(picked[0].starts_with("Meanwhile"));
+        assert!(picked[0].ends_with("right here."));
+    }
+
+    #[test]
+    fn test_schedule_factoid_bubbles_prevents_overlap_for_multipart_and_end_of_track() {
+        let items = vec![
+            (
+                "STUDIO LORE".into(),
+                "Track 01".into(),
+                "During the marathon winter recording sessions at the coastal studio, the engineers custom-wired three vintage spring reverb tanks in series, bounced the analog tape drums through a guitar amplifier, and captured the final vocal take before dawn.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "BAND LORE".into(),
+                "Example Artist".into(),
+                "In a later interview, the rhythm section explained that half of the percussive loops came from tapping empty studio tape reels with drumsticks while testing the control room monitors.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "LEGACY & LORE".into(),
+                "Sample Album".into(),
+                "Music historians eventually highlighted the album's sparse nocturnal production for inspiring a wave of bedroom electronic producers who worked exclusively with portable four-track hardware.".into(),
+                "Wikipedia".into(),
+            ),
+            (
+                "CRAFT".into(),
+                "Example Artist".into(),
+                "Even years afterward, mastering engineers praised the wide dynamic headroom left intact on the original stereo mixdown before loudness wars reshaped pop radio mastering.".into(),
+                "Wikipedia".into(),
+            ),
+        ];
+
+        // Standard track: verify multi-part bubbles never collide with the next factoid slot
+        let scheduled = schedule_factoid_bubbles(items.clone(), 200_000);
+        for pair in scheduled.windows(2) {
+            assert!(
+                pair[1].start_sec >= pair[0].start_sec + pair[0].duration_sec,
+                "overlapping bubbles: {:?} vs {:?}",
+                pair[0],
+                pair[1]
+            );
+        }
+
+        // Short 90s track: verify nothing extends past track_sec - 4 (86s)
+        let short_scheduled = schedule_factoid_bubbles(items, 90_000);
+        assert!(!short_scheduled.is_empty());
+        for b in &short_scheduled {
+            assert!(
+                b.start_sec + b.duration_sec <= 86,
+                "bubble exceeded short track hard_end 86s: {:?}",
+                b
+            );
+        }
     }
 }

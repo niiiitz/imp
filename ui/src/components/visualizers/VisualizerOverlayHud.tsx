@@ -180,9 +180,12 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
   const activeFactoid =
     !suppressFactoids && !showMtvIntroChyron && !showUpNextFlyover
       ? factoidBubbles.find(
-          (b) => posSec >= b.start_sec && posSec <= b.start_sec + b.duration_sec,
+          (b) => posSec >= b.start_sec && posSec < b.start_sec + b.duration_sec,
         ) || null
       : null;
+
+  const comicFontFamily =
+    '"Comic Sans MS", "Chalkboard SE", "Comic Neue", "Marker Felt", "Trebuchet MS", cursive, sans-serif';
 
   const factoidEnv = activeFactoid
     ? computeSoftVhsEnvelope(
@@ -393,7 +396,7 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
         </div>
       )}
 
-      {/* 3. VH1-Style "Pop-Up Video" Speech Bubble (Bottom-Center, Scaled Up, 2-Part Continuation & Pointer Tail) */}
+      {/* 3. VH1-Style "Pop-Up Video" Speech Bubble (Bottom-Center, 2x Comic Outlined Off-White) */}
       {activeFactoid && factoidEnv > 0.01 && (
         <div
           style={{
@@ -403,8 +406,11 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            width: 'min(580px, 84vw)',
+            width: 'fit-content',
+            maxWidth: 'min(960px, 90vw)',
             opacity: factoidEnv,
+            filter:
+              'drop-shadow(5px 5px 0 rgba(17, 17, 20, 0.88)) drop-shadow(0 10px 24px rgba(0, 0, 0, 0.42))',
             transform: `translateX(-50%) scale(${(0.92 + factoidEnv * 0.08).toFixed(3)}) translateY(${((1 - factoidEnv) * 8).toFixed(1)}px)`,
             transformOrigin: 'bottom center',
           }}
@@ -412,17 +418,15 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
           <div
             style={{
               position: 'relative',
-              width: '100%',
+              width: 'fit-content',
+              maxWidth: '100%',
               display: 'flex',
               flexDirection: 'column',
-              gap: 7,
-              padding: '16px 24px 18px 24px',
-              borderRadius: '28px',
-              background:
-                'radial-gradient(circle at 22% 18%, rgba(24, 32, 54, 0.96) 0%, rgba(10, 14, 26, 0.95) 100%)',
-              border: '2.5px solid rgba(250, 204, 21, 0.85)',
-              boxShadow:
-                '0 18px 42px rgba(0, 0, 0, 0.88), 0 0 28px rgba(250, 204, 21, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.24)',
+              gap: 8,
+              padding: '18px 28px 20px 28px',
+              borderRadius: '30px',
+              background: '#FAF7EE',
+              border: '3.5px solid #141418',
             }}
           >
             <div
@@ -430,17 +434,17 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 10,
-                fontSize: 12,
-                fontFamily: '"JetBrains Mono", monospace',
+                gap: 12,
+                fontSize: 16,
+                fontFamily: comicFontFamily,
                 fontWeight: 800,
-                color: '#facc15',
-                letterSpacing: '0.09em',
+                color: '#52525b',
+                letterSpacing: '0.05em',
                 textTransform: 'uppercase',
               }}
             >
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <ImpIcon name="factoid" size={15} color="#facc15" />
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <ImpIcon name="factoid" size={20} color="#b45309" />
                 <span>
                   {activeFactoid.category} • {activeFactoid.source}
                 </span>
@@ -448,12 +452,14 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
               {activeFactoid.part_total && activeFactoid.part_total > 1 && (
                 <span
                   style={{
-                    padding: '2px 9px',
+                    padding: '1px 10px',
                     borderRadius: 999,
-                    background: 'rgba(250, 204, 21, 0.2)',
-                    border: '1px solid rgba(250, 204, 21, 0.5)',
-                    color: '#fef08a',
-                    fontSize: 11,
+                    background: '#FEF08A',
+                    border: '2px solid #141418',
+                    color: '#141418',
+                    fontSize: 15,
+                    fontWeight: 800,
+                    lineHeight: 1.25,
                   }}
                 >
                   {activeFactoid.part_index || 1}/{activeFactoid.part_total}
@@ -462,11 +468,11 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
             </div>
             <div
               style={{
-                fontSize: 'clamp(15.5px, 1.8vw, 18.5px)',
+                fontSize: 'clamp(31px, 3.6vw, 37px)',
+                fontFamily: comicFontFamily,
                 fontWeight: 700,
-                color: '#f8fafc',
-                lineHeight: 1.42,
-                textShadow: '0 1px 5px rgba(0, 0, 0, 0.92)',
+                color: '#141418',
+                lineHeight: 1.24,
               }}
             >
               {activeFactoid.body}
@@ -474,19 +480,22 @@ export const VisualizerOverlayHud: React.FC<VisualizerOverlayHudProps> = ({
           </div>
           {/* Speech Bubble Pointer Tail (Bottom-Center) */}
           <svg
-            width="30"
-            height="16"
-            viewBox="0 0 30 16"
+            width="36"
+            height="22"
+            viewBox="0 0 36 22"
             style={{
-              marginTop: -2.5,
-              filter: 'drop-shadow(0 5px 8px rgba(0,0,0,0.7))',
+              marginTop: -3.5,
+              zIndex: 1,
+              display: 'block',
             }}
           >
+            <path d="M2 0 L34 0 L18 20 Z" fill="#FAF7EE" />
             <path
-              d="M4 0 L26 0 L15 14 Z"
-              fill="rgba(12, 16, 30, 0.96)"
-              stroke="rgba(250, 204, 21, 0.85)"
-              strokeWidth="2.5"
+              d="M3 0 L18 19 L33 0"
+              fill="none"
+              stroke="#141418"
+              strokeWidth="3.5"
+              strokeLinecap="round"
               strokeLinejoin="round"
             />
           </svg>

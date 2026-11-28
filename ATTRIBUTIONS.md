@@ -96,8 +96,6 @@ Imp's native Rust Internet Archive client (`crates/imp-core/src/sinks/internet_a
   * Reference for ES256 (`P-256` ECDSA) developer token signing, storefront catalog resolution, artist profile & discography views, cloud library pagination, and personal/algorithmic radio station seeding (`crates/imp-core/src/sinks/apple_api.rs`).
 * **Daniel Stenberg & the [`curl` / `libcurl`](https://curl.se/libcurl/) Project**:
   * Reference for Imp's in-process `libcurl.so.4` C FFI connection pool (`crates/imp-core/src/http_pool.rs`) enabling persistent TLS + HTTP/2 connection reuse without bloating the binary.
-* **Lukáš Lalinský ([`AcoustID` & `Chromaprint`](https://acoustid.org/)), [`rusty-chromaprint`](https://github.com/darksv/rusty-chromaprint), and the [MetaBrainz Foundation (`MusicBrainz`)](https://musicbrainz.org/)**:
-  * Powers Project LIBERATION's pure-Rust Chromaprint acoustic fingerprinting, offline cross-codec duplicate detection, and opt-in Acoustic Mend canonical release identification (`crates/imp-core/src/liberation/fingerprint.rs`) without requiring an external `fpcalc` binary.
 
 ---
 
