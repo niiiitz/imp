@@ -847,7 +847,7 @@ dependencies = [
 
 [[package]]
 name = "imp"
-version = "1.3.0-alpha.1"
+version = "1.3.0-alpha.2"
 dependencies = [
  "anyhow",
  "block",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "imp-core"
-version = "1.3.0-alpha.1"
+version = "1.3.0-alpha.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -907,7 +907,7 @@ dependencies = [
 
 [[package]]
 name = "imp-daemon"
-version = "1.3.0-alpha.1"
+version = "1.3.0-alpha.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -926,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "imp-protocol"
-version = "1.3.0-alpha.1"
+version = "1.3.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",

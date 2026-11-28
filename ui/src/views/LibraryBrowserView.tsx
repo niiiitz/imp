@@ -2549,6 +2549,37 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
     focusRightPaneFirstTrack();
   };
 
+  const openPlayingQueueCollection = useCallback(() => {
+    const liveQueue =
+      snap?.queue && snap.queue.length > 0 ? snap.queue : track ? [track] : [];
+    if (liveQueue.length === 0) return;
+    if (rightPaneMode === 'tracks' && browserTarget?.kind === 'playing_queue') {
+      focusRightPaneFirstTrack();
+      return;
+    }
+    const activeTrack = track || liveQueue[snap?.queue_index ?? 0] || liveQueue[0];
+    pushCurrentNavState({
+      forceEvenOnPreview: xmbPreviewTriggerRef.current && rightPaneMode === 'browse',
+    });
+    setBrowserTarget({
+      kind: 'playing_queue',
+      id: 'now_playing_queue',
+      title: 'Playing Queue',
+      art_url: activeTrack?.art_url || null,
+    });
+    setRightPaneMode('tracks');
+    focusRightPaneFirstTrack();
+  }, [
+    browserTarget?.kind,
+    focusRightPaneFirstTrack,
+    pushCurrentNavState,
+    rightPaneMode,
+    setBrowserTarget,
+    snap?.queue,
+    snap?.queue_index,
+    track,
+  ]);
+
   const selectCloudPlaylist = async (pl: AppleCloudPlaylistSummary) => {
     pushCurrentNavState({
       returnTileKey: `cloud_playlist:${pl.id}`,
@@ -4067,6 +4098,7 @@ export const LibraryBrowserView: React.FC<LibraryBrowserViewProps> = ({
         desktopMode={desktopMode}
         onReturnToPlayer={() => setView('lock')}
         onTriggerScreensaver={onTriggerScreensaver}
+        onOpenPlayingQueue={openPlayingQueueCollection}
         applyVolume={applyVolume}
         currentVolume={currentVolume}
         volumePopoverOpen={volumePopoverOpen}

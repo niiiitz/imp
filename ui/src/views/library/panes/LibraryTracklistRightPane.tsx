@@ -111,6 +111,13 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
   snap,
   track,
 }) => {
+  const isPlayingQueue = browserTarget?.kind === 'playing_queue';
+  const heroArtUrl = isPlayingQueue
+    ? track?.art_url || browserTarget?.art_url || ''
+    : selectedAlbumObj?.art_url ||
+      selectedPlaylistObj?.cover_art_url ||
+      browserTarget?.art_url ||
+      '';
   const { allLyricsUris } = useLibraryLyricsStatus();
 
   const lyricsMatchedTracks = React.useMemo(
@@ -202,16 +209,9 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                     )}
                 </div>
 
-                {(selectedAlbumObj?.art_url ||
-                  selectedPlaylistObj?.cover_art_url ||
-                  browserTarget?.art_url) && (
+                {heroArtUrl && (
                   <img
-                    src={
-                      selectedAlbumObj?.art_url ||
-                      selectedPlaylistObj?.cover_art_url ||
-                      browserTarget?.art_url ||
-                      ''
-                    }
+                    src={heroArtUrl}
                     alt=""
                     style={{
                       width: 48,
@@ -269,9 +269,14 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       }
                     />
                     <span>
-                      {browserTarget?.kind === 'ia_item' &&
-                      activeIaDetail &&
-                      activeIaDetail.episodes.length > 0
+                      {isPlayingQueue
+                        ? `Track ${Math.min(
+                            (snap?.queue_index ?? 0) + 1,
+                            Math.max(1, browserTracks.length)
+                          )} of ${browserTracks.length}${snap?.shuffle ? ' • Shuffle On' : ''}`
+                        : browserTarget?.kind === 'ia_item' &&
+                          activeIaDetail &&
+                          activeIaDetail.episodes.length > 0
                         ? `${activeIaDetail.episodes.length} video ${
                             activeIaDetail.episodes.length === 1 ? 'part' : 'parts'
                           }${
@@ -287,6 +292,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                       {selectedMountObj ? ` in ${selectedMountObj.mount_root}` : ''}
                       {!selectedAlbumObj &&
                       !selectedMountObj &&
+                      !isPlayingQueue &&
                       browserTarget?.subtitle
                         ? ` • ${browserTarget.subtitle}`
                         : ''}
@@ -401,6 +407,21 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                         setView('lock');
                         return;
                       }
+                      if (isPlayingQueue) {
+                        if (!snap?.is_playing) {
+                          if (track) {
+                            defaultSimpClient.play();
+                          } else if (browserTracks.length > 0) {
+                            defaultSimpClient.loadQueue(
+                              browserTracks.map((tr) => tr.uri),
+                              Math.min(snap?.queue_index ?? 0, browserTracks.length - 1),
+                              browserTracks
+                            );
+                          }
+                        }
+                        setView('lock');
+                        return;
+                      }
                       const ctxKey = `${browserTarget.kind}:${browserTarget.id}`;
                       setPlayingContextId(ctxKey);
                       if (browserTarget.kind === 'album') {
@@ -439,6 +460,10 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                     browserTracks.length > 0 && (
                       <button
                         onClick={() => {
+                          if (isPlayingQueue) {
+                            defaultSimpClient.setShuffle(!snap?.shuffle);
+                            return;
+                          }
                           const ctxKey = `${browserTarget.kind}:${browserTarget.id}`;
                           setPlayingContextId(ctxKey);
                           if (browserTarget.kind === 'album') {
@@ -459,15 +484,15 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                           minHeight: 40,
                           padding: '0 14px',
                           borderRadius: 10,
-                          background: '#14141c',
-                          color: '#d4d4dc',
-                          border: '1px solid #2e2e3a',
+                          background: isPlayingQueue && snap?.shuffle ? 'rgba(232, 184, 109, 0.14)' : '#14141c',
+                          color: isPlayingQueue && snap?.shuffle ? '#f5e1be' : '#d4d4dc',
+                          border: isPlayingQueue && snap?.shuffle ? '1px solid #e8b86d' : '1px solid #2e2e3a',
                           fontWeight: 700,
                           fontSize: 12,
                           cursor: 'pointer',
                         }}
                       >
-                        🔀 Shuffle<span className="simp-gp-badge"> (X)</span>
+                        {isPlayingQueue && snap?.shuffle ? '🔀 Shuffle On' : '🔀 Shuffle'}<span className="simp-gp-badge"> (X)</span>
                       </button>
                     )}
                 </div>
@@ -874,6 +899,10 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
               const isViewingLocalPlaylist =
                 browserTarget?.kind === 'playlist' &&
                 selectedPlaylistObj?.origin === 'simp_local';
+              const isRowActive =
+                isPlayingQueue && !filterHasLyricsOnly && snap?.queue?.length === browserTracks.length
+                  ? (snap?.queue_index ?? -1) === i
+                  : track?.uri === t.uri;
               return (
                 <div
                   key={`${t.uri}-${i}`}
@@ -881,7 +910,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                   tabIndex={0}
                   data-focusable="true"
                   data-right-track="true"
-                  data-track-playing={track?.uri === t.uri ? 'true' : undefined}
+                  data-track-playing={isRowActive ? 'true' : undefined}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
@@ -911,6 +940,21 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                         '🔒 30s Preview — Sign in to SoundCloud in Settings for full track playback'
                       );
                     }
+                    if (isPlayingQueue) {
+                      if (isRowActive && track?.uri === t.uri) {
+                        if (!snap?.is_playing) {
+                          defaultSimpClient.play();
+                        }
+                      } else {
+                        defaultSimpClient.loadQueue(
+                          displayedBrowserTracks.map((tr) => tr.uri),
+                          i,
+                          displayedBrowserTracks
+                        );
+                      }
+                      setView('lock');
+                      return;
+                    }
                     const queueAlreadyMatches =
                       snap?.queue &&
                       snap.queue.length === displayedBrowserTracks.length &&
@@ -935,8 +979,8 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                     minHeight: 50,
                     padding: '6px 12px',
                     borderRadius: 12,
-                    background: track?.uri === t.uri ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
-                    border: track?.uri === t.uri ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #16161e',
+                    background: isRowActive ? 'var(--imp-accent-active-bg, rgba(232, 184, 109, 0.13))' : 'var(--imp-surface-card, #1a1d24)',
+                    border: isRowActive ? '1px solid var(--imp-focus-ring, #e8b86d)' : '1px solid #16161e',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -958,7 +1002,7 @@ export const LibraryTracklistRightPane: React.FC<LibraryTracklistRightPaneProps>
                 }}
               >
                     <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#71717a', flexShrink: 0 }}>
-                      {String(t.track_number ?? i + 1).padStart(2, '0')}
+                      {String(isPlayingQueue ? i + 1 : t.track_number ?? i + 1).padStart(2, '0')}
                     </span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div

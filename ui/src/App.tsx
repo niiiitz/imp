@@ -1089,6 +1089,18 @@ const ConsoleMainApp: React.FC = () => {
     activeCloudAlbum?.id,
   ]);
 
+  // 3b. Keep live queue synchronized in real time when viewing the Playing Queue collection
+  useEffect(() => {
+    if (browserTarget?.kind !== 'playing_queue') return;
+    const liveQueue =
+      snap?.queue && snap.queue.length > 0
+        ? snap.queue
+        : snap?.current_track
+        ? [snap.current_track]
+        : [];
+    setBrowserTracks(liveQueue);
+  }, [browserTarget?.kind, snap?.queue, snap?.current_track]);
+
   // 3a. Optical CD-ROM (`cdda://`) & DVD-Video Scanner & Eject Handler
   const handleScanOpticalDisc = useCallback(
     async (forceRefresh = false, silent = false) => {

@@ -73,7 +73,8 @@ export interface BrowserTarget {
     | 'soundcloud_user'
     | 'ia_discover'
     | 'ia_item'
-    | 'cdda';
+    | 'cdda'
+    | 'playing_queue';
   id: string;
   title?: string;
   subtitle?: string;

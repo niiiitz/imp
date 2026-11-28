@@ -33,6 +33,7 @@ export interface LibraryMiniPlayerBarProps {
   desktopMode?: boolean;
   onReturnToPlayer: () => void;
   onTriggerScreensaver?: () => void;
+  onOpenPlayingQueue?: () => void;
   applyVolume: (nextVol: number) => void;
   currentVolume: number;
   volumePopoverOpen: boolean;
@@ -176,6 +177,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   desktopMode = false,
   onReturnToPlayer,
   onTriggerScreensaver,
+  onOpenPlayingQueue,
   applyVolume,
   currentVolume,
   volumePopoverOpen,
@@ -193,6 +195,7 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
   expiredAuthProviders = [],
 }) => {
   const theme = getSourceThemeForTrack(track?.uri, track?.source);
+  const [metaHovered, setMetaHovered] = useState(false);
   const [vizMode, setVizMode] = useState<VisualizerMode>(() => readSavedVizMode());
   const [enabledVizScenes, setEnabledVizScenes] = useState<VisualizerEngine[]>(() =>
     loadEnabledVisualizerScenes()
@@ -897,19 +900,71 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
             minWidth: 0,
           }}
         >
-          {/* Row 2 — Art + Title/Metadata */}
-          <div
-            style={{
-              height: 24,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              minWidth: 0,
-            }}
-          >
-            {dockArtworkThumb}
-            {track ? (
-              <>
+          {/* Row 2 — Art + Title/Metadata (clicks push to Playing Queue in library view) */}
+          {(() => {
+            const queueCount = snap?.queue?.length || (track ? 1 : 0);
+            const canOpenQueue = Boolean(onOpenPlayingQueue && (track || queueCount > 0));
+            if (!track) {
+              return (
+                <div
+                  style={{
+                    height: 24,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 7,
+                    minWidth: 0,
+                  }}
+                >
+                  {dockArtworkThumb}
+                  <span
+                    style={{
+                      color: '#64748b',
+                      fontSize: 11.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    No track playing — select any album, playlist, or song below
+                  </span>
+                </div>
+              );
+            }
+            return (
+              <button
+                type="button"
+                data-row-aux="true"
+                onClick={() => {
+                  if (canOpenQueue) onOpenPlayingQueue?.();
+                }}
+                onMouseEnter={() => setMetaHovered(true)}
+                onMouseLeave={() => setMetaHovered(false)}
+                title={
+                  canOpenQueue
+                    ? `View Playing Queue (${queueCount} track${queueCount === 1 ? '' : 's'})`
+                    : `${track.title}`
+                }
+                style={{
+                  height: 24,
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 7,
+                  padding: '0 6px 0 2px',
+                  borderRadius: 6,
+                  background:
+                    metaHovered && canOpenQueue ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                  border:
+                    metaHovered && canOpenQueue
+                      ? '1px solid rgba(255, 255, 255, 0.14)'
+                      : '1px solid transparent',
+                  cursor: canOpenQueue ? 'pointer' : 'default',
+                  textAlign: 'left',
+                  minWidth: 0,
+                  transition: 'background 120ms ease, border-color 120ms ease',
+                }}
+              >
+                {dockArtworkThumb}
                 <span
                   style={{
                     fontSize: 12,
@@ -940,21 +995,27 @@ export const LibraryMiniPlayerBar: React.FC<LibraryMiniPlayerBarProps> = ({
                     {track.album ? ` • ${track.album}` : ''}
                   </span>
                 )}
-              </>
-            ) : (
-              <span
-                style={{
-                  color: '#64748b',
-                  fontSize: 11.5,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                No track playing — select any album, playlist, or song below
-              </span>
-            )}
-          </div>
+                {queueCount > 1 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontFamily: 'monospace',
+                      fontWeight: 700,
+                      color: metaHovered ? '#e2e8f0' : '#94a3b8',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: 4,
+                      padding: '1px 5px',
+                      flexShrink: 0,
+                      lineHeight: 1.2,
+                    }}
+                  >
+                    {(snap?.queue_index ?? 0) + 1}/{queueCount}
+                  </span>
+                )}
+              </button>
+            );
+          })()}
 
           {/* Row 3 — Full-width Scrub Bar + EQ */}
           <div
