@@ -1530,16 +1530,18 @@ export const LibraryXmbLeftColumn: React.FC<LibraryXmbLeftColumnProps> = ({
                               padding: '4px 8px',
                               fontSize: 10.5,
                               fontFamily: 'monospace',
-                              color: '#6ee7b7',
+                              color: !activeDrillMount.is_online ? '#fbbf24' : '#6ee7b7',
                               opacity: 0.85,
                             }}
                           >
-                            {activeDrillMount.track_count === 0 &&
-                            leftFolderDrill.directTracks.length === 0
-                              ? '⏳ Scanning folder…'
-                              : `${leftFolderDrill.directTracks.length} track${
-                                  leftFolderDrill.directTracks.length === 1 ? '' : 's'
-                                } here — press → to browse`}
+                            {!activeDrillMount.is_online
+                              ? '⚠️ Folder offline — drive or share unreachable'
+                              : activeDrillMount.track_count === 0 &&
+                                  leftFolderDrill.directTracks.length === 0
+                                ? 'No tracks indexed yet (scanning or empty)'
+                                : `${leftFolderDrill.directTracks.length} track${
+                                    leftFolderDrill.directTracks.length === 1 ? '' : 's'
+                                  } here — press → to browse`}
                           </div>
                         )}
                       </div>

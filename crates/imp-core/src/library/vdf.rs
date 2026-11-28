@@ -231,6 +231,19 @@ pub fn strip_windows_verbatim_prefix(s: &str) -> String {
     t.to_string()
 }
 
+fn normalize_windows_unc_remainder(raw_rest: &str) -> Option<PathBuf> {
+    let mut normalized = raw_rest.replace('/', "\\");
+    while normalized.contains("\\\\") {
+        normalized = normalized.replace("\\\\", "\\");
+    }
+    let clean = normalized.trim_end_matches('\\');
+    if clean.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(format!(r"\\{clean}")))
+    }
+}
+
 /// Converts Windows VDF/Explorer paths (`"C:\\Users\\...\\Music"` or `"D:\\SteamLibrary"`),
 /// bash-escaped paths (`"/mnt/c/Users/.../Apple\\ Music/"`), and `~/...` paths into clean
 /// canonical platform paths on Linux/WSL2 and Windows.
@@ -246,7 +259,20 @@ pub fn normalize_platform_path(raw_path: &str) -> PathBuf {
         }
     }
 
-    // 2. If it starts with `/` (POSIX / WSL `/mnt/c/...` path), unescape shell `\ ` spaces
+    // 2. Preserve Windows UNC paths before `/` POSIX handling or `\\` unescaping
+    #[cfg(target_os = "windows")]
+    if trimmed.starts_with("//") {
+        if let Some(unc) = normalize_windows_unc_remainder(trimmed.trim_start_matches('/')) {
+            return unc;
+        }
+    }
+    if trimmed.starts_with(r"\\") {
+        if let Some(unc) = normalize_windows_unc_remainder(trimmed.trim_start_matches('\\')) {
+            return unc;
+        }
+    }
+
+    // 3. If it starts with `/` (POSIX / WSL `/mnt/c/...` path), unescape shell `\ ` spaces
     if trimmed.starts_with('/') {
         let unescaped_spaces = trimmed.replace("\\\\ ", " ").replace("\\ ", " ");
         let clean = if unescaped_spaces.len() > 1 {
@@ -257,7 +283,7 @@ pub fn normalize_platform_path(raw_path: &str) -> PathBuf {
         return PathBuf::from(clean);
     }
 
-    // 3. Detect Windows drive letter prefix like `C:\` or `D:/`
+    // 4. Detect Windows drive letter prefix like `C:\` or `D:/`
     let unescaped = trimmed.replace("\\\\", "\\");
     let unescaped_trimmed = strip_windows_verbatim_prefix(&unescaped);
     let bytes = unescaped_trimmed.as_bytes();
@@ -433,6 +459,30 @@ mod tests {
         assert_eq!(
             normalize_platform_path(mangled_verbatim_path),
             PathBuf::from("/mnt/c/Users/ExampleUser/Music/Apple Music/Media/Music")
+        );
+    }
+
+    #[test]
+    fn test_windows_unc_path_normalization() {
+        assert_eq!(
+            normalize_platform_path(r"\\fileserver.local\share\Music"),
+            PathBuf::from(r"\\fileserver.local\share\Music")
+        );
+        assert_eq!(
+            normalize_platform_path(r"\\fileserver.local\share\Music\"),
+            PathBuf::from(r"\\fileserver.local\share\Music")
+        );
+        assert_eq!(
+            normalize_platform_path(r"\\\\fileserver.local\\share\\Music"),
+            PathBuf::from(r"\\fileserver.local\share\Music")
+        );
+        assert_eq!(
+            normalize_platform_path(r"\\?\UNC\fileserver.local\share\Music"),
+            PathBuf::from(r"\\fileserver.local\share\Music")
+        );
+        assert_eq!(
+            normalize_platform_path(r"\\\\?\\UNC\\fileserver.local\\share\\Music"),
+            PathBuf::from(r"\\fileserver.local\share\Music")
         );
     }
 

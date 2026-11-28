@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { resolveDaemonUrl } from '../api/servicesCacheApi';
 import { ImpIcon } from './icons/ImpIcon';
 
 interface FsRootItem {
@@ -41,7 +42,7 @@ export const FolderChooserModal: React.FC<FolderChooserModalProps> = ({
     setError(null);
     try {
       const q = pathToLoad ? `?path=${encodeURIComponent(pathToLoad)}` : '';
-      const resp = await fetch(`http://127.0.0.1:18888/api/fs/list${q}`);
+      const resp = await fetch(resolveDaemonUrl(`/api/fs/list${q}`));
       const json = await resp.json();
       if (json?.ok && json.data) {
         setCurrentPath(json.data.current_path || '');
@@ -60,7 +61,7 @@ export const FolderChooserModal: React.FC<FolderChooserModalProps> = ({
 
   useEffect(() => {
     if (!open) return;
-    fetch('http://127.0.0.1:18888/api/fs/roots')
+    fetch(resolveDaemonUrl('/api/fs/roots'))
       .then((r) => r.json())
       .then((json) => {
         if (json?.ok && Array.isArray(json.roots)) {

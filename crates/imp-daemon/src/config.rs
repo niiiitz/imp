@@ -115,6 +115,38 @@ mod tests {
         assert!(!parsed_privacy.provisioning.fetch_sc_comments_online);
         assert_eq!(parsed_privacy.provisioning.update_channel, "off");
     }
+
+    #[test]
+    fn test_settings_vdf_windows_drive_and_unc_paths_roundtrip() {
+        let mut cfg = SimpSettings::default();
+        cfg.library.custom_paths.clear();
+        cfg.library
+            .custom_paths
+            .insert("0".to_string(), r"Z:\Music".to_string());
+        cfg.library
+            .custom_paths
+            .insert("1".to_string(), r"\\fileserver.local\share\Music".to_string());
+
+        let vdf_str = keyvalues_serde::to_string_with_key(&cfg, "SimpSettings")
+            .expect("serialize settings.vdf with Windows drive and UNC paths");
+        let parsed: SimpSettings = keyvalues_serde::from_str(&vdf_str)
+            .expect("deserialize settings.vdf with Windows drive and UNC paths");
+
+        assert_eq!(
+            parsed.library.custom_paths.get("0").map(|s| s.as_str()),
+            Some(r"Z:\Music")
+        );
+        assert_eq!(
+            parsed.library.custom_paths.get("1").map(|s| s.as_str()),
+            Some(r"\\fileserver.local\share\Music")
+        );
+        assert_eq!(
+            imp_core::library::vdf::normalize_platform_path(
+                parsed.library.custom_paths.get("1").unwrap()
+            ),
+            std::path::PathBuf::from(r"\\fileserver.local\share\Music")
+        );
+    }
 }
 
 

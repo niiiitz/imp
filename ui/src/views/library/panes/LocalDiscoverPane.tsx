@@ -1743,8 +1743,17 @@ export const LocalDiscoverPane: React.FC<LocalDiscoverPaneProps> = ({
               {folderDrillData.subfolders.length === 0 &&
                 folderDrillData.albumsHere.length === 0 &&
                 folderDrillData.directTracks.length === 0 && (
-                  <div style={{ padding: 24, textAlign: 'center', color: '#8e8e99', fontSize: 13 }}>
-                    No matching files indexed in this folder.
+                  <div
+                    style={{
+                      padding: 24,
+                      textAlign: 'center',
+                      color: effectiveMount && !effectiveMount.is_online ? '#fbbf24' : '#8e8e99',
+                      fontSize: 13,
+                    }}
+                  >
+                    {effectiveMount && !effectiveMount.is_online
+                      ? `⚠️ Folder offline or unreachable (${effectiveMount.mount_root}) — verify the drive or network share is connected, then rescan.`
+                      : 'No matching files indexed in this folder.'}
                   </div>
                 )}
             </>

@@ -79,7 +79,63 @@ pub(super) async fn fs_roots_handler() -> impl IntoResponse {
     Json(serde_json::json!({ "ok": true, "roots": roots }))
 }
 
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+fn lexical_clean_windows_abs_path(raw: &str) -> Option<String> {
+    let stripped = imp_core::library::vdf::strip_windows_verbatim_prefix(raw);
+    let trimmed = stripped.trim();
+
+    if trimmed.starts_with(r"\\") {
+        let rest = trimmed.trim_start_matches('\\');
+        let mut comps = rest.split(['\\', '/']).filter(|s| !s.is_empty());
+        let server = comps.next()?;
+        let share = comps.next()?;
+        let mut segments: Vec<&str> = Vec::new();
+        for seg in comps {
+            match seg {
+                "." => {}
+                ".." => {
+                    segments.pop();
+                }
+                _ => segments.push(seg),
+            }
+        }
+        return if segments.is_empty() {
+            Some(format!(r"\\{server}\{share}"))
+        } else {
+            Some(format!(r"\\{server}\{share}\{}", segments.join("\\")))
+        };
+    }
+
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+        let drive = (bytes[0] as char).to_ascii_uppercase();
+        let mut segments: Vec<&str> = Vec::new();
+        for seg in trimmed[3..].split(['\\', '/']).filter(|s| !s.is_empty()) {
+            match seg {
+                "." => {}
+                ".." => {
+                    segments.pop();
+                }
+                _ => segments.push(seg),
+            }
+        }
+        return if segments.is_empty() {
+            Some(format!("{drive}:\\"))
+        } else {
+            Some(format!("{drive}:\\{}", segments.join("\\")))
+        };
+    }
+
+    None
+}
+
 fn clean_fs_path(p: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    if let Some(cleaned) = lexical_clean_windows_abs_path(&p.to_string_lossy()) {
+        // Keep user-chosen mapped drive letters (e.g. Z:\...) instead of dereferencing to UNC
+        return std::path::PathBuf::from(cleaned);
+    }
+
     let raw = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let cleaned = imp_core::library::vdf::strip_windows_verbatim_prefix(&raw.to_string_lossy());
     std::path::PathBuf::from(cleaned)
@@ -849,6 +905,45 @@ pub(super) async fn video_subtitles_handler(
             .header(axum::http::header::CONTENT_TYPE, "text/vtt; charset=utf-8")
             .body(axum::body::Body::from("WEBVTT\n\n"))
             .unwrap(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lexical_clean_windows_abs_path;
+
+    #[test]
+    fn test_lexical_clean_windows_abs_path_preserves_drive_letters_and_unc() {
+        assert_eq!(lexical_clean_windows_abs_path(r"Z:\"), Some(r"Z:\".to_string()));
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"Z:\Music\"),
+            Some(r"Z:\Music".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"Z:\Music\Sub\.."),
+            Some(r"Z:\Music".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"Z:\.."),
+            Some(r"Z:\".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"\\?\Z:\Music"),
+            Some(r"Z:\Music".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"\\fileserver.local\share\Music\"),
+            Some(r"\\fileserver.local\share\Music".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"\\fileserver.local\share\Music\.."),
+            Some(r"\\fileserver.local\share".to_string())
+        );
+        assert_eq!(
+            lexical_clean_windows_abs_path(r"\\?\UNC\fileserver.local\share\Music"),
+            Some(r"\\fileserver.local\share\Music".to_string())
+        );
+        assert_eq!(lexical_clean_windows_abs_path("/home/player/Music"), None);
     }
 }
 
